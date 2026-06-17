@@ -1,0 +1,46 @@
+# env
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+.vercel/
+
+# Logs/data
+*.log
+logs/
+pgdata/
+exports/
+backups/
+*.sqlite
+*.db
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Secrets
+*.pem
+*.key
+id_rsa
+id_ed25519

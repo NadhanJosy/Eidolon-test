@@ -1,0 +1,6 @@
+# Replace example.com with your domain.
+# Do not commit production secrets.
+
+api.example.com {
+  reverse_proxy 127.0.0.1:8000
+}

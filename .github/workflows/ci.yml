@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: eidolon
+          POSTGRES_USER: eidolon
+          POSTGRES_PASSWORD: eidolon_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U eidolon -d eidolon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend
+        run: |
+          if [ -f apps/api/pyproject.toml ]; then
+            cd apps/api
+            pip install -e ".[dev]"
+          fi
+      - name: Run backend checks
+        env:
+          DATABASE_URL: postgresql+asyncpg://eidolon:eidolon_dev_password@localhost:5432/eidolon
+        run: |
+          if [ -f apps/api/pyproject.toml ]; then
+            cd apps/api
+            alembic upgrade head || true
+            pytest
+            ruff check .
+          fi
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install frontend
+        run: |
+          if [ -f apps/web/package.json ]; then
+            cd apps/web
+            npm install
+          fi
+      - name: Run frontend checks
+        run: |
+          if [ -f apps/web/package.json ]; then
+            cd apps/web
+            npm run lint
+            npm run build
+          fi

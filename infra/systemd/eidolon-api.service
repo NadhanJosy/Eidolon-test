@@ -1,0 +1,15 @@
+[Unit]
+Description=Eidolon FastAPI backend
+After=network.target postgresql.service
+
+[Service]
+User=eidolon
+Group=eidolon
+WorkingDirectory=/opt/eidolon/apps/api
+EnvironmentFile=/opt/eidolon/.env
+ExecStart=/opt/eidolon/apps/api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
