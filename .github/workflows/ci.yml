@@ -41,9 +41,10 @@ jobs:
         run: |
           if [ -f apps/api/pyproject.toml ]; then
             cd apps/api
-            alembic upgrade head || true
+            alembic upgrade head
             pytest
             ruff check .
+            ruff format --check .
           fi
 
   frontend:
@@ -58,7 +59,7 @@ jobs:
         run: |
           if [ -f apps/web/package.json ]; then
             cd apps/web
-            npm install
+            npm ci
           fi
       - name: Run frontend checks
         run: |

@@ -102,6 +102,14 @@ npm install
 npm run dev
 ```
 
+## Codespaces registration troubleshooting
+
+If registration shows `Failed to fetch`, the browser probably cannot reach the
+backend through `localhost`. Set `NEXT_PUBLIC_API_BASE_URL` for the frontend to
+the forwarded port 8000 URL, either in `apps/web/.env.local` or the shell that
+starts `npm run dev`. Set backend `WEB_ORIGIN` or `CORS_ORIGINS` to the
+forwarded port 3000 URL. Restart both dev servers after changing env vars.
+
 ## Important design rule
 
 The backend owns intelligence state. The LLM only writes the next message.

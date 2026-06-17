@@ -46,7 +46,7 @@ web-dev:
 	cd apps/web && npm run dev
 
 verify:
-	$(MAKE) api-test || true
-	$(MAKE) api-lint || true
-	$(MAKE) web-lint || true
-	$(MAKE) web-build || true
+	$(MAKE) api-test
+	$(MAKE) api-lint
+	$(MAKE) web-lint
+	$(MAKE) web-build

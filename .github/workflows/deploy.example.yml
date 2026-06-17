@@ -1,0 +1,35 @@
+name: Deploy Example
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: SSH deploy skeleton
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH key
+        env:
+          EIDOLON_SSH_KEY: ${{ secrets.EIDOLON_SSH_KEY }}
+          EIDOLON_HOST: ${{ secrets.EIDOLON_HOST }}
+        run: |
+          test -n "${EIDOLON_SSH_KEY}"
+          test -n "${EIDOLON_HOST}"
+          mkdir -p ~/.ssh
+          printf '%s\n' "${EIDOLON_SSH_KEY}" > ~/.ssh/eidolon_deploy
+          chmod 600 ~/.ssh/eidolon_deploy
+          ssh-keyscan -H "${EIDOLON_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Deploy API
+        env:
+          EIDOLON_HOST: ${{ secrets.EIDOLON_HOST }}
+          EIDOLON_USER: ${{ secrets.EIDOLON_USER }}
+          EIDOLON_PATH: ${{ secrets.EIDOLON_PATH }}
+        run: |
+          : "${EIDOLON_HOST:?}"
+          : "${EIDOLON_USER:?}"
+          remote_path="${EIDOLON_PATH:-/opt/eidolon}"
+          ssh -i ~/.ssh/eidolon_deploy "${EIDOLON_USER}@${EIDOLON_HOST}" \
+            "cd '${remote_path}' && git pull && cd apps/api && python3 -m venv .venv && . .venv/bin/activate && pip install -e . && alembic upgrade head && sudo systemctl restart eidolon-api"
