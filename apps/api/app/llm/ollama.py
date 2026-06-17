@@ -5,6 +5,10 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from app.llm.base import LLMProviderUnavailable
+
+OLLAMA_UNAVAILABLE = "Ollama provider is unavailable or returned an invalid response."
+
 
 class OllamaProvider:
     name = "ollama"
@@ -22,35 +26,43 @@ class OllamaProvider:
         self._client = client
 
     async def generate(self, prompt: str) -> str:
-        async with self._managed_client() as client:
-            response = await client.post(
-                f"{self.base_url}/api/generate",
-                json={"model": self.model, "prompt": prompt, "stream": False},
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            text = payload.get("response")
-            return text if isinstance(text, str) else ""
+        try:
+            async with self._managed_client() as client:
+                response = await client.post(
+                    f"{self.base_url}/api/generate",
+                    json={"model": self.model, "prompt": prompt, "stream": False},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                text = payload.get("response")
+                if not isinstance(text, str):
+                    raise ValueError("Ollama response did not include text.")
+                return text
+        except (httpx.HTTPError, ValueError) as exc:
+            raise LLMProviderUnavailable(OLLAMA_UNAVAILABLE) from exc
 
     async def stream(self, prompt: str) -> AsyncIterator[str]:
-        async with self._managed_client() as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/api/generate",
-                json={"model": self.model, "prompt": prompt, "stream": True},
-                timeout=self.timeout_seconds,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    payload = json.loads(line)
-                    chunk = payload.get("response")
-                    if isinstance(chunk, str) and chunk:
-                        yield chunk
-                    if payload.get("done") is True:
-                        break
+        try:
+            async with self._managed_client() as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/api/generate",
+                    json={"model": self.model, "prompt": prompt, "stream": True},
+                    timeout=self.timeout_seconds,
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        payload = json.loads(line)
+                        chunk = payload.get("response")
+                        if isinstance(chunk, str) and chunk:
+                            yield chunk
+                        if payload.get("done") is True:
+                            break
+        except (httpx.HTTPError, json.JSONDecodeError) as exc:
+            raise LLMProviderUnavailable(OLLAMA_UNAVAILABLE) from exc
 
     async def health(self) -> dict[str, str]:
         try:

@@ -44,6 +44,9 @@ async def test_chat_persists_user_and_assistant_messages(client: AsyncClient) ->
     payload = chat.json()
     assert payload["user_message"]["content"] == "Hello there"
     assert payload["assistant_message"]["role"] == "assistant"
+    assert payload["assistant_message"]["metadata_json"]["provider"] == "mock"
+    assert payload["assistant_message"]["content"].startswith("[mock:Eidolon]")
+    assert "I heard:" not in payload["assistant_message"]["content"]
 
     messages = await client.get(f"/conversations/{conversation_id}/messages", headers=headers)
     assert messages.status_code == 200

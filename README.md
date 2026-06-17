@@ -110,6 +110,12 @@ the forwarded port 8000 URL, either in `apps/web/.env.local` or the shell that
 starts `npm run dev`. Set backend `WEB_ORIGIN` or `CORS_ORIGINS` to the
 forwarded port 3000 URL. Restart both dev servers after changing env vars.
 
+## LLM provider modes
+
+Development uses `LLM_PROVIDER=mock` by default. This deterministic provider is
+for UI and state testing only. To use Ollama, set `LLM_PROVIDER=ollama`,
+`OLLAMA_BASE_URL`, and `OLLAMA_MODEL`, then restart the backend.
+
 ## Important design rule
 
 The backend owns intelligence state. The LLM only writes the next message.

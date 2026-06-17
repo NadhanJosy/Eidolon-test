@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_conversation
+from app.llm.base import LLMProviderUnavailable
 from app.llm.factory import get_llm_provider
 from app.models import User
 from app.schemas import ChatRequest, ChatResponse, MessageOut
@@ -24,14 +25,18 @@ async def chat_message(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ChatResponse:
     conversation = await require_conversation(payload.conversation_id, user, session)
-    user_message, assistant_message = await run_chat(
-        session,
-        user=user,
-        conversation=conversation,
-        content=payload.content,
-        requested_mode=payload.content_mode,
-        provider=get_llm_provider(),
-    )
+    try:
+        user_message, assistant_message = await run_chat(
+            session,
+            user=user,
+            conversation=conversation,
+            content=payload.content,
+            requested_mode=payload.content_mode,
+            provider=get_llm_provider(),
+        )
+    except LLMProviderUnavailable as exc:
+        await session.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ChatResponse(
         user_message=MessageOut.model_validate(user_message),
         assistant_message=MessageOut.model_validate(assistant_message),
@@ -78,6 +83,9 @@ async def chat_stream(
             await session.commit()
             await session.refresh(assistant_message)
             yield sse("message_done", {"assistant_message": dump_message(assistant_message)})
+        except LLMProviderUnavailable as exc:
+            await session.rollback()
+            yield sse("error", {"detail": str(exc)})
         except Exception:  # noqa: BLE001 - streamed clients need a readable event
             await session.rollback()
             yield sse(

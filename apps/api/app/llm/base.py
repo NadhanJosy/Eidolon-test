@@ -12,3 +12,7 @@ class LLMProvider(Protocol):
     async def stream(self, prompt: str) -> AsyncIterator[str]: ...
 
     async def health(self) -> dict[str, str]: ...
+
+
+class LLMProviderUnavailable(RuntimeError):
+    """Raised when a configured provider cannot produce a response."""

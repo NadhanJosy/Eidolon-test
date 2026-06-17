@@ -20,6 +20,21 @@ Fixes:
 - Backend CORS origin parsing now trims whitespace and trailing slashes for `WEB_ORIGIN` and `CORS_ORIGINS`.
 - `.env.example`, `apps/web/.env.example`, and `README.md` document Codespaces URL variables without hardcoding a specific Codespace URL.
 
+## Debug update - mock LLM response behaviour
+
+Root cause inspected on 2026-06-17:
+- `Settings.llm_provider` defaults to `mock`, and `get_llm_provider()` routes to Ollama only when `LLM_PROVIDER=ollama`.
+- The chat flow already passed the assembled prompt into the provider, including character, speech style, memories, recent messages, and relationship state.
+- `MockLLMProvider` ignored almost all of that prompt and returned the shallow echo response `I'm here with you. I heard: ...`.
+
+Fixes:
+- `MockLLMProvider` now parses the assembled prompt for character name, speech style, first relevant memory, recent-message presence, and relationship summary.
+- Mock responses are deterministic, short, SFW, explicitly marked with `[mock:<character>]`, and no longer echo the current user message.
+- Mock streaming now emits natural phrase-like chunks that join back to the exact generated response.
+- Ollama provider remains available for `LLM_PROVIDER=ollama`; HTTP failures or invalid responses now raise a controlled provider-unavailable error that the chat API returns cleanly.
+- Debug prompt context now includes `llm_provider`, and persisted assistant message metadata already stores `provider: mock`.
+- README now documents switching between mock and Ollama mode.
+
 ## Checkpoints
 
 | # | Checkpoint | Status | Notes |
@@ -75,6 +90,9 @@ Fixes:
 - `curl -i -sS http://localhost:8000/auth/register -H 'Content-Type: application/json' -H 'Origin: http://localhost:3000' --data '{"email":"debug-register@example.com","password":"good-password","display_name":"Debug"}'` - passed with HTTP 201.
 - `cd apps/api && source .venv/bin/activate && pytest && ruff check .` - final rerun passed and cleared the throwaway curl-created user from the test database.
 - `git diff --check` - passed.
+- `cd apps/api && source .venv/bin/activate && pytest && ruff check . && ruff format .` - initial LLM-provider rerun found a mock streaming trailing-space assertion and Ruff import ordering; both fixed.
+- `cd apps/api && source .venv/bin/activate && ruff check . --fix && ruff format . && pytest && ruff check .` - passed after formatting provider tests.
+- `cd apps/api && source .venv/bin/activate && pytest && ruff check . && ruff format .` - final LLM-provider validation passed; 22 backend tests.
 
 ## Known limitations
 

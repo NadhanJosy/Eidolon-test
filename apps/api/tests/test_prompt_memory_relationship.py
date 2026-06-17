@@ -31,10 +31,12 @@ async def test_manual_memory_retrieval_and_debug_prompt(client: AsyncClient) -> 
 
     debug = await client.get(f"/debug/character/{character_id}", headers=headers)
     assert debug.status_code == 200
-    prompt = debug.json()["prompt_context"]["prompt"]
+    prompt_context = debug.json()["prompt_context"]
+    prompt = prompt_context["prompt"]
     assert "User likes quiet late-night conversations." in prompt
     assert HARD_BOUNDARIES in prompt
     assert "password_hash" not in prompt
+    assert prompt_context["llm_provider"] == "mock"
 
 
 async def test_relationship_updates_after_chat(client: AsyncClient) -> None:

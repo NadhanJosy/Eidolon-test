@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_character, require_conversation
+from app.llm.factory import get_llm_provider
 from app.models import Message, ScheduledJob, User
 from app.schemas import MessageOut, ScheduledJobOut
 from app.services.memory import retrieve_memories
@@ -74,6 +75,7 @@ async def debug_character(
         "prompt_context": {
             "prompt_version": prompt.prompt_version,
             "content_mode": prompt.content_mode,
+            "llm_provider": get_llm_provider().name,
             "prompt": prompt.prompt,
         },
     }
