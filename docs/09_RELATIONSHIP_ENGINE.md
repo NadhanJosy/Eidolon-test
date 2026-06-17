@@ -56,6 +56,18 @@ Range: 0 to 100
 
 MVP can update very slowly or leave near zero.
 
+## Level 2 metadata
+
+Relationship state also tracks:
+
+- mood
+- conflict_state
+- repair_needed
+- tags_json
+- timeline entries in metadata_json
+
+These fields are deterministic backend state. They should explain tone and continuity without turning the system into a manipulative dependency loop.
+
 ## Update rules v1
 
 Start deterministic.
@@ -68,6 +80,13 @@ Example:
 - long absence later: warmth/tension can shift via jobs
 
 Clamp all values to bounds.
+
+Level 2 also applies simple decay before message updates:
+
+- tension drifts down after absence
+- warmth drifts toward baseline
+- attachment cools slowly
+- absence can add a tag and timeline event
 
 ## Prompt injection
 

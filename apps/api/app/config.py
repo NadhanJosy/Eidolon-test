@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +32,19 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_runtime_settings(self) -> Settings:
+        if self.llm_provider not in {"mock", "ollama"}:
+            raise ValueError("LLM_PROVIDER must be either 'mock' or 'ollama'.")
+        if (
+            self.app_env not in {"development", "testing"}
+            and self.jwt_secret == "change-me-in-real-env"
+        ):
+            raise ValueError(
+                "JWT_SECRET must be set to a private value outside development/testing."
+            )
+        return self
 
     @property
     def allowed_origins(self) -> list[str]:

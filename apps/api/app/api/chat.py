@@ -12,8 +12,13 @@ from app.dependencies import get_current_user, require_conversation
 from app.llm.base import LLMProviderUnavailable
 from app.llm.factory import get_llm_provider
 from app.models import User
-from app.schemas import ChatRequest, ChatResponse, MessageOut
-from app.services.chat import complete_assistant_message, prepare_user_message, run_chat
+from app.schemas import ChatRequest, ChatRerollRequest, ChatResponse, MessageOut
+from app.services.chat import (
+    complete_assistant_message,
+    prepare_user_message,
+    reroll_assistant_message,
+    run_chat,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -41,6 +46,28 @@ async def chat_message(
         user_message=MessageOut.model_validate(user_message),
         assistant_message=MessageOut.model_validate(assistant_message),
     )
+
+
+@router.post("/reroll", response_model=MessageOut)
+async def chat_reroll(
+    payload: ChatRerollRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MessageOut:
+    conversation = await require_conversation(payload.conversation_id, user, session)
+    try:
+        message = await reroll_assistant_message(
+            session,
+            user=user,
+            conversation=conversation,
+            assistant_message_id=payload.assistant_message_id,
+            requested_mode=payload.content_mode,
+            provider=get_llm_provider(),
+        )
+    except LLMProviderUnavailable as exc:
+        await session.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return MessageOut.model_validate(message)
 
 
 @router.post("/stream")

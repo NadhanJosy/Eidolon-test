@@ -12,6 +12,7 @@ from app.dependencies import get_current_user
 from app.models import (
     Character,
     Conversation,
+    EpisodicJournal,
     MemoryItem,
     Message,
     RelationshipState,
@@ -51,6 +52,9 @@ async def export_account(
     memories = (
         await session.execute(select(MemoryItem).where(MemoryItem.user_id == user.id))
     ).scalars()
+    journals = (
+        await session.execute(select(EpisodicJournal).where(EpisodicJournal.user_id == user.id))
+    ).scalars()
     relationships = (
         await session.execute(select(RelationshipState).where(RelationshipState.user_id == user.id))
     ).scalars()
@@ -71,6 +75,7 @@ async def export_account(
         conversations=[conversation_to_dict(conversation) for conversation in conversation_list],
         messages=[message_to_dict(message) for message in messages],
         memories=[memory_to_dict(memory) for memory in memories],
+        episodic_journals=[journal_to_dict(journal) for journal in journals],
         relationship_states=[relationship_to_dict(relationship) for relationship in relationships],
         scheduled_jobs=[job_to_dict(job) for job in jobs],
     )
@@ -118,10 +123,29 @@ def memory_to_dict(memory: MemoryItem) -> dict:
         "source_message_id": str(memory.source_message_id) if memory.source_message_id else None,
         "memory_type": memory.memory_type,
         "content": memory.content,
+        "importance": memory.importance,
         "confidence": memory.confidence,
         "emotional_weight": memory.emotional_weight,
+        "pinned": memory.pinned,
         "decay_score": memory.decay_score,
+        "contradiction_group": memory.contradiction_group,
         "created_at": memory.created_at.isoformat(),
+    }
+
+
+def journal_to_dict(journal: EpisodicJournal) -> dict:
+    return {
+        "id": str(journal.id),
+        "character_id": str(journal.character_id),
+        "conversation_id": str(journal.conversation_id) if journal.conversation_id else None,
+        "journal_type": journal.journal_type,
+        "title": journal.title,
+        "summary": journal.summary,
+        "emotional_tags_json": journal.emotional_tags_json,
+        "unresolved_threads_json": journal.unresolved_threads_json,
+        "callbacks_json": journal.callbacks_json,
+        "importance": journal.importance,
+        "created_at": journal.created_at.isoformat(),
     }
 
 
@@ -135,6 +159,10 @@ def relationship_to_dict(relationship: RelationshipState) -> dict:
         "tension": relationship.tension,
         "familiarity": relationship.familiarity,
         "attachment": relationship.attachment,
+        "mood": relationship.mood,
+        "conflict_state": relationship.conflict_state,
+        "repair_needed": relationship.repair_needed,
+        "tags_json": relationship.tags_json,
     }
 
 

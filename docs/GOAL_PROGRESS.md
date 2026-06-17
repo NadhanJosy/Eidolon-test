@@ -6,6 +6,102 @@ Codex should update this file during `/goal` runs.
 
 Local MVP is implemented and validated. FastAPI and Next.js dev servers start locally, `/health` returns the exact expected payload, and the app supports register/login/chat/stream/refresh with persisted history plus persona, memory, relationship, proactive/debug, adult gates, export, and deploy/backup templates.
 
+## Level 2 goal run - audit checkpoint
+
+Started on 2026-06-17.
+
+Files/docs read:
+- `AGENTS.md`, `README.md`, all `docs/*.md`, env examples, backend app code, Alembic migration, tests, CI, and the current single-component web UI.
+
+Findings:
+- Register/login/chat/stream/persistence are already implemented with local auth, owner-scoped endpoints, mock default LLM, optional Ollama provider, safe generic errors, CORS normalization, and backend/frontend validation history.
+- No forbidden runtime dependency was found in project manifests. The app remains text/state only.
+- Memory v1 exists but needs Level 2 schema fields, edit/delete, dedupe/merge, contradiction metadata, forgetting/decay, richer retrieval scoring, and episodic journals.
+- Relationship v1 is bounded and deterministic, but Level 2 needs mood/conflict/repair metadata, tags, decay, and a visible timeline.
+- Proactive v1 can queue a cooldown-protected fallback message, but Level 2 needs scheduled-job helper coverage for inactivity, morning/goodnight, thinking-of-you, milestone, and unresolved-thread nudges.
+- Adult gates are structural and SFW by default, but Level 2 needs clearer settings state and blocked-state explanations in API/UI.
+- Debug APIs are authenticated and owner-scoped, but the frontend currently renders the full prompt in the debug panel; Level 2 should keep debug private, compact, and separate from chat.
+- The frontend is a compact single-page MVP. Level 2 needs panels for conversations/search, memory edit/delete, journal, relationship timeline, adult settings, app settings, and data wipe controls without adding heavy UI dependencies.
+
+Next checkpoint:
+- Implement backend Level 2 state, services, APIs, migration, and tests while preserving existing auth/chat/persistence flows.
+
+## Level 2 goal run - backend checkpoint
+
+Completed in this checkpoint:
+- Added Alembic migration `0002_level2_state` for Memory v2 fields, Relationship v2 fields, and `episodic_journals`.
+- Upgraded `memory_items` support with `importance`, `pinned`, `contradiction_group`, dedupe/merge, contradiction metadata, recall scoring, decay/forgetting, edit/delete, and clear APIs.
+- Added deterministic episodic journals with summaries, emotional tags, unresolved threads, callbacks, and adult-mode detail redaction for durable journal text.
+- Added `reasoning_context_builder` to assemble active context, semantic memories, episodic journals, relationship state, adult gate status, and time/day context without exposing chain-of-thought.
+- Upgraded prompt assembly to `persona_memory_relationship_episode_v2` with compact persona, relationship mood/repair, memories, journals, callbacks, safety gates, and private-context instructions.
+- Upgraded relationship state with mood, conflict state, repair-needed flag, tags, deterministic decay, and timeline entries in metadata.
+- Added proactive scheduled-job hooks for inactivity, morning, goodnight, thinking-of-you, milestone, and unresolved-thread nudges.
+- Added adult gate status API, reroll endpoint, edit-message endpoint, clear/delete conversation endpoints, journal APIs, memory hygiene APIs, and export coverage for journals/new fields.
+- Sanitized debug output from full raw prompt to bounded `prompt_preview` plus structured state.
+- Added production env validation for placeholder JWT secret and invalid LLM providers.
+
+Commands run:
+- `docker compose up -d postgres` - passed after pulling `pgvector/pgvector:pg16`.
+- `cd apps/api && python -m pip install -e ".[dev]"` - passed using user site packages because the existing `.venv` entrypoints were stale.
+- `cd apps/api && alembic upgrade head && pytest -q` - passed; migration upgraded through `0002_level2_state`; 28 tests passed.
+- `cd apps/api && ruff check . --fix` - fixed import ordering; remaining line-length issues were patched.
+- `cd apps/api && ruff check . && pytest -q` - passed; 28 tests passed.
+
+Known limitations:
+- Embedding generation remains intentionally deferred; pgvector storage is available, retrieval is deterministic keyword/recency/importance scoring.
+- APScheduler is still not started in tests; proactive Level 2 creates PostgreSQL scheduled jobs safely, but no live worker loop is enabled by default.
+- Reroll creates an alternate assistant message with metadata rather than replacing history.
+
+Next checkpoint:
+- Expand the lightweight Next.js UI for Level 2 panels and controls without adding forbidden/heavy dependencies.
+
+## Level 2 goal run - frontend checkpoint
+
+Completed in this checkpoint:
+- Reworked the single-page Next.js shell into a responsive Level 2 app layout with conversation rail, central streaming chat, and multi-panel state inspector/editor.
+- Added UI coverage for conversations, chat search, reroll, edit-message, proactive check-in trigger, character editor, memory editor, journal view/create, relationship metrics/timeline, adult gate settings/status, app settings, debug preview, export, clear chat, clear memories, and delete conversation.
+- Kept the frontend dependency set unchanged: Next.js, React, TypeScript, Tailwind only.
+- Removed full raw prompt rendering from the UI; debug shows bounded `prompt_preview`, prompt version/provider, jobs, and scoped conversation state.
+- Improved empty/error/notice states, timestamps, streaming display, mobile stacking, and relationship/adult blocked-state visibility.
+
+Commands run:
+- `cd apps/web && npm run lint` - passed.
+- `cd apps/web && npm run build` - passed.
+
+Known limitations:
+- The UI remains a single App Router page rather than separate routes; this keeps the MVP light but makes the component large.
+- Message editing updates the stored user message but does not automatically regenerate subsequent assistant messages.
+
+Next checkpoint:
+- Run full backend and frontend validation commands, apply formatting, and record final results.
+
+## Level 2 goal run - final validation
+
+Completed in this checkpoint:
+- Updated docs for Level 2 data model, API contract, memory, relationship, proactive jobs, frontend UX, testing, and progress tracking.
+- Confirmed no forbidden runtime dependency additions. No package manifests added Redis, Celery, Supabase, Firebase, LangChain, Pinecone, Chroma, Clerk, Auth0, NextAuth, Stripe, Socket.io, Three.js, Framer Motion, WebRTC, native mobile, Kubernetes, multimedia, paid APIs, or external vector DB.
+- Preserved register/login/chat/SSE/persistence flows while adding Level 2 memory, journals, relationship timeline, adult-gate status, proactive hooks, privacy controls, and UI panels.
+
+Commands run:
+- `docker compose up -d postgres` - passed; `eidolon-postgres` running.
+- `cd apps/api && python -m pip install -e ".[dev]"` - passed using user site packages because the checked-in `.venv` entrypoints were stale in this environment.
+- `cd apps/api && alembic upgrade head && pytest && ruff check . && ruff format .` - passed; 28 tests passed; Ruff passed; 2 files formatted.
+- `cd apps/api && pytest -q && ruff check .` - passed after formatting; 28 tests passed.
+- `cd apps/web && npm install` - passed; 0 vulnerabilities.
+- `cd apps/web && npm run lint && npm run build` - passed.
+- `git diff --check` - passed.
+- Forbidden-dependency text scan - no runtime/package-manifest forbidden additions found; hits were docs or ordinary export-related symbols.
+- `cd apps/api && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000` - started locally.
+- `curl -sS http://localhost:8000/health` - passed with `{"status":"ok","service":"eidolon-api"}`.
+- `cd apps/web && npm run dev -- --port 3000` - started locally.
+- `curl -I -sS http://localhost:3000` - passed with HTTP 200.
+
+Known limitations:
+- Embeddings are still storage-ready but not generated; retrieval is deterministic keyword/recency/importance scoring.
+- The scheduler worker loop remains disabled by default; proactive Level 2 creates PostgreSQL-backed jobs safely but does not run APScheduler in tests.
+- The Level 2 web UI is still a single lightweight component/page. It is buildable and responsive, but a future pass could split panels into smaller components.
+- `apps/web/next-env.d.ts` was updated by the production Next build from dev route types to build route types.
+
 ## Debug update - frontend registration `Failed to fetch`
 
 Root cause inspected on 2026-06-17:

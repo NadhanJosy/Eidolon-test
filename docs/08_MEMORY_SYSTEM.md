@@ -39,6 +39,15 @@ MVP should support:
 - view memories in debug panel
 - conservative extraction from messages
 
+Level 2 additionally supports:
+
+- active context from recent messages
+- semantic memories with importance, confidence, emotional weight, pinning, decay, contradiction metadata, and optional embedding storage
+- episodic journals for summaries, callbacks, unresolved threads, emotional tags, milestones, and shared references
+- manual edit/delete/clear controls
+- deterministic dedupe/merge and low-value forgetting
+- bounded prompt injection through the reasoning context builder
+
 ## Memory extraction rules
 
 Extract only stable/useful facts:
@@ -92,12 +101,13 @@ Preferred:
 Fallback:
 - ILIKE / pg_trgm text search
 - recency/confidence ordering
+- deterministic keyword overlap, recency, importance, confidence, emotional weight, pinning, relationship relevance, and decay scoring
 
 ## Contradictions later
 
 Later versions should detect if new memories contradict old memories.
 
-MVP can simply allow manual correction/delete.
+Level 2 stores simple contradiction groups and metadata links so the user can inspect and correct conflicts.
 
 ## Memory viewer
 

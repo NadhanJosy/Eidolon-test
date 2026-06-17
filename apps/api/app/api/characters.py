@@ -10,8 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_character
 from app.models import Character, User
-from app.schemas import CharacterCreate, CharacterOut, CharacterUpdate, RelationshipOut
+from app.schemas import (
+    AdultGateStatus,
+    CharacterCreate,
+    CharacterOut,
+    CharacterUpdate,
+    RelationshipOut,
+)
 from app.services.relationship import get_or_create_relationship
+from app.services.safety import adult_gate_status
 
 router = APIRouter(prefix="/characters", tags=["characters"])
 
@@ -77,3 +84,13 @@ async def get_relationship(
     await session.commit()
     await session.refresh(relationship)
     return relationship
+
+
+@router.get("/{character_id}/adult-status", response_model=AdultGateStatus)
+async def get_adult_status(
+    character_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    character = await require_character(character_id, user, session)
+    return adult_gate_status(user, character, "adult")

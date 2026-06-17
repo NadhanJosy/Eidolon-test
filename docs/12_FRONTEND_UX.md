@@ -34,6 +34,19 @@ Nice later:
 - conversation search
 - relationship stats drawer
 
+Level 2 implemented:
+
+- conversation rail
+- search results
+- reroll assistant message
+- edit user message
+- memory edit/delete/pin/forget
+- journal viewer/manual note
+- relationship timeline
+- adult gate status/settings
+- data export/clear/delete controls
+- bounded debug prompt preview
+
 ## Visual style
 
 - dark mode by default

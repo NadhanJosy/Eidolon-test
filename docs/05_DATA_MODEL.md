@@ -92,10 +92,13 @@ Fields:
 - source_message_id nullable FK messages.id
 - memory_type string
 - content text
+- importance float default 0.5
 - confidence float default 0.5
 - emotional_weight float default 0.0
+- pinned boolean default false
 - embedding vector nullable
 - decay_score float default 0.0
+- contradiction_group nullable string
 - last_recalled_at nullable datetime
 - metadata_json JSON
 - created_at datetime
@@ -126,6 +129,10 @@ Fields:
 - tension float default 0
 - familiarity float default 0
 - attachment float default 0
+- mood string default steady
+- conflict_state string default clear
+- repair_needed boolean default false
+- tags_json JSON list
 - last_interaction_at nullable datetime
 - metadata_json JSON
 - created_at datetime
@@ -165,17 +172,22 @@ Job types:
 - proactive_inactivity_check
 - proactive_message_create
 
-## episodic_journals later
+## episodic_journals
 
-Not required for first MVP unless time remains.
+Purpose: durable summaries of shared episodes, callbacks, unresolved threads, and emotional continuity.
 
 Fields:
 - id UUID primary key
 - user_id FK users.id
 - character_id FK characters.id
 - conversation_id nullable FK conversations.id
+- journal_type string
 - title string
 - summary text
 - emotional_tags_json JSON
+- unresolved_threads_json JSON
+- callbacks_json JSON
 - importance float
+- metadata_json JSON
 - created_at datetime
+- updated_at datetime

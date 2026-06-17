@@ -116,6 +116,16 @@ class ChatResponse(BaseModel):
     assistant_message: MessageOut
 
 
+class ChatRerollRequest(BaseModel):
+    conversation_id: uuid.UUID
+    assistant_message_id: uuid.UUID | None = None
+    content_mode: Literal["sfw", "adult"] = "sfw"
+
+
+class MessageUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=6000)
+
+
 class MemoryOut(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
@@ -123,9 +133,12 @@ class MemoryOut(BaseModel):
     source_message_id: uuid.UUID | None
     memory_type: str
     content: str
+    importance: float
     confidence: float
     emotional_weight: float
+    pinned: bool
     decay_score: float
+    contradiction_group: str | None
     last_recalled_at: datetime | None
     metadata_json: dict[str, Any]
     created_at: datetime
@@ -137,8 +150,23 @@ class MemoryOut(BaseModel):
 class MemoryCreate(BaseModel):
     memory_type: str = Field(default="preference", min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=1000)
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     emotional_weight: float = Field(default=0.0, ge=-1.0, le=1.0)
+    pinned: bool = False
+
+
+class MemoryUpdate(BaseModel):
+    memory_type: str | None = Field(default=None, min_length=1, max_length=80)
+    content: str | None = Field(default=None, min_length=1, max_length=1000)
+    importance: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    emotional_weight: float | None = Field(default=None, ge=-1.0, le=1.0)
+    pinned: bool | None = None
+
+
+class MemoryForgetResponse(BaseModel):
+    forgotten: int
 
 
 class RelationshipOut(BaseModel):
@@ -151,6 +179,10 @@ class RelationshipOut(BaseModel):
     tension: float
     familiarity: float
     attachment: float
+    mood: str
+    conflict_state: str
+    repair_needed: bool
+    tags_json: list[str]
     last_interaction_at: datetime | None
     metadata_json: dict[str, Any]
     created_at: datetime
@@ -177,6 +209,48 @@ class ScheduledJobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class EpisodicJournalOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    character_id: uuid.UUID
+    conversation_id: uuid.UUID | None
+    journal_type: str
+    title: str
+    summary: str
+    emotional_tags_json: list[str]
+    unresolved_threads_json: list[str]
+    callbacks_json: list[str]
+    importance: float
+    metadata_json: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EpisodicJournalCreate(BaseModel):
+    conversation_id: uuid.UUID | None = None
+    journal_type: str = Field(default="summary", min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=2000)
+    emotional_tags_json: list[str] = Field(default_factory=list)
+    unresolved_threads_json: list[str] = Field(default_factory=list)
+    callbacks_json: list[str] = Field(default_factory=list)
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class AdultGateStatus(BaseModel):
+    requested_mode: Literal["sfw", "adult"]
+    effective_mode: Literal["sfw", "adult"]
+    allowed: bool
+    reasons: list[str]
+    intensity: int
+
+
+class DeleteResponse(BaseModel):
+    deleted: int
+
+
 class ExportOut(BaseModel):
     exported_at: datetime
     user: dict[str, Any]
@@ -184,5 +258,6 @@ class ExportOut(BaseModel):
     conversations: list[dict[str, Any]]
     messages: list[dict[str, Any]]
     memories: list[dict[str, Any]]
+    episodic_journals: list[dict[str, Any]]
     relationship_states: list[dict[str, Any]]
     scheduled_jobs: list[dict[str, Any]]

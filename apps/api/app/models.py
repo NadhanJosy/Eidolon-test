@@ -148,14 +148,46 @@ class MemoryItem(TimestampMixin, Base):
     )
     memory_type: Mapped[str] = mapped_column(String(80), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    importance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     emotional_weight: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     embedding: Mapped[Any | None] = mapped_column(Vector(384), nullable=True)
     decay_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    contradiction_group: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_recalled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+
+class EpisodicJournal(TimestampMixin, Base):
+    __tablename__ = "episodic_journals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
+    )
+    journal_type: Mapped[str] = mapped_column(String(80), default="summary", nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    emotional_tags_json: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    unresolved_threads_json: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    callbacks_json: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    importance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
 
@@ -182,6 +214,10 @@ class RelationshipState(TimestampMixin, Base):
     tension: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     familiarity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     attachment: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mood: Mapped[str] = mapped_column(String(80), default="steady", nullable=False)
+    conflict_state: Mapped[str] = mapped_column(String(80), default="clear", nullable=False)
+    repair_needed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    tags_json: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     last_interaction_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

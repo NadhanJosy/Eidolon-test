@@ -22,6 +22,11 @@ Test categories:
 - auth access control
 - adult mode gates
 - export access control
+- memory v2 edit/delete/dedupe/contradiction
+- episodic journal creation
+- relationship v2 timeline metadata
+- proactive scheduled-job hooks
+- conversation clear/reroll controls
 
 ## Frontend checks
 

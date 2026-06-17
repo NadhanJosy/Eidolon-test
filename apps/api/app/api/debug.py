@@ -13,6 +13,7 @@ from app.dependencies import get_current_user, require_character, require_conver
 from app.llm.factory import get_llm_provider
 from app.models import Message, ScheduledJob, User
 from app.schemas import MessageOut, ScheduledJobOut
+from app.services.journal import list_journals
 from app.services.memory import retrieve_memories
 from app.services.proactive import create_inactivity_proactive_message
 from app.services.prompt import assemble_prompt
@@ -37,11 +38,13 @@ async def debug_character(
         limit=10,
         mark_recalled=False,
     )
+    journals = await list_journals(session, user.id, character.id, limit=4)
     prompt = assemble_prompt(
         user=user,
         character=character,
         relationship=relationship,
         memories=memories,
+        journals=journals,
         recent_messages=[],
         current_message="debug preview",
         content_mode="sfw",
@@ -62,21 +65,40 @@ async def debug_character(
             "tension": relationship.tension,
             "familiarity": relationship.familiarity,
             "attachment": relationship.attachment,
+            "mood": relationship.mood,
+            "conflict_state": relationship.conflict_state,
+            "repair_needed": relationship.repair_needed,
+            "tags_json": relationship.tags_json,
+            "timeline": (relationship.metadata_json or {}).get("timeline", []),
         },
         "memories": [
             {
                 "id": str(memory.id),
                 "memory_type": memory.memory_type,
                 "content": memory.content,
+                "importance": memory.importance,
                 "confidence": memory.confidence,
+                "pinned": memory.pinned,
             }
             for memory in memories
+        ],
+        "journals": [
+            {
+                "id": str(journal.id),
+                "journal_type": journal.journal_type,
+                "title": journal.title,
+                "summary": journal.summary,
+                "importance": journal.importance,
+                "emotional_tags_json": journal.emotional_tags_json,
+            }
+            for journal in journals
         ],
         "prompt_context": {
             "prompt_version": prompt.prompt_version,
             "content_mode": prompt.content_mode,
             "llm_provider": get_llm_provider().name,
-            "prompt": prompt.prompt,
+            "prompt_preview": _compact_prompt(prompt.prompt),
+            "prompt_chars": len(prompt.prompt),
         },
     }
 
@@ -139,3 +161,9 @@ async def debug_create_proactive(
     if message is not None:
         await session.refresh(message)
     return message
+
+
+def _compact_prompt(prompt: str) -> str:
+    if len(prompt) <= 4000:
+        return prompt
+    return prompt[:3997].rstrip() + "..."

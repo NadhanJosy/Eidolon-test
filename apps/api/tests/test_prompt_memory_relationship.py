@@ -32,11 +32,12 @@ async def test_manual_memory_retrieval_and_debug_prompt(client: AsyncClient) -> 
     debug = await client.get(f"/debug/character/{character_id}", headers=headers)
     assert debug.status_code == 200
     prompt_context = debug.json()["prompt_context"]
-    prompt = prompt_context["prompt"]
+    prompt = prompt_context["prompt_preview"]
     assert "User likes quiet late-night conversations." in prompt
     assert HARD_BOUNDARIES in prompt
     assert "password_hash" not in prompt
     assert prompt_context["llm_provider"] == "mock"
+    assert "prompt" not in prompt_context
 
 
 async def test_relationship_updates_after_chat(client: AsyncClient) -> None:
@@ -56,6 +57,9 @@ async def test_relationship_updates_after_chat(client: AsyncClient) -> None:
     assert payload["familiarity"] > 0
     assert payload["warmth"] > 0
     assert payload["trust"] > 0
+    assert payload["mood"] in {"steady", "warm", "close"}
+    assert "warm" in payload["tags_json"]
+    assert payload["metadata_json"]["timeline"]
 
 
 async def test_adult_mode_structural_gates(client: AsyncClient) -> None:
@@ -64,7 +68,7 @@ async def test_adult_mode_structural_gates(client: AsyncClient) -> None:
     character_id = characters.json()[0]["id"]
 
     blocked_debug = await client.get(f"/debug/character/{character_id}", headers=headers)
-    assert "Content mode: SFW." in blocked_debug.json()["prompt_context"]["prompt"]
+    assert "Content mode: SFW." in blocked_debug.json()["prompt_context"]["prompt_preview"]
 
     await client.patch("/auth/me", json={"age_gate_confirmed": True}, headers=headers)
     await client.patch(

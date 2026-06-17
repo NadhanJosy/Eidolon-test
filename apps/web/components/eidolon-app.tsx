@@ -5,7 +5,15 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ApiError, apiErrorFromResponse, apiFetch, apiJson, getApiBaseUrl } from "@/lib/api";
 
 type AuthMode = "login" | "register";
-type Panel = "character" | "memory" | "debug" | "export";
+type Panel =
+  | "character"
+  | "memory"
+  | "journal"
+  | "relationship"
+  | "adult"
+  | "settings"
+  | "debug"
+  | "data";
 type ContentMode = "sfw" | "adult";
 
 type User = {
@@ -24,12 +32,21 @@ type Character = {
   boundaries_json: Record<string, unknown>;
   explicit_age: number | null;
   adult_mode_allowed: boolean;
+  content_intensity: number;
 };
 
 type Conversation = {
   id: string;
   character_id: string;
   title: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type DeliveryState = {
+  typing_ms?: number;
+  read_state?: string;
+  away_state?: string;
 };
 
 type Message = {
@@ -37,7 +54,15 @@ type Message = {
   conversation_id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  metadata_json: Record<string, unknown>;
+  metadata_json: {
+    content_mode?: ContentMode;
+    proactive?: boolean;
+    provider?: string;
+    prompt_version?: string;
+    delivery_state?: DeliveryState;
+    reroll_of?: string;
+    edited?: boolean;
+  } & Record<string, unknown>;
   created_at: string;
 };
 
@@ -45,7 +70,14 @@ type MemoryItem = {
   id: string;
   memory_type: string;
   content: string;
+  importance: number;
   confidence: number;
+  emotional_weight: number;
+  pinned: boolean;
+  decay_score: number;
+  contradiction_group: string | null;
+  last_recalled_at: string | null;
+  metadata_json: Record<string, unknown>;
   created_at: string;
 };
 
@@ -56,29 +88,59 @@ type Relationship = {
   tension: number;
   familiarity: number;
   attachment: number;
+  mood: string;
+  conflict_state: string;
+  repair_needed: boolean;
+  tags_json: string[];
+  metadata_json: {
+    timeline?: RelationshipEvent[];
+  } & Record<string, unknown>;
 };
 
-const relationshipMetrics = [
-  "trust",
-  "intimacy",
-  "warmth",
-  "tension",
-  "familiarity",
-  "attachment"
-] as const;
+type RelationshipEvent = {
+  at?: string;
+  kind?: string;
+  summary?: string;
+  tags?: string[];
+};
 
 type ScheduledJob = {
   id: string;
   job_type: string;
   status: string;
   run_at: string;
+  payload_json?: Record<string, unknown>;
+};
+
+type Journal = {
+  id: string;
+  journal_type: string;
+  title: string;
+  summary: string;
+  emotional_tags_json: string[];
+  unresolved_threads_json: string[];
+  callbacks_json: string[];
+  importance: number;
+  created_at: string;
+};
+
+type AdultStatus = {
+  requested_mode: ContentMode;
+  effective_mode: ContentMode;
+  allowed: boolean;
+  reasons: string[];
+  intensity: number;
 };
 
 type DebugPayload = {
+  relationship?: Relationship & { timeline?: RelationshipEvent[] };
+  journals?: Pick<Journal, "id" | "title" | "summary" | "journal_type" | "importance">[];
   prompt_context?: {
     prompt_version: string;
     content_mode: string;
-    prompt: string;
+    llm_provider: string;
+    prompt_preview: string;
+    prompt_chars: number;
   };
 };
 
@@ -89,6 +151,7 @@ type CharacterDraft = {
   speech_style: string;
   explicit_age: string;
   adult_mode_allowed: boolean;
+  content_intensity: string;
 };
 
 type AuthResponse = {
@@ -102,8 +165,33 @@ const emptyRelationship: Relationship = {
   warmth: 0,
   tension: 0,
   familiarity: 0,
-  attachment: 0
+  attachment: 0,
+  mood: "steady",
+  conflict_state: "clear",
+  repair_needed: false,
+  tags_json: [],
+  metadata_json: {}
 };
+
+const panels: Panel[] = [
+  "character",
+  "memory",
+  "journal",
+  "relationship",
+  "adult",
+  "settings",
+  "debug",
+  "data"
+];
+
+const relationshipMetrics = [
+  "trust",
+  "intimacy",
+  "warmth",
+  "tension",
+  "familiarity",
+  "attachment"
+] as const;
 
 export function EidolonApp() {
   const [token, setToken] = useState<string | null>(() =>
@@ -117,24 +205,32 @@ export function EidolonApp() {
 
   const [characters, setCharacters] = useState<Character[]>([]);
   const [activeCharacter, setActiveCharacter] = useState<Character | null>(null);
-  const [characterDraft, setCharacterDraft] = useState({
-    name: "",
-    description: "",
-    personality_core: "",
-    speech_style: "",
-    explicit_age: "",
-    adult_mode_allowed: false
-  });
+  const [characterDraft, setCharacterDraft] = useState<CharacterDraft>(emptyCharacterDraft());
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState("");
   const [contentMode, setContentMode] = useState<ContentMode>("sfw");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Message[]>([]);
 
   const [memories, setMemories] = useState<MemoryItem[]>([]);
-  const [memoryDraft, setMemoryDraft] = useState("");
+  const [memoryContent, setMemoryContent] = useState("");
+  const [memoryType, setMemoryType] = useState("preference");
+  const [memoryImportance, setMemoryImportance] = useState("0.6");
+  const [memoryPinned, setMemoryPinned] = useState(false);
+  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+  const [memoryEditContent, setMemoryEditContent] = useState("");
+
+  const [journals, setJournals] = useState<Journal[]>([]);
+  const [journalTitle, setJournalTitle] = useState("");
+  const [journalSummary, setJournalSummary] = useState("");
+
   const [relationship, setRelationship] = useState<Relationship>(emptyRelationship);
+  const [adultStatus, setAdultStatus] = useState<AdultStatus | null>(null);
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
   const [debug, setDebug] = useState<DebugPayload | null>(null);
   const [panel, setPanel] = useState<Panel>("character");
@@ -145,12 +241,13 @@ export function EidolonApp() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const activeCharacterId = activeCharacter?.id ?? activeConversation?.character_id ?? null;
+  const timeline = relationship.metadata_json.timeline ?? debug?.relationship?.timeline ?? [];
 
   useEffect(() => {
     if (token && !user) {
       void bootstrap(token);
     }
-    // The bootstrap function intentionally reads the latest state setters only.
+    // bootstrap intentionally uses the latest state setters only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, user]);
 
@@ -169,6 +266,7 @@ export function EidolonApp() {
     try {
       const me = await apiJson<User>("/auth/me", { token: authToken });
       setUser(me);
+      setDisplayName(me.display_name ?? "");
       const characterList = await apiJson<Character[]>("/characters", { token: authToken });
       setCharacters(characterList);
 
@@ -240,12 +338,15 @@ export function EidolonApp() {
     characterId: string,
     conversationId: string
   ) {
-    const [memoryResult, relationshipResult, debugResult, jobsResult] = await Promise.allSettled([
-      apiJson<MemoryItem[]>(`/characters/${characterId}/memories`, { token: authToken }),
-      apiJson<Relationship>(`/characters/${characterId}/relationship`, { token: authToken }),
-      apiJson<DebugPayload>(`/debug/character/${characterId}`, { token: authToken }),
-      apiJson<ScheduledJob[]>("/debug/jobs", { token: authToken })
-    ]);
+    const [memoryResult, relationshipResult, debugResult, jobsResult, journalsResult, adultResult] =
+      await Promise.allSettled([
+        apiJson<MemoryItem[]>(`/characters/${characterId}/memories`, { token: authToken }),
+        apiJson<Relationship>(`/characters/${characterId}/relationship`, { token: authToken }),
+        apiJson<DebugPayload>(`/debug/character/${characterId}`, { token: authToken }),
+        apiJson<ScheduledJob[]>("/debug/jobs", { token: authToken }),
+        apiJson<Journal[]>(`/characters/${characterId}/journals`, { token: authToken }),
+        apiJson<AdultStatus>(`/characters/${characterId}/adult-status`, { token: authToken })
+      ]);
 
     if (memoryResult.status === "fulfilled") {
       setMemories(memoryResult.value);
@@ -259,7 +360,57 @@ export function EidolonApp() {
     if (jobsResult.status === "fulfilled") {
       setJobs(jobsResult.value);
     }
+    if (journalsResult.status === "fulfilled") {
+      setJournals(journalsResult.value);
+    }
+    if (adultResult.status === "fulfilled") {
+      setAdultStatus(adultResult.value);
+    }
     await loadConversation(authToken, conversationId);
+  }
+
+  async function reloadConversations(authToken: string) {
+    const conversationList = await apiJson<Conversation[]>("/conversations", {
+      token: authToken
+    });
+    setConversations(conversationList);
+    return conversationList;
+  }
+
+  async function selectConversation(conversation: Conversation) {
+    if (!token) {
+      return;
+    }
+    setActiveConversation(conversation);
+    setError(null);
+    const character =
+      characters.find((item) => item.id === conversation.character_id) ??
+      (await apiJson<Character>(`/characters/${conversation.character_id}`, { token }));
+    setCurrentCharacter(character);
+    await refreshSideState(token, character.id, conversation.id);
+  }
+
+  async function createConversationForCurrentCharacter() {
+    if (!token) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await apiJson<Conversation>("/conversations", {
+        method: "POST",
+        body: JSON.stringify({ character_id: activeCharacterId }),
+        token
+      });
+      const conversationList = await reloadConversations(token);
+      const conversation = conversationList.find((item) => item.id === created.id) ?? created;
+      await selectConversation(conversation);
+      setNotice("Conversation created.");
+    } catch (caught) {
+      setError(readError(caught));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -267,6 +418,11 @@ export function EidolonApp() {
     if (!token || !activeConversation || !activeCharacterId || !messageDraft.trim()) {
       return;
     }
+    if (editingMessageId) {
+      await saveEditedMessage();
+      return;
+    }
+
     setSending(true);
     setError(null);
     setNotice(null);
@@ -302,6 +458,34 @@ export function EidolonApp() {
     } finally {
       setSending(false);
       setStreamingContent("");
+    }
+  }
+
+  async function saveEditedMessage() {
+    if (!token || !activeConversation || !editingMessageId || !messageDraft.trim()) {
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      const updated = await apiJson<Message>(
+        `/conversations/${activeConversation.id}/messages/${editingMessageId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ content: messageDraft.trim() }),
+          token
+        }
+      );
+      setMessages((current) =>
+        current.map((message) => (message.id === updated.id ? updated : message))
+      );
+      setEditingMessageId(null);
+      setMessageDraft("");
+      setNotice("Message edited.");
+    } catch (caught) {
+      setError(readError(caught));
+    } finally {
+      setSending(false);
     }
   }
 
@@ -377,7 +561,8 @@ export function EidolonApp() {
           explicit_age: characterDraft.explicit_age
             ? Number.parseInt(characterDraft.explicit_age, 10)
             : null,
-          adult_mode_allowed: characterDraft.adult_mode_allowed
+          adult_mode_allowed: characterDraft.adult_mode_allowed,
+          content_intensity: Number.parseInt(characterDraft.content_intensity || "0", 10)
         }),
         token
       });
@@ -396,35 +581,132 @@ export function EidolonApp() {
     }
   }
 
-  async function toggleAgeGate() {
-    if (!token || !user) {
+  async function updateUser(payload: Partial<Pick<User, "display_name" | "age_gate_confirmed">>) {
+    if (!token) {
       return;
     }
-    setError(null);
     const updated = await apiJson<User>("/auth/me", {
       method: "PATCH",
-      body: JSON.stringify({ age_gate_confirmed: !user.age_gate_confirmed }),
+      body: JSON.stringify(payload),
       token
     });
     setUser(updated);
+    if (activeCharacterId && activeConversation) {
+      await refreshSideState(token, activeCharacterId, activeConversation.id);
+    }
   }
 
   async function addMemory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!token || !activeCharacterId || !memoryDraft.trim()) {
+    if (!token || !activeCharacterId || !activeConversation || !memoryContent.trim()) {
       return;
     }
     setError(null);
     await apiJson<MemoryItem>(`/characters/${activeCharacterId}/memories`, {
       method: "POST",
       body: JSON.stringify({
-        memory_type: "preference",
-        content: memoryDraft.trim(),
-        confidence: 0.8
+        memory_type: memoryType,
+        content: memoryContent.trim(),
+        importance: parseDecimal(memoryImportance, 0.6),
+        confidence: 0.8,
+        pinned: memoryPinned
       }),
       token
     });
-    setMemoryDraft("");
+    setMemoryContent("");
+    setMemoryPinned(false);
+    await refreshSideState(token, activeCharacterId, activeConversation.id);
+  }
+
+  async function saveMemoryEdit(memory: MemoryItem) {
+    if (!token || !activeCharacterId || !activeConversation || !memoryEditContent.trim()) {
+      return;
+    }
+    const updated = await apiJson<MemoryItem>(
+      `/characters/${activeCharacterId}/memories/${memory.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ content: memoryEditContent.trim() }),
+        token
+      }
+    );
+    setMemories((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    setEditingMemoryId(null);
+    setMemoryEditContent("");
+  }
+
+  async function toggleMemoryPinned(memory: MemoryItem) {
+    if (!token || !activeCharacterId || !activeConversation) {
+      return;
+    }
+    const updated = await apiJson<MemoryItem>(
+      `/characters/${activeCharacterId}/memories/${memory.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ pinned: !memory.pinned }),
+        token
+      }
+    );
+    setMemories((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+  }
+
+  async function deleteMemory(memory: MemoryItem) {
+    if (!token || !activeCharacterId) {
+      return;
+    }
+    await apiJson<{ deleted: number }>(`/characters/${activeCharacterId}/memories/${memory.id}`, {
+      method: "DELETE",
+      token
+    });
+    setMemories((current) => current.filter((item) => item.id !== memory.id));
+  }
+
+  async function clearMemories() {
+    if (!token || !activeCharacterId || !activeConversation) {
+      return;
+    }
+    const response = await apiJson<{ deleted: number }>(`/characters/${activeCharacterId}/memories`, {
+      method: "DELETE",
+      token
+    });
+    setMemories([]);
+    setNotice(`${response.deleted} memories cleared.`);
+    await refreshSideState(token, activeCharacterId, activeConversation.id);
+  }
+
+  async function forgetMemories() {
+    if (!token || !activeCharacterId || !activeConversation) {
+      return;
+    }
+    const response = await apiJson<{ forgotten: number }>(
+      `/characters/${activeCharacterId}/memories/forget`,
+      {
+        method: "POST",
+        token
+      }
+    );
+    setNotice(`${response.forgotten} low-value memories forgotten.`);
+    await refreshSideState(token, activeCharacterId, activeConversation.id);
+  }
+
+  async function addJournal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !activeCharacterId || !journalTitle.trim() || !journalSummary.trim()) {
+      return;
+    }
+    await apiJson<Journal>(`/characters/${activeCharacterId}/journals`, {
+      method: "POST",
+      body: JSON.stringify({
+        conversation_id: activeConversation?.id ?? null,
+        title: journalTitle.trim(),
+        summary: journalSummary.trim(),
+        journal_type: "manual_note",
+        importance: 0.6
+      }),
+      token
+    });
+    setJournalTitle("");
+    setJournalSummary("");
     if (activeConversation) {
       await refreshSideState(token, activeCharacterId, activeConversation.id);
     }
@@ -442,8 +724,83 @@ export function EidolonApp() {
         token
       }
     );
-    setNotice(message ? "Queued." : "Cooldown active.");
+    setNotice(message ? "Queued check-in." : "Cooldown is active.");
     await refreshSideState(token, activeCharacterId, activeConversation.id);
+  }
+
+  async function rerollMessage(message: Message) {
+    if (!token || !activeConversation || !activeCharacterId) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const rerolled = await apiJson<Message>("/chat/reroll", {
+        method: "POST",
+        body: JSON.stringify({
+          conversation_id: activeConversation.id,
+          assistant_message_id: message.id,
+          content_mode: contentMode
+        }),
+        token
+      });
+      appendMessage(rerolled);
+      await refreshSideState(token, activeCharacterId, activeConversation.id);
+    } catch (caught) {
+      setError(readError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startEditMessage(message: Message) {
+    setEditingMessageId(message.id);
+    setMessageDraft(message.content);
+  }
+
+  async function searchMessages(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !activeConversation || !searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const result = await apiJson<Message[]>(
+      `/conversations/${activeConversation.id}/search?q=${encodeURIComponent(searchQuery.trim())}`,
+      { token }
+    );
+    setSearchResults(result);
+  }
+
+  async function clearConversationMessages() {
+    if (!token || !activeConversation || !activeCharacterId) {
+      return;
+    }
+    const response = await apiJson<{ deleted: number }>(
+      `/conversations/${activeConversation.id}/messages`,
+      {
+        method: "DELETE",
+        token
+      }
+    );
+    setMessages([]);
+    setNotice(`${response.deleted} messages cleared.`);
+    await refreshSideState(token, activeCharacterId, activeConversation.id);
+  }
+
+  async function deleteActiveConversation() {
+    if (!token || !activeConversation) {
+      return;
+    }
+    await apiJson<{ deleted: number }>(`/conversations/${activeConversation.id}`, {
+      method: "DELETE",
+      token
+    });
+    const conversationList = await reloadConversations(token);
+    if (conversationList.length === 0) {
+      await createConversationForCurrentCharacter();
+      return;
+    }
+    await selectConversation(conversationList[0]);
   }
 
   async function exportAccount() {
@@ -471,6 +828,8 @@ export function EidolonApp() {
     setConversations([]);
     setActiveConversation(null);
     setActiveCharacter(null);
+    setDebug(null);
+    setNotice(null);
   }
 
   function setCurrentCharacter(character: Character) {
@@ -482,9 +841,12 @@ export function EidolonApp() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-ink px-4 py-8 text-paper">
         <section className="w-full max-w-sm border border-line bg-panel p-5 shadow-xl">
-          <div className="mb-5 flex items-center justify-between">
-            <h1 className="text-2xl font-semibold">Eidolon</h1>
-            <div className="flex border border-line">
+          <div className="mb-5 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase text-zinc-500">Private text companion</p>
+              <h1 className="text-2xl font-semibold">Eidolon</h1>
+            </div>
+            <div className="flex overflow-hidden rounded-md border border-line">
               <button
                 type="button"
                 onClick={() => setAuthMode("login")}
@@ -534,7 +896,7 @@ export function EidolonApp() {
                 />
               </label>
             ) : null}
-            {error ? <p className="border border-amber-700 bg-amber-950 p-3 text-sm">{error}</p> : null}
+            {error ? <p className={errorClass}>{error}</p> : null}
             <button className={primaryButtonClass} disabled={busy} type="submit">
               {busy ? "Working" : authMode === "register" ? "Create account" : "Enter"}
             </button>
@@ -547,14 +909,19 @@ export function EidolonApp() {
   return (
     <main className="min-h-screen bg-ink text-paper">
       <header className="border-b border-line bg-panel">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Eidolon</p>
-            <h1 className="text-xl font-semibold">{activeCharacter?.name ?? "Conversation"}</h1>
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs uppercase text-zinc-500">Eidolon Level 2</p>
+            <h1 className="truncate text-xl font-semibold">
+              {activeCharacter?.name ?? "Conversation"}
+            </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="border border-line px-3 py-2 text-zinc-300">
+            <span className="rounded-md border border-line px-3 py-2 text-zinc-300">
               {user.display_name ?? user.email}
+            </span>
+            <span className="rounded-md border border-line px-3 py-2 text-zinc-300">
+              {relationship.mood} · {relationship.conflict_state}
             </span>
             <select
               value={contentMode}
@@ -572,12 +939,28 @@ export function EidolonApp() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[250px_minmax(0,1fr)_390px]">
+        <ConversationRail
+          activeConversation={activeConversation}
+          conversations={conversations}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          searchResults={searchResults}
+          onCreate={createConversationForCurrentCharacter}
+          onSearch={searchMessages}
+          onSelect={selectConversation}
+        />
+
         <section className="flex min-h-[calc(100vh-112px)] flex-col border border-line bg-panel">
-          <div className="flex items-center justify-between border-b border-line px-4 py-3">
-            <div>
-              <h2 className="text-base font-medium">{activeConversation?.title ?? "Chat"}</h2>
-              <p className="text-xs text-zinc-500">{sortedMessages.length} messages</p>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-medium">
+                {activeConversation?.title ?? "Chat"}
+              </h2>
+              <p className="text-xs text-zinc-500">
+                {sortedMessages.length} messages · {memories.length} memories ·{" "}
+                {journals.length} journal entries
+              </p>
             </div>
             <button
               className={secondaryButtonClass}
@@ -591,13 +974,18 @@ export function EidolonApp() {
 
           <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
             {sortedMessages.length === 0 && !streamingContent ? (
-              <p className="text-sm text-zinc-500">No messages yet.</p>
+              <EmptyState text="No messages yet." />
             ) : null}
             {sortedMessages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <MessageBubble
+                key={message.id}
+                message={message}
+                onEdit={startEditMessage}
+                onReroll={rerollMessage}
+              />
             ))}
             {streamingContent ? (
-              <div className="max-w-[82%] border border-line bg-ink px-3 py-2">
+              <div className="max-w-[86%] border border-line bg-ink px-3 py-2">
                 <p className="whitespace-pre-wrap text-sm leading-6">{streamingContent}</p>
                 <p className="mt-2 text-xs text-zinc-500">Streaming</p>
               </div>
@@ -605,34 +993,44 @@ export function EidolonApp() {
           </div>
 
           <form className="border-t border-line p-3" onSubmit={sendMessage}>
-            {error ? (
-              <p className="mb-2 border border-amber-700 bg-amber-950 px-3 py-2 text-sm">{error}</p>
-            ) : null}
-            {notice ? (
-              <p className="mb-2 border border-moss bg-lime-950 px-3 py-2 text-sm">{notice}</p>
-            ) : null}
+            {error ? <p className={`mb-2 ${errorClass}`}>{error}</p> : null}
+            {notice ? <p className={`mb-2 ${noticeClass}`}>{notice}</p> : null}
             <div className="flex gap-2">
               <textarea
                 value={messageDraft}
                 onChange={(event) => setMessageDraft(event.target.value)}
                 className="min-h-12 flex-1 resize-none rounded-md border border-line bg-ink px-3 py-2 text-sm"
-                placeholder="Write a message"
+                placeholder={editingMessageId ? "Edit message" : "Write a message"}
                 disabled={sending}
               />
-              <button
-                className="rounded-md bg-paper px-4 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={sending || !messageDraft.trim()}
-                type="submit"
-              >
-                {sending ? "..." : "Send"}
-              </button>
+              <div className="flex w-24 flex-col gap-2">
+                <button
+                  className="rounded-md bg-paper px-3 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={sending || !messageDraft.trim()}
+                  type="submit"
+                >
+                  {sending ? "..." : editingMessageId ? "Save" : "Send"}
+                </button>
+                {editingMessageId ? (
+                  <button
+                    className={secondaryButtonClass}
+                    onClick={() => {
+                      setEditingMessageId(null);
+                      setMessageDraft("");
+                    }}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+              </div>
             </div>
           </form>
         </section>
 
         <aside className="border border-line bg-panel">
           <div className="grid grid-cols-4 border-b border-line text-sm">
-            {(["character", "memory", "debug", "export"] as Panel[]).map((item) => (
+            {panels.map((item) => (
               <button
                 key={item}
                 className={tabClass(panel === item)}
@@ -648,24 +1046,76 @@ export function EidolonApp() {
               <CharacterPanel
                 draft={characterDraft}
                 setDraft={setCharacterDraft}
-                user={user}
-                relationship={relationship}
                 onSave={saveCharacter}
-                onToggleAgeGate={toggleAgeGate}
               />
             ) : null}
             {panel === "memory" ? (
               <MemoryPanel
                 memories={memories}
-                draft={memoryDraft}
-                setDraft={setMemoryDraft}
+                memoryContent={memoryContent}
+                memoryType={memoryType}
+                memoryImportance={memoryImportance}
+                memoryPinned={memoryPinned}
+                editingMemoryId={editingMemoryId}
+                memoryEditContent={memoryEditContent}
+                setMemoryContent={setMemoryContent}
+                setMemoryType={setMemoryType}
+                setMemoryImportance={setMemoryImportance}
+                setMemoryPinned={setMemoryPinned}
+                setEditingMemoryId={setEditingMemoryId}
+                setMemoryEditContent={setMemoryEditContent}
                 onAdd={addMemory}
+                onSaveEdit={saveMemoryEdit}
+                onTogglePinned={toggleMemoryPinned}
+                onDelete={deleteMemory}
+                onForget={forgetMemories}
+              />
+            ) : null}
+            {panel === "journal" ? (
+              <JournalPanel
+                journals={journals}
+                title={journalTitle}
+                summary={journalSummary}
+                setTitle={setJournalTitle}
+                setSummary={setJournalSummary}
+                onAdd={addJournal}
+              />
+            ) : null}
+            {panel === "relationship" ? (
+              <RelationshipPanel relationship={relationship} timeline={timeline} />
+            ) : null}
+            {panel === "adult" ? (
+              <AdultPanel
+                status={adultStatus}
+                user={user}
+                draft={characterDraft}
+                setDraft={setCharacterDraft}
+                onToggleAgeGate={() =>
+                  void updateUser({ age_gate_confirmed: !user.age_gate_confirmed })
+                }
+                onSave={saveCharacter}
+              />
+            ) : null}
+            {panel === "settings" ? (
+              <SettingsPanel
+                user={user}
+                displayName={displayName}
+                setDisplayName={setDisplayName}
+                onSaveName={() => void updateUser({ display_name: displayName })}
+                onLogout={clearAuth}
               />
             ) : null}
             {panel === "debug" ? (
               <DebugPanel debug={debug} jobs={jobs} conversations={conversations} />
             ) : null}
-            {panel === "export" ? <ExportPanel onExport={exportAccount} /> : null}
+            {panel === "data" ? (
+              <DataPanel
+                onExport={exportAccount}
+                onClearMessages={clearConversationMessages}
+                onClearMemories={clearMemories}
+                onDeleteConversation={deleteActiveConversation}
+              />
+            ) : null}
           </div>
         </aside>
       </div>
@@ -673,49 +1123,125 @@ export function EidolonApp() {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function ConversationRail({
+  activeConversation,
+  conversations,
+  searchQuery,
+  setSearchQuery,
+  searchResults,
+  onCreate,
+  onSearch,
+  onSelect
+}: {
+  activeConversation: Conversation | null;
+  conversations: Conversation[];
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
+  searchResults: Message[];
+  onCreate: () => void;
+  onSearch: (event: FormEvent<HTMLFormElement>) => void;
+  onSelect: (conversation: Conversation) => void;
+}) {
+  return (
+    <aside className="space-y-3 border border-line bg-panel p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">Conversations</h2>
+        <button className={secondaryButtonClass} onClick={onCreate} type="button">
+          New
+        </button>
+      </div>
+      <div className="space-y-2">
+        {conversations.map((conversation) => (
+          <button
+            className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
+              activeConversation?.id === conversation.id
+                ? "border-tide bg-cyan-950"
+                : "border-line bg-ink hover:border-zinc-500"
+            }`}
+            key={conversation.id}
+            onClick={() => void onSelect(conversation)}
+            type="button"
+          >
+            <span className="block truncate">{conversation.title ?? conversation.id}</span>
+            <span className="text-xs text-zinc-500">{conversation.id.slice(0, 8)}</span>
+          </button>
+        ))}
+      </div>
+      <form className="space-y-2 border-t border-line pt-3" onSubmit={onSearch}>
+        <input
+          className={inputClass}
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search chat"
+        />
+        <button className={secondaryButtonClass} type="submit">
+          Search
+        </button>
+      </form>
+      <div className="space-y-2">
+        {searchResults.map((message) => (
+          <p className="rounded-md border border-line bg-ink p-2 text-xs" key={message.id}>
+            <span className="text-zinc-500">{message.role}</span> {message.content}
+          </p>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function MessageBubble({
+  message,
+  onEdit,
+  onReroll
+}: {
+  message: Message;
+  onEdit: (message: Message) => void;
+  onReroll: (message: Message) => void;
+}) {
   const isUser = message.role === "user";
+  const delivery = message.metadata_json.delivery_state;
   return (
     <article className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[82%] border px-3 py-2 ${
+        className={`max-w-[86%] rounded-md border px-3 py-2 ${
           isUser ? "border-tide bg-cyan-950" : "border-line bg-ink"
         }`}
       >
         <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
-        <p className="mt-2 text-xs text-zinc-500">
-          {message.role} · {formatTimestamp(message.created_at)}
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          <span>
+            {message.role} · {formatTimestamp(message.created_at)}
+          </span>
+          {message.metadata_json.edited ? <span>edited</span> : null}
+          {message.metadata_json.proactive ? <span>proactive</span> : null}
+          {delivery?.away_state ? <span>{delivery.away_state}</span> : null}
+          {isUser ? (
+            <button className="text-zinc-300 hover:text-paper" onClick={() => onEdit(message)} type="button">
+              Edit
+            </button>
+          ) : (
+            <button
+              className="text-zinc-300 hover:text-paper"
+              onClick={() => void onReroll(message)}
+              type="button"
+            >
+              Reroll
+            </button>
+          )}
+        </div>
       </div>
     </article>
   );
 }
 
-function toCharacterDraft(character: Character): CharacterDraft {
-  return {
-    name: character.name,
-    description: character.description ?? "",
-    personality_core: character.personality_core ?? "",
-    speech_style: character.speech_style ?? "",
-    explicit_age: character.explicit_age?.toString() ?? "",
-    adult_mode_allowed: character.adult_mode_allowed
-  };
-}
-
 function CharacterPanel({
   draft,
   setDraft,
-  user,
-  relationship,
-  onSave,
-  onToggleAgeGate
+  onSave
 }: {
   draft: CharacterDraft;
   setDraft: (value: CharacterDraft) => void;
-  user: User;
-  relationship: Relationship;
   onSave: () => void;
-  onToggleAgeGate: () => void;
 }) {
   return (
     <>
@@ -751,6 +1277,287 @@ function CharacterPanel({
           onChange={(event) => setDraft({ ...draft, speech_style: event.target.value })}
         />
       </label>
+      <button className={primaryButtonClass} onClick={onSave} type="button">
+        Save character
+      </button>
+    </>
+  );
+}
+
+function MemoryPanel({
+  memories,
+  memoryContent,
+  memoryType,
+  memoryImportance,
+  memoryPinned,
+  editingMemoryId,
+  memoryEditContent,
+  setMemoryContent,
+  setMemoryType,
+  setMemoryImportance,
+  setMemoryPinned,
+  setEditingMemoryId,
+  setMemoryEditContent,
+  onAdd,
+  onSaveEdit,
+  onTogglePinned,
+  onDelete,
+  onForget
+}: {
+  memories: MemoryItem[];
+  memoryContent: string;
+  memoryType: string;
+  memoryImportance: string;
+  memoryPinned: boolean;
+  editingMemoryId: string | null;
+  memoryEditContent: string;
+  setMemoryContent: (value: string) => void;
+  setMemoryType: (value: string) => void;
+  setMemoryImportance: (value: string) => void;
+  setMemoryPinned: (value: boolean) => void;
+  setEditingMemoryId: (value: string | null) => void;
+  setMemoryEditContent: (value: string) => void;
+  onAdd: (event: FormEvent<HTMLFormElement>) => void;
+  onSaveEdit: (memory: MemoryItem) => void;
+  onTogglePinned: (memory: MemoryItem) => void;
+  onDelete: (memory: MemoryItem) => void;
+  onForget: () => void;
+}) {
+  return (
+    <>
+      <form className="space-y-2" onSubmit={onAdd}>
+        <textarea
+          className={`${inputClass} min-h-16 resize-none`}
+          value={memoryContent}
+          onChange={(event) => setMemoryContent(event.target.value)}
+          placeholder="Memory"
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            className={inputClass}
+            value={memoryType}
+            onChange={(event) => setMemoryType(event.target.value)}
+          >
+            <option value="preference">preference</option>
+            <option value="event">event</option>
+            <option value="inside_joke">inside joke</option>
+            <option value="boundary">boundary</option>
+            <option value="relationship_milestone">milestone</option>
+          </select>
+          <input
+            className={inputClass}
+            value={memoryImportance}
+            onChange={(event) => setMemoryImportance(event.target.value)}
+            inputMode="decimal"
+            aria-label="Memory importance"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={memoryPinned}
+            onChange={(event) => setMemoryPinned(event.target.checked)}
+          />
+          Pinned
+        </label>
+        <div className="flex gap-2">
+          <button className={primaryButtonClass} type="submit">
+            Add memory
+          </button>
+          <button className={secondaryButtonClass} onClick={onForget} type="button">
+            Forget stale
+          </button>
+        </div>
+      </form>
+      <div className="space-y-2">
+        {memories.length === 0 ? <EmptyState text="No memories." /> : null}
+        {memories.map((memory) => (
+          <article className="rounded-md border border-line bg-ink p-3 text-sm" key={memory.id}>
+            {editingMemoryId === memory.id ? (
+              <textarea
+                className={`${inputClass} min-h-20 resize-none`}
+                value={memoryEditContent}
+                onChange={(event) => setMemoryEditContent(event.target.value)}
+              />
+            ) : (
+              <p>{memory.content}</p>
+            )}
+            <p className="mt-2 text-xs text-zinc-500">
+              {memory.memory_type} · confidence {memory.confidence.toFixed(1)} · importance{" "}
+              {memory.importance.toFixed(1)} · decay {memory.decay_score.toFixed(2)}
+            </p>
+            {memory.contradiction_group ? (
+              <p className="mt-1 text-xs text-ember">{memory.contradiction_group}</p>
+            ) : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {editingMemoryId === memory.id ? (
+                <button
+                  className={primaryButtonClass}
+                  onClick={() => void onSaveEdit(memory)}
+                  type="button"
+                >
+                  Save
+                </button>
+              ) : (
+                <button
+                  className={secondaryButtonClass}
+                  onClick={() => {
+                    setEditingMemoryId(memory.id);
+                    setMemoryEditContent(memory.content);
+                  }}
+                  type="button"
+                >
+                  Edit
+                </button>
+              )}
+              <button
+                className={secondaryButtonClass}
+                onClick={() => void onTogglePinned(memory)}
+                type="button"
+              >
+                {memory.pinned ? "Unpin" : "Pin"}
+              </button>
+              <button
+                className={secondaryButtonClass}
+                onClick={() => void onDelete(memory)}
+                type="button"
+              >
+                Delete
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function JournalPanel({
+  journals,
+  title,
+  summary,
+  setTitle,
+  setSummary,
+  onAdd
+}: {
+  journals: Journal[];
+  title: string;
+  summary: string;
+  setTitle: (value: string) => void;
+  setSummary: (value: string) => void;
+  onAdd: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <>
+      <form className="space-y-2" onSubmit={onAdd}>
+        <input
+          className={inputClass}
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="Journal title"
+        />
+        <textarea
+          className={`${inputClass} min-h-20 resize-none`}
+          value={summary}
+          onChange={(event) => setSummary(event.target.value)}
+          placeholder="Summary"
+        />
+        <button className={primaryButtonClass} type="submit">
+          Add journal
+        </button>
+      </form>
+      <div className="space-y-2">
+        {journals.length === 0 ? <EmptyState text="No journal entries." /> : null}
+        {journals.map((journal) => (
+          <article className="rounded-md border border-line bg-ink p-3 text-sm" key={journal.id}>
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="font-medium">{journal.title}</h3>
+              <span className="text-xs text-zinc-500">{journal.importance.toFixed(1)}</span>
+            </div>
+            <p className="mt-2 whitespace-pre-wrap leading-6">{journal.summary}</p>
+            <p className="mt-2 text-xs text-zinc-500">
+              {journal.journal_type} · {formatTimestamp(journal.created_at)}
+            </p>
+            <TagRow tags={[...journal.emotional_tags_json, ...journal.callbacks_json.slice(0, 2)]} />
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function RelationshipPanel({
+  relationship,
+  timeline
+}: {
+  relationship: Relationship;
+  timeline: RelationshipEvent[];
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        {relationshipMetrics.map((key) => (
+          <div className="rounded-md border border-line bg-ink p-2" key={key}>
+            <dt className="text-zinc-500">{key}</dt>
+            <dd className="font-mono">{formatMetric(relationship[key])}</dd>
+          </div>
+        ))}
+      </div>
+      <div className="rounded-md border border-line bg-ink p-3 text-sm">
+        <p>
+          {relationship.mood} · {relationship.conflict_state}
+        </p>
+        {relationship.repair_needed ? <p className="mt-1 text-ember">Repair needed</p> : null}
+        <TagRow tags={relationship.tags_json} />
+      </div>
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold">Timeline</h2>
+        {timeline.length === 0 ? <EmptyState text="No timeline events." /> : null}
+        {timeline
+          .slice()
+          .reverse()
+          .slice(0, 12)
+          .map((event, index) => (
+            <article className="rounded-md border border-line bg-ink p-3 text-xs" key={index}>
+              <p className="text-zinc-300">{event.summary ?? event.kind ?? "state update"}</p>
+              <p className="mt-1 text-zinc-500">{event.at ? formatTimestamp(event.at) : ""}</p>
+              <TagRow tags={event.tags ?? []} />
+            </article>
+          ))}
+      </section>
+    </>
+  );
+}
+
+function AdultPanel({
+  status,
+  user,
+  draft,
+  setDraft,
+  onToggleAgeGate,
+  onSave
+}: {
+  status: AdultStatus | null;
+  user: User;
+  draft: CharacterDraft;
+  setDraft: (value: CharacterDraft) => void;
+  onToggleAgeGate: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <>
+      <div className="rounded-md border border-line bg-ink p-3 text-sm">
+        <p>{status?.effective_mode === "adult" ? "Adult mode available" : "SFW enforced"}</p>
+        <p className="mt-1 text-xs text-zinc-500">Intensity {status?.intensity ?? 0}/3</p>
+        {status?.reasons.map((reason) => (
+          <p className="mt-2 text-xs text-ember" key={reason}>
+            {reason}
+          </p>
+        ))}
+      </div>
+      <button className={secondaryButtonClass} onClick={onToggleAgeGate} type="button">
+        {user.age_gate_confirmed ? "Age gate confirmed" : "Confirm age gate"}
+      </button>
       <div className="grid grid-cols-2 gap-2">
         <label className="block text-sm text-zinc-300">
           Age
@@ -761,73 +1568,68 @@ function CharacterPanel({
             inputMode="numeric"
           />
         </label>
-        <label className="flex items-end gap-2 pb-2 text-sm text-zinc-300">
-          <input
-            type="checkbox"
-            checked={draft.adult_mode_allowed}
-            onChange={(event) =>
-              setDraft({ ...draft, adult_mode_allowed: event.target.checked })
-            }
-          />
-          Adult mode
+        <label className="block text-sm text-zinc-300">
+          Intensity
+          <select
+            className={inputClass}
+            value={draft.content_intensity}
+            onChange={(event) => setDraft({ ...draft, content_intensity: event.target.value })}
+          >
+            <option value="0">0</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
         </label>
       </div>
-      <div className="flex gap-2">
-        <button className={primaryButtonClass} onClick={onSave} type="button">
-          Save
-        </button>
-        <button className={secondaryButtonClass} onClick={onToggleAgeGate} type="button">
-          {user.age_gate_confirmed ? "Age gate on" : "Age gate off"}
-        </button>
-      </div>
-      <dl className="grid grid-cols-2 gap-2 text-sm">
-        {relationshipMetrics.map((key) => (
-          <div className="border border-line p-2" key={key}>
-            <dt className="text-zinc-500">{key}</dt>
-            <dd className="font-mono">{formatMetric(relationship[key])}</dd>
-          </div>
-        ))}
-      </dl>
+      <label className="flex items-center gap-2 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          checked={draft.adult_mode_allowed}
+          onChange={(event) => setDraft({ ...draft, adult_mode_allowed: event.target.checked })}
+        />
+        Character adult mode
+      </label>
+      <button className={primaryButtonClass} onClick={onSave} type="button">
+        Save adult settings
+      </button>
     </>
   );
 }
 
-function MemoryPanel({
-  memories,
-  draft,
-  setDraft,
-  onAdd
+function SettingsPanel({
+  user,
+  displayName,
+  setDisplayName,
+  onSaveName,
+  onLogout
 }: {
-  memories: MemoryItem[];
-  draft: string;
-  setDraft: (value: string) => void;
-  onAdd: (event: FormEvent<HTMLFormElement>) => void;
+  user: User;
+  displayName: string;
+  setDisplayName: (value: string) => void;
+  onSaveName: () => void;
+  onLogout: () => void;
 }) {
   return (
     <>
-      <form className="flex gap-2" onSubmit={onAdd}>
+      <p className="rounded-md border border-line bg-ink p-3 text-sm">{user.email}</p>
+      <label className="block text-sm text-zinc-300">
+        Display name
         <input
           className={inputClass}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Memory"
+          value={displayName}
+          onChange={(event) => setDisplayName(event.target.value)}
         />
-        <button className={primaryButtonClass} type="submit">
-          Add
-        </button>
-      </form>
-      <div className="space-y-2">
-        {memories.length === 0 ? <p className="text-sm text-zinc-500">No memories.</p> : null}
-        {memories.map((memory) => (
-          <article className="border border-line p-3 text-sm" key={memory.id}>
-            <p>{memory.content}</p>
-            <p className="mt-2 text-xs text-zinc-500">
-              {memory.memory_type} · {memory.confidence.toFixed(1)} ·{" "}
-              {formatTimestamp(memory.created_at)}
-            </p>
-          </article>
-        ))}
-      </div>
+      </label>
+      <button className={primaryButtonClass} onClick={onSaveName} type="button">
+        Save settings
+      </button>
+      <p className="rounded-md border border-line bg-ink p-3 text-xs text-zinc-500">
+        API: {getApiBaseUrl()}
+      </p>
+      <button className={secondaryButtonClass} onClick={onLogout} type="button">
+        Logout
+      </button>
     </>
   );
 }
@@ -844,19 +1646,21 @@ function DebugPanel({
   return (
     <>
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Prompt</h2>
+        <h2 className="text-sm font-semibold">Prompt Preview</h2>
         <p className="text-xs text-zinc-500">
-          {debug?.prompt_context?.prompt_version ?? "not loaded"}
+          {debug?.prompt_context?.prompt_version ?? "not loaded"} ·{" "}
+          {debug?.prompt_context?.llm_provider ?? "provider unknown"} ·{" "}
+          {debug?.prompt_context?.prompt_chars ?? 0} chars
         </p>
-        <pre className="max-h-72 overflow-y-auto border border-line bg-ink p-3 text-xs leading-5">
-          {debug?.prompt_context?.prompt ?? ""}
+        <pre className="max-h-72 overflow-y-auto rounded-md border border-line bg-ink p-3 text-xs leading-5">
+          {debug?.prompt_context?.prompt_preview ?? ""}
         </pre>
       </section>
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Jobs</h2>
-        {jobs.length === 0 ? <p className="text-sm text-zinc-500">No jobs.</p> : null}
+        {jobs.length === 0 ? <EmptyState text="No jobs." /> : null}
         {jobs.map((job) => (
-          <p className="border border-line p-2 text-xs" key={job.id}>
+          <p className="rounded-md border border-line bg-ink p-2 text-xs" key={job.id}>
             {job.job_type} · {job.status} · {formatTimestamp(job.run_at)}
           </p>
         ))}
@@ -864,7 +1668,7 @@ function DebugPanel({
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Conversations</h2>
         {conversations.map((conversation) => (
-          <p className="border border-line p-2 text-xs" key={conversation.id}>
+          <p className="rounded-md border border-line bg-ink p-2 text-xs" key={conversation.id}>
             {conversation.title ?? conversation.id}
           </p>
         ))}
@@ -873,14 +1677,76 @@ function DebugPanel({
   );
 }
 
-function ExportPanel({ onExport }: { onExport: () => void }) {
+function DataPanel({
+  onExport,
+  onClearMessages,
+  onClearMemories,
+  onDeleteConversation
+}: {
+  onExport: () => void;
+  onClearMessages: () => void;
+  onClearMemories: () => void;
+  onDeleteConversation: () => void;
+}) {
   return (
     <div className="space-y-3">
       <button className={primaryButtonClass} onClick={onExport} type="button">
         Export JSON
       </button>
+      <button className={secondaryButtonClass} onClick={onClearMessages} type="button">
+        Clear chat
+      </button>
+      <button className={secondaryButtonClass} onClick={onClearMemories} type="button">
+        Clear memories
+      </button>
+      <button className={secondaryButtonClass} onClick={onDeleteConversation} type="button">
+        Delete conversation
+      </button>
     </div>
   );
+}
+
+function TagRow({ tags }: { tags: string[] }) {
+  if (tags.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {tags.slice(0, 6).map((tag) => (
+        <span className="rounded border border-line px-2 py-1 text-xs text-zinc-400" key={tag}>
+          {tag}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <p className="rounded-md border border-line bg-ink p-3 text-sm text-zinc-500">{text}</p>;
+}
+
+function emptyCharacterDraft(): CharacterDraft {
+  return {
+    name: "",
+    description: "",
+    personality_core: "",
+    speech_style: "",
+    explicit_age: "",
+    adult_mode_allowed: false,
+    content_intensity: "0"
+  };
+}
+
+function toCharacterDraft(character: Character): CharacterDraft {
+  return {
+    name: character.name,
+    description: character.description ?? "",
+    personality_core: character.personality_core ?? "",
+    speech_style: character.speech_style ?? "",
+    explicit_age: character.explicit_age?.toString() ?? "",
+    adult_mode_allowed: character.adult_mode_allowed,
+    content_intensity: character.content_intensity.toString()
+  };
 }
 
 function isMessage(value: unknown): value is Message {
@@ -913,8 +1779,13 @@ function formatMetric(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(1) : "0.0";
 }
 
+function parseDecimal(value: string, fallback: number) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function tabClass(active: boolean) {
-  return `px-3 py-2 text-sm capitalize ${
+  return `px-2 py-2 text-xs capitalize sm:text-sm ${
     active ? "bg-paper text-ink" : "bg-panel text-zinc-300 hover:bg-ink"
   }`;
 }
@@ -927,3 +1798,7 @@ const primaryButtonClass =
 
 const secondaryButtonClass =
   "rounded-md border border-line bg-ink px-3 py-2 text-sm text-paper hover:border-zinc-400 disabled:cursor-not-allowed disabled:opacity-50";
+
+const errorClass = "rounded-md border border-amber-700 bg-amber-950 px-3 py-2 text-sm";
+
+const noticeClass = "rounded-md border border-moss bg-lime-950 px-3 py-2 text-sm";

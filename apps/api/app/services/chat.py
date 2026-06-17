@@ -8,8 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.base import LLMProvider
 from app.models import Character, Conversation, Message, User, utc_now
-from app.services.memory import maybe_extract_memory, retrieve_memories
+from app.services.journal import maybe_create_journal_from_conversation
+from app.services.memory import maybe_extract_memory
+from app.services.proactive import ensure_proactive_jobs
 from app.services.prompt import PromptBundle, assemble_prompt
+from app.services.reasoning import build_reasoning_context
 from app.services.relationship import get_or_create_relationship, update_relationship_from_message
 from app.services.safety import resolve_content_mode, validate_user_content
 
@@ -90,22 +93,25 @@ async def prepare_user_message(
     await session.flush()
 
     relationship = await get_or_create_relationship(session, user.id, character.id)
-    memories = await retrieve_memories(
+    context = await build_reasoning_context(
         session,
-        user_id=user.id,
-        character_id=character.id,
-        query=content,
-        limit=5,
+        user=user,
+        character=character,
+        conversation=conversation,
+        current_message=content,
+        requested_mode=requested_mode,
     )
-    recent_messages = await list_recent_messages(session, conversation.id, limit=12)
     prompt = assemble_prompt(
         user=user,
         character=character,
-        relationship=relationship,
-        memories=memories,
-        recent_messages=recent_messages,
+        relationship=context.relationship or relationship,
+        memories=context.memories,
+        journals=context.journals,
+        recent_messages=context.recent_messages,
         current_message=content,
-        content_mode=content_mode,
+        content_mode=context.safety_status["effective_mode"],
+        safety_status=context.safety_status,
+        time_context=context.time_context,
     )
     return user_message, character, prompt
 
@@ -130,6 +136,12 @@ async def complete_assistant_message(
             "prompt_version": prompt.prompt_version,
             "content_mode": prompt.content_mode,
             "streaming_complete": True,
+            "delivery_state": {
+                "typing_ms": min(4500, max(700, len(assistant_content) * 12)),
+                "read_state": "delivered",
+                "away_state": "present",
+            },
+            "rerollable": True,
         },
     )
     conversation.updated_at = utc_now()
@@ -142,6 +154,18 @@ async def complete_assistant_message(
         content=user_message.content,
     )
     await update_relationship_from_message(session, user.id, character.id, user_message.content)
+    await maybe_create_journal_from_conversation(
+        session,
+        user=user,
+        character=character,
+        conversation=conversation,
+    )
+    await ensure_proactive_jobs(
+        session,
+        conversation=conversation,
+        user_id=user.id,
+        character_id=character.id,
+    )
     await session.flush()
     return assistant_message
 
@@ -179,6 +203,66 @@ async def run_chat(
     return user_message, assistant_message
 
 
+async def reroll_assistant_message(
+    session: AsyncSession,
+    *,
+    user: User,
+    conversation: Conversation,
+    assistant_message_id: uuid.UUID | None,
+    requested_mode: str,
+    provider: LLMProvider,
+) -> Message:
+    character = await session.get(Character, conversation.character_id)
+    if character is None or character.owner_user_id != user.id:
+        raise HTTPException(status_code=404, detail="Character was not found.")
+
+    assistant_message = await _target_assistant_message(session, conversation, assistant_message_id)
+    user_message = await _nearest_user_message(session, conversation, assistant_message)
+    context = await build_reasoning_context(
+        session,
+        user=user,
+        character=character,
+        conversation=conversation,
+        current_message=user_message.content,
+        requested_mode=requested_mode,
+    )
+    prompt = assemble_prompt(
+        user=user,
+        character=character,
+        relationship=context.relationship,
+        memories=context.memories,
+        journals=context.journals,
+        recent_messages=context.recent_messages,
+        current_message=user_message.content,
+        content_mode=context.safety_status["effective_mode"],
+        safety_status=context.safety_status,
+        time_context=context.time_context,
+    )
+    reroll_prompt = (
+        f"{prompt.prompt}\n\n"
+        "Reroll instruction: write an alternate reply without mentioning rerolling."
+    )
+    assistant_content = await provider.generate(reroll_prompt)
+    rerolled = Message(
+        conversation_id=conversation.id,
+        role="assistant",
+        content=assistant_content.strip() or "I am here, but the model returned an empty response.",
+        metadata_json={
+            "provider": provider.name,
+            "prompt_version": prompt.prompt_version,
+            "content_mode": prompt.content_mode,
+            "streaming_complete": True,
+            "reroll_of": str(assistant_message.id),
+            "rerollable": True,
+        },
+    )
+    conversation.updated_at = utc_now()
+    session.add(rerolled)
+    await session.commit()
+    await session.refresh(rerolled)
+    return rerolled
+
+
 async def list_recent_messages(
     session: AsyncSession,
     conversation_id: uuid.UUID,
@@ -192,3 +276,44 @@ async def list_recent_messages(
         .limit(limit)
     )
     return list(reversed(result.scalars().all()))
+
+
+async def _target_assistant_message(
+    session: AsyncSession,
+    conversation: Conversation,
+    assistant_message_id: uuid.UUID | None,
+) -> Message:
+    statement = select(Message).where(
+        Message.conversation_id == conversation.id,
+        Message.role == "assistant",
+    )
+    if assistant_message_id is not None:
+        statement = statement.where(Message.id == assistant_message_id)
+    else:
+        statement = statement.order_by(desc(Message.created_at)).limit(1)
+    result = await session.execute(statement)
+    message = result.scalar_one_or_none()
+    if message is None:
+        raise HTTPException(status_code=404, detail="Assistant message was not found.")
+    return message
+
+
+async def _nearest_user_message(
+    session: AsyncSession,
+    conversation: Conversation,
+    assistant_message: Message,
+) -> Message:
+    result = await session.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conversation.id,
+            Message.role == "user",
+            Message.created_at <= assistant_message.created_at,
+        )
+        .order_by(desc(Message.created_at))
+        .limit(1)
+    )
+    message = result.scalar_one_or_none()
+    if message is None:
+        raise HTTPException(status_code=404, detail="No user message was available to reroll.")
+    return message

@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import auth, characters, chat, conversations, debug, export, health, memory
+from app.api import auth, characters, chat, conversations, debug, export, health, journal, memory
 from app.config import get_settings
 
 
@@ -25,6 +25,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(chat.router)
     app.include_router(memory.router)
+    app.include_router(journal.router)
     app.include_router(debug.router)
     app.include_router(export.router)
 

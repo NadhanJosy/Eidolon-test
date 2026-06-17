@@ -83,6 +83,12 @@ GET /conversations/{conversation_id}/messages
 
 GET /conversations/{conversation_id}/search?q=term&limit=20
 
+PATCH /conversations/{conversation_id}/messages/{message_id}
+
+DELETE /conversations/{conversation_id}/messages
+
+DELETE /conversations/{conversation_id}
+
 ## Chat
 
 POST /chat/messages
@@ -123,6 +129,10 @@ Events:
 - message_done
 - error
 
+POST /chat/reroll
+
+Creates an alternate assistant message for the previous user turn and records `reroll_of` metadata.
+
 ## Memory
 
 GET /characters/{character_id}/memories
@@ -131,9 +141,31 @@ POST /characters/{character_id}/memories
 
 GET /characters/{character_id}/memories/search?q=term
 
+PATCH /characters/{character_id}/memories/{memory_id}
+
+DELETE /characters/{character_id}/memories/{memory_id}
+
+DELETE /characters/{character_id}/memories
+
+POST /characters/{character_id}/memories/forget
+
+## Episodic Journals
+
+GET /characters/{character_id}/journals
+
+POST /characters/{character_id}/journals
+
 ## Relationship
 
 GET /characters/{character_id}/relationship
+
+Relationship response includes numeric state, mood, conflict state, repair-needed flag, tags, and timeline metadata.
+
+## Adult Gate Status
+
+GET /characters/{character_id}/adult-status
+
+Returns requested/effective mode, gate allowance, blocked reasons, and content intensity.
 
 ## Debug
 

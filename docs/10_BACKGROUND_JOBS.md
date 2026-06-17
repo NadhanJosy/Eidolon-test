@@ -63,6 +63,16 @@ Check whether a conversation has been inactive long enough for a queued message.
 
 Create a queued assistant message.
 
+Level 2 proactive hooks also create PostgreSQL-backed pending jobs for:
+
+- proactive_morning_check
+- proactive_goodnight_check
+- proactive_thinking_of_you
+- proactive_milestone_check
+- proactive_unresolved_thread_nudge
+
+These are safe queued records by default. The scheduler remains optional and disabled in tests.
+
 ## Scheduler config
 
 Use env:
