@@ -8,11 +8,15 @@ Tests should verify product-critical behaviour without requiring expensive or un
 
 Use pytest.
 
+The test fixture applies Alembic migrations to the test database at session
+startup. It must not create tables directly from SQLAlchemy metadata, because
+that would hide broken migrations.
+
 Test categories:
 
 - health endpoints
 - database models
-- migrations where practical
+- migration revision/schema checks
 - chat endpoints
 - streaming endpoint
 - provider selection
@@ -60,6 +64,7 @@ MVP is acceptable when:
 - character profile affects prompt
 - memory can be stored/retrieved
 - relationship state updates
+- relationship absence decay persists on reads and jobs
 - debug panel exposes state safely
 - tests pass
 - lint/build pass

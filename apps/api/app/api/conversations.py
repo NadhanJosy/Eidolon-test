@@ -9,10 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_conversation
-from app.models import Conversation, Message, User
+from app.models import Conversation, Message, ScheduledJob, User
 from app.schemas import (
     ConversationCreate,
     ConversationOut,
+    ConversationUpdate,
     DeleteResponse,
     MessageOut,
     MessageUpdate,
@@ -48,6 +49,21 @@ async def create_conversation_endpoint(
         character_id=payload.character_id,
         title=payload.title,
     )
+    await session.commit()
+    await session.refresh(conversation)
+    return conversation
+
+
+@router.patch("/{conversation_id}", response_model=ConversationOut)
+async def update_conversation(
+    conversation_id: uuid.UUID,
+    payload: ConversationUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Conversation:
+    conversation = await require_conversation(conversation_id, user, session)
+    if "title" in payload.model_fields_set:
+        conversation.title = payload.title
     await session.commit()
     await session.refresh(conversation)
     return conversation
@@ -127,6 +143,7 @@ async def clear_conversation_messages(
     result = await session.execute(
         delete(Message).where(Message.conversation_id == conversation.id)
     )
+    await _delete_conversation_jobs(session, conversation.id)
     await session.commit()
     return DeleteResponse(deleted=int(result.rowcount or 0))
 
@@ -138,6 +155,16 @@ async def delete_conversation(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DeleteResponse:
     conversation = await require_conversation(conversation_id, user, session)
-    await session.delete(conversation)
+    await session.execute(delete(Message).where(Message.conversation_id == conversation.id))
+    await _delete_conversation_jobs(session, conversation.id)
+    result = await session.execute(delete(Conversation).where(Conversation.id == conversation.id))
     await session.commit()
-    return DeleteResponse(deleted=1)
+    return DeleteResponse(deleted=int(result.rowcount or 0))
+
+
+async def _delete_conversation_jobs(session: AsyncSession, conversation_id: uuid.UUID) -> None:
+    await session.execute(
+        delete(ScheduledJob).where(
+            ScheduledJob.payload_json["conversation_id"].as_string() == str(conversation_id)
+        )
+    )

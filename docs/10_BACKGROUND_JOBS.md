@@ -53,15 +53,28 @@ A harmless test job.
 
 ### memory_extract
 
-Extract memories from recent messages.
+Extract memories from recent user messages through the same deterministic
+Memory v2 extractor used by chat completion. Jobs may provide a
+`conversation_id` to scan recent user messages or both `conversation_id` and
+`message_id` to process one specific user message. Existing dedupe/merge,
+unsafe-term filtering, contradiction metadata, and confidence rules still
+apply. Missing or non-user messages fail the job with safe bounded text.
+
+### relationship_decay
+
+Apply persisted relationship drift for a user-character pair after absence.
+Chat updates queue one pending relationship-decay job per pair. Relationship
+reads also apply decay so the visible state and prompt context do not wait for a
+new user message.
 
 ### proactive_inactivity_check
 
 Check whether a conversation has been inactive long enough for a queued message.
+Creates a SFW quiet check-in when cooldown rules allow it.
 
 ### proactive_message_create
 
-Create a queued assistant message.
+Create a manual queued assistant message.
 
 Level 2 proactive hooks also create PostgreSQL-backed pending jobs for:
 
@@ -71,7 +84,10 @@ Level 2 proactive hooks also create PostgreSQL-backed pending jobs for:
 - proactive_milestone_check
 - proactive_unresolved_thread_nudge
 
-These are safe queued records by default. The scheduler remains optional and disabled in tests.
+These are safe queued records by default. When due, the scheduler creates a
+type-aware SFW assistant message with `proactive_type` and `proactive_label`
+metadata. A per-conversation cooldown prevents different proactive variants
+from stacking into spam. The scheduler remains optional and disabled in tests.
 
 ## Scheduler config
 
@@ -79,9 +95,17 @@ Use env:
 
 ```text
 ENABLE_SCHEDULER=false
+SCHEDULER_INTERVAL_SECONDS=60
+SCHEDULER_JOB_LIMIT=10
+PROACTIVE_COOLDOWN_HOURS=24
 ```
 
 Default false in tests.
+
+When `ENABLE_SCHEDULER=true`, FastAPI starts an APScheduler interval job that
+claims due `scheduled_jobs` rows, processes them, and writes `done` or `failed`
+state back to PostgreSQL. The scheduler is only a wake-up mechanism; job state,
+locks, retry counts, and safe error text live in the database.
 
 ## Anti-spam rules
 
@@ -101,5 +125,7 @@ Tests should cover:
 - mark done
 - mark failed
 - duplicate prevention
+- memory extract job processing
+- relationship decay job processing
 
 Tests must not start infinite background loops.

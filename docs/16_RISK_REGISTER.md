@@ -36,9 +36,9 @@ System may store too many bad memories.
 
 Mitigation:
 - conservative extraction
-- memory viewer
+- memory viewer/editor
 - confidence score
-- delete/edit later
+- edit/delete/clear/forget controls
 - do not store every message
 
 ## Risk: unsafe adult mode

@@ -27,7 +27,7 @@ Must include:
 - message timestamps
 - character name
 
-Nice later:
+Original MVP nice-to-haves:
 
 - reroll button
 - edit last user message

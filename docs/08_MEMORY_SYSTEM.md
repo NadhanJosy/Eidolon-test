@@ -22,11 +22,11 @@ Durable facts, preferences, named entities, interests, and boundaries.
 Stored in:
 - memory_items table
 
-### Episodic memory later
+### Episodic memory
 
 Summaries of meaningful events and emotional arcs.
 
-Stored later in:
+Stored in:
 - episodic_journals table
 
 ## MVP memory behaviour
@@ -82,32 +82,40 @@ Recommended values:
 
 ## Decay
 
-MVP can include decay_score but does not need complex decay.
+Level 2 stores `decay_score`, `last_recalled_at`, `importance`, `confidence`,
+`emotional_weight`, and `pinned`. Retrieval and forgetting use these fields to
+keep durable memory useful without treating every old note as equally relevant.
 
-Later decay can consider:
+Decay considers:
 - age
 - recall frequency
 - emotional weight
 - contradiction
 - user correction
 
+## Background extraction
+
+The `memory_extract` scheduled job processes recent user messages for a
+conversation, or one specific user message when `message_id` is provided. It
+uses the same extraction, unsafe-term filtering, dedupe/merge, contradiction,
+and scoring logic as inline chat memory extraction.
+
 ## Retrieval
 
-Preferred:
-- vector similarity with pgvector
+Implemented:
 - filter by user_id and character_id
-- rank by relevance, confidence, emotional_weight, recency
+- deterministic keyword overlap
+- recency, importance, confidence, emotional weight, pinning, relationship relevance, and decay scoring
+- pg_trgm/ILIKE-friendly text search endpoints
 
-Fallback:
-- ILIKE / pg_trgm text search
-- recency/confidence ordering
-- deterministic keyword overlap, recency, importance, confidence, emotional weight, pinning, relationship relevance, and decay scoring
+Prepared for future model-backed retrieval:
+- nullable pgvector embedding storage
+- vector similarity ranking once a zero-cost embedding path is chosen
 
-## Contradictions later
+## Contradictions
 
-Later versions should detect if new memories contradict old memories.
-
-Level 2 stores simple contradiction groups and metadata links so the user can inspect and correct conflicts.
+Level 2 stores simple contradiction groups and metadata links so the user can
+inspect and correct conflicts.
 
 ## Memory viewer
 
@@ -117,6 +125,9 @@ Display:
 - content
 - type
 - confidence
+- importance
+- pinned state
+- contradiction metadata
 - created_at
 - last_recalled_at
-- delete button later
+- edit/delete/clear controls

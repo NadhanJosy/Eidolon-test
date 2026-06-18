@@ -49,6 +49,9 @@ Request:
 Response:
 ```json
 {
+  "access_token": "jwt",
+  "refresh_token": "opaque-refresh-token",
+  "token_type": "bearer",
   "user": {
     "id": "uuid",
     "email": "user@example.com",
@@ -59,9 +62,33 @@ Response:
 
 POST /auth/login
 
+Response matches register.
+
+POST /auth/refresh
+
+Request:
+```json
+{
+  "refresh_token": "opaque-refresh-token"
+}
+```
+
+Refresh rotates the stored token and returns a new auth response. Reusing a
+rotated, revoked, expired, or unknown refresh token returns 401.
+
 GET /auth/me
 
 POST /auth/logout
+
+Optional request:
+```json
+{
+  "refresh_token": "opaque-refresh-token"
+}
+```
+
+If a refresh token is provided, logout revokes it. The frontend also removes
+local browser tokens.
 
 ## Characters
 
@@ -167,6 +194,9 @@ GET /characters/{character_id}/adult-status
 
 Returns requested/effective mode, gate allowance, blocked reasons, and content intensity.
 
+`POST /characters` and `PATCH /characters/{character_id}` reject
+`adult_mode_allowed=true` unless `explicit_age` is 18 or older.
+
 ## Debug
 
 GET /debug/character/{character_id}
@@ -177,12 +207,23 @@ GET /debug/jobs
 
 Debug endpoints must be authenticated and scoped to current user.
 
+In production, debug endpoints are unavailable unless `ENABLE_DEBUG_ROUTES=true`
+is set explicitly. Development and testing keep them available for local
+inspection.
+
 ## Export
 
 GET /account/export
+
+DELETE /account
 
 Response should exclude:
 - password_hash
 - token hashes
 - secrets
 - environment variables
+
+Account deletion requires the current password and exact confirmation phrase
+`DELETE MY ACCOUNT`. It deletes the current user row and relies on PostgreSQL
+cascades to remove account-owned characters, conversations, messages, memories,
+journals, relationship state, refresh tokens, and scheduled jobs.

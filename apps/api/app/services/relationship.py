@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import RelationshipState, utc_now
+from app.models import RelationshipState, ScheduledJob, utc_now
+from app.services.jobs import create_job
 
 POSITIVE_WORDS = ("thanks", "thank you", "kind", "glad", "happy", "appreciate", "good")
 REPAIR_WORDS = ("sorry", "apologize", "my fault")
@@ -45,6 +46,17 @@ async def get_or_create_relationship(
         metadata_json={},
     )
     session.add(state)
+    await session.flush()
+    return state
+
+
+async def get_current_relationship(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+) -> RelationshipState:
+    state = await get_or_create_relationship(session, user_id, character_id)
+    apply_relationship_decay(state, utc_now())
     await session.flush()
     return state
 
@@ -98,8 +110,41 @@ async def update_relationship_from_message(
             "tags": sorted(tags),
         },
     )
+    await ensure_relationship_decay_job(session, user_id, character_id)
     await session.flush()
     return state
+
+
+async def ensure_relationship_decay_job(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    *,
+    exclude_job_id: uuid.UUID | None = None,
+) -> ScheduledJob | None:
+    statement = (
+        select(ScheduledJob.id)
+        .where(
+            ScheduledJob.user_id == user_id,
+            ScheduledJob.character_id == character_id,
+            ScheduledJob.job_type == "relationship_decay",
+            ScheduledJob.status.in_(("pending", "running")),
+        )
+        .limit(1)
+    )
+    if exclude_job_id is not None:
+        statement = statement.where(ScheduledJob.id != exclude_job_id)
+    result = await session.execute(statement)
+    if result.scalar_one_or_none() is not None:
+        return None
+    return await create_job(
+        session,
+        job_type="relationship_decay",
+        run_at=utc_now() + timedelta(days=1),
+        user_id=user_id,
+        character_id=character_id,
+        payload_json={"source": "relationship_update"},
+    )
 
 
 def apply_relationship_decay(state: RelationshipState, now: datetime) -> RelationshipState:

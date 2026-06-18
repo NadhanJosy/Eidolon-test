@@ -53,6 +53,8 @@ Acceptance criteria:
 - inactive conversation can create one queued proactive message
 - duplicate spam is prevented
 - proactive messages appear in normal chat history
+- proactive jobs can represent inactivity, morning, goodnight, thinking-of-you,
+  milestone, and unresolved-thread nudges with SFW text
 - no push notifications required for MVP
 
 ### Auth

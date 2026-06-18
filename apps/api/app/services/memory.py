@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import MemoryItem, utc_now
 from app.services.relationship import clamp
+from app.services.safety import is_blocked_content
 
 MEMORY_TRIGGERS = (
     "remember that ",
@@ -253,7 +254,7 @@ async def maybe_extract_memory(
     normalized = content.strip().lower()
     if len(normalized) < 12:
         return None
-    if any(term in normalized for term in UNSAFE_MEMORY_TERMS):
+    if any(term in normalized for term in UNSAFE_MEMORY_TERMS) or is_blocked_content(content):
         return None
     if not any(trigger in normalized for trigger in MEMORY_TRIGGERS):
         return None

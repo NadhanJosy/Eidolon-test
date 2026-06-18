@@ -21,6 +21,52 @@ async def test_register_login_me_and_default_character(client: AsyncClient) -> N
     )
     assert login.status_code == 200
     assert login.json()["access_token"]
+    assert login.json()["refresh_token"]
+
+
+async def test_refresh_token_rotates_and_logout_revokes(client: AsyncClient) -> None:
+    register = await client.post(
+        "/auth/register",
+        json={
+            "email": "refresh@example.com",
+            "password": "good-password",
+            "display_name": "Refresh",
+        },
+    )
+    assert register.status_code == 201
+    first_refresh_token = register.json()["refresh_token"]
+
+    refreshed = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": first_refresh_token},
+    )
+    assert refreshed.status_code == 200
+    second_refresh_token = refreshed.json()["refresh_token"]
+    assert second_refresh_token != first_refresh_token
+
+    reused = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": first_refresh_token},
+    )
+    assert reused.status_code == 401
+
+    me = await client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {refreshed.json()['access_token']}"},
+    )
+    assert me.status_code == 200
+
+    logout = await client.post(
+        "/auth/logout",
+        json={"refresh_token": second_refresh_token},
+    )
+    assert logout.status_code == 200
+
+    revoked = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": second_refresh_token},
+    )
+    assert revoked.status_code == 401
 
 
 async def test_protected_endpoint_requires_auth(client: AsyncClient) -> None:

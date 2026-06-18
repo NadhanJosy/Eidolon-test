@@ -17,8 +17,8 @@ from app.schemas import (
     CharacterUpdate,
     RelationshipOut,
 )
-from app.services.relationship import get_or_create_relationship
-from app.services.safety import adult_gate_status
+from app.services.relationship import get_current_relationship, get_or_create_relationship
+from app.services.safety import adult_gate_status, validate_character_adult_configuration
 
 router = APIRouter(prefix="/characters", tags=["characters"])
 
@@ -40,6 +40,10 @@ async def create_character(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Character:
+    validate_character_adult_configuration(
+        explicit_age=payload.explicit_age,
+        adult_mode_allowed=payload.adult_mode_allowed,
+    )
     character = Character(owner_user_id=user.id, **payload.model_dump())
     session.add(character)
     await session.flush()
@@ -66,7 +70,12 @@ async def update_character(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Character:
     character = await require_character(character_id, user, session)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    validate_character_adult_configuration(
+        explicit_age=updates.get("explicit_age", character.explicit_age),
+        adult_mode_allowed=updates.get("adult_mode_allowed", character.adult_mode_allowed),
+    )
+    for field, value in updates.items():
         setattr(character, field, value)
     await session.commit()
     await session.refresh(character)
@@ -80,7 +89,7 @@ async def get_relationship(
     session: Annotated[AsyncSession, Depends(get_session)],
 ):
     character = await require_character(character_id, user, session)
-    relationship = await get_or_create_relationship(session, user.id, character.id)
+    relationship = await get_current_relationship(session, user.id, character.id)
     await session.commit()
     await session.refresh(relationship)
     return relationship

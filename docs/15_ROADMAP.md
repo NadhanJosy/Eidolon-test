@@ -86,7 +86,7 @@
 ## Stage 11: Data control
 
 - export endpoint
-- wipe endpoint later
+- wipe/account erasure endpoint
 - backup script
 
 ## Stage 12: Deploy
@@ -108,12 +108,9 @@
 
 Only after MVP works:
 
-- episodic journals
-- memory decay
-- contradiction detection
-- relationship milestones
-- richer proactive scheduling
-- browser notifications
-- PWA install
+- zero-cost embedding generation if it can run acceptably on the production VM
+- browser notifications after proactive text is reliable
+- PWA install polish
+- richer local backup/export UX
 - multi-character library
 - improved model routing

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from secrets import token_urlsafe
 
 import jwt
 from argon2 import PasswordHasher
@@ -33,6 +35,14 @@ def create_access_token(user_id: uuid.UUID) -> str:
     expires_at = datetime.now(UTC) + timedelta(minutes=settings.jwt_access_token_expire_minutes)
     payload = {"sub": str(user_id), "exp": expires_at}
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
+
+
+def create_refresh_token() -> str:
+    return token_urlsafe(64)
+
+
+def hash_refresh_token(token: str) -> str:
+    return sha256(token.encode("utf-8")).hexdigest()
 
 
 def decode_access_token(token: str) -> uuid.UUID | None:

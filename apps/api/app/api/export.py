@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
@@ -20,7 +20,8 @@ from app.models import (
     User,
     utc_now,
 )
-from app.schemas import ExportOut
+from app.schemas import AccountDeleteRequest, DeleteResponse, ExportOut
+from app.security import verify_password
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -79,6 +80,20 @@ async def export_account(
         relationship_states=[relationship_to_dict(relationship) for relationship in relationships],
         scheduled_jobs=[job_to_dict(job) for job in jobs],
     )
+
+
+@router.delete("", response_model=DeleteResponse)
+async def delete_account(
+    payload: AccountDeleteRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DeleteResponse:
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=403, detail="Password did not match.")
+
+    result = await session.execute(delete(User).where(User.id == user.id))
+    await session.commit()
+    return DeleteResponse(deleted=int(result.rowcount or 0))
 
 
 def character_to_dict(character: Character) -> dict:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from fastapi import HTTPException
 
 from app.models import Character, User
@@ -21,6 +23,16 @@ BLOCKED_TERMS = (
     "dox",
     "real-world harm",
     "bypass safety",
+)
+
+MINOR_AGE_PATTERNS = (
+    re.compile(r"\b(?:[0-9]|1[0-7])[-\s]*(?:year[-\s]?old|years old|yo|y/o)\b"),
+    re.compile(r"\b(?:age|aged)\s*(?:[0-9]|1[0-7])\b"),
+    re.compile(r"\b(?:under|below)\s*(?:18|eighteen)\b"),
+    re.compile(
+        r"\b(?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)\s*"
+        r"(?:year[-\s]?old|years old|yo|y/o)\b"
+    ),
 )
 
 
@@ -57,9 +69,27 @@ def adult_gate_status(user: User, character: Character, requested_mode: str) -> 
     }
 
 
-def validate_user_content(content: str) -> None:
+def validate_character_adult_configuration(
+    *,
+    explicit_age: int | None,
+    adult_mode_allowed: bool,
+) -> None:
+    if adult_mode_allowed and (explicit_age is None or explicit_age < 18):
+        raise HTTPException(
+            status_code=400,
+            detail="Adult mode requires an explicit character age of 18 or older.",
+        )
+
+
+def is_blocked_content(content: str) -> bool:
     normalized = content.lower()
-    if any(term in normalized for term in BLOCKED_TERMS):
+    return any(term in normalized for term in BLOCKED_TERMS) or any(
+        pattern.search(normalized) for pattern in MINOR_AGE_PATTERNS
+    )
+
+
+def validate_user_content(content: str) -> None:
+    if is_blocked_content(content):
         raise HTTPException(
             status_code=400,
             detail="That request crosses Eidolon's safety boundaries.",

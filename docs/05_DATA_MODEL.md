@@ -23,7 +23,7 @@ Fields:
 
 ## refresh_tokens
 
-Purpose: optional refresh token/session storage.
+Purpose: local session continuity without external auth services.
 
 Fields:
 - id UUID primary key
@@ -32,6 +32,9 @@ Fields:
 - expires_at datetime
 - revoked_at nullable datetime
 - created_at datetime
+
+Refresh token values are random opaque strings. Only hashes are stored. Refresh
+rotates tokens; logout revokes the provided refresh token.
 
 ## characters
 
@@ -171,6 +174,11 @@ Job types:
 - relationship_decay
 - proactive_inactivity_check
 - proactive_message_create
+- proactive_morning_check
+- proactive_goodnight_check
+- proactive_thinking_of_you
+- proactive_milestone_check
+- proactive_unresolved_thread_nudge
 
 ## episodic_journals
 

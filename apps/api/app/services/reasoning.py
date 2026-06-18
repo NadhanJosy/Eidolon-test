@@ -17,7 +17,7 @@ from app.models import (
 )
 from app.services.journal import list_journals
 from app.services.memory import retrieve_memories
-from app.services.relationship import get_or_create_relationship
+from app.services.relationship import get_current_relationship
 from app.services.safety import adult_gate_status
 
 
@@ -40,7 +40,7 @@ async def build_reasoning_context(
     current_message: str,
     requested_mode: str,
 ) -> ReasoningContext:
-    relationship = await get_or_create_relationship(session, user.id, character.id)
+    relationship = await get_current_relationship(session, user.id, character.id)
     memories = await retrieve_memories(
         session,
         user_id=user.id,

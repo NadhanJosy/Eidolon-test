@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,9 +17,19 @@ from app.services.journal import list_journals
 from app.services.memory import retrieve_memories
 from app.services.proactive import create_inactivity_proactive_message
 from app.services.prompt import assemble_prompt
-from app.services.relationship import get_or_create_relationship
+from app.services.relationship import get_current_relationship
 
-router = APIRouter(prefix="/debug", tags=["debug"])
+
+def require_debug_routes_enabled() -> None:
+    if not get_settings().debug_routes_available:
+        raise HTTPException(status_code=404, detail="Debug routes are not available.")
+
+
+router = APIRouter(
+    prefix="/debug",
+    tags=["debug"],
+    dependencies=[Depends(require_debug_routes_enabled)],
+)
 
 
 @router.get("/character/{character_id}")
@@ -29,7 +39,7 @@ async def debug_character(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     character = await require_character(character_id, user, session)
-    relationship = await get_or_create_relationship(session, user.id, character.id)
+    relationship = await get_current_relationship(session, user.id, character.id)
     memories = await retrieve_memories(
         session,
         user_id=user.id,
@@ -156,6 +166,7 @@ async def debug_create_proactive(
         conversation,
         inactivity_hours=settings.proactive_inactivity_hours,
         force=True,
+        proactive_type="proactive_message_create",
     )
     await session.commit()
     if message is not None:

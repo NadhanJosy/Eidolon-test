@@ -57,7 +57,7 @@ No paid inference APIs in MVP.
 - local auth
 - password hashing with Argon2id preferred
 - JWT access tokens
-- refresh token table or secure cookie flow where practical
+- PostgreSQL-backed refresh token rotation and revocation
 
 No Clerk/Auth0/Firebase/NextAuth for MVP.
 

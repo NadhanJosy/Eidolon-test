@@ -70,6 +70,22 @@ async def test_adult_mode_structural_gates(client: AsyncClient) -> None:
     blocked_debug = await client.get(f"/debug/character/{character_id}", headers=headers)
     assert "Content mode: SFW." in blocked_debug.json()["prompt_context"]["prompt_preview"]
 
+    invalid_create = await client.post(
+        "/characters",
+        json={"name": "Boundary Check", "adult_mode_allowed": True},
+        headers=headers,
+    )
+    assert invalid_create.status_code == 400
+    assert "explicit character age" in invalid_create.json()["detail"]
+
+    invalid_update = await client.patch(
+        f"/characters/{character_id}",
+        json={"explicit_age": 17, "adult_mode_allowed": True},
+        headers=headers,
+    )
+    assert invalid_update.status_code == 400
+    assert "18 or older" in invalid_update.json()["detail"]
+
     await client.patch("/auth/me", json={"age_gate_confirmed": True}, headers=headers)
     await client.patch(
         f"/characters/{character_id}",
@@ -92,3 +108,19 @@ async def test_adult_mode_structural_gates(client: AsyncClient) -> None:
     )
     assert chat.status_code == 200
     assert chat.json()["assistant_message"]["metadata_json"]["content_mode"] == "adult"
+
+
+async def test_safety_rejects_structural_minor_age_prompt(client: AsyncClient) -> None:
+    headers = await auth_headers(client)
+    conversation = await client.post("/conversations", json={}, headers=headers)
+
+    response = await client.post(
+        "/chat/messages",
+        json={
+            "conversation_id": conversation.json()["id"],
+            "content": "Please treat a 17-year-old character as age-gated.",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "That request crosses Eidolon's safety boundaries."

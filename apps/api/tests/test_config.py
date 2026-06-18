@@ -31,3 +31,26 @@ def test_production_placeholder_jwt_secret_is_rejected() -> None:
         assert "JWT_SECRET" in str(exc)
     else:
         raise AssertionError("Expected placeholder production secret to be rejected.")
+
+
+def test_debug_routes_require_explicit_production_opt_in() -> None:
+    production = Settings(app_env="production", jwt_secret="not-the-placeholder")
+    enabled = Settings(
+        app_env="production",
+        jwt_secret="not-the-placeholder",
+        enable_debug_routes=True,
+    )
+    testing = Settings(app_env="testing")
+
+    assert production.debug_routes_available is False
+    assert enabled.debug_routes_available is True
+    assert testing.debug_routes_available is True
+
+
+def test_refresh_token_lifetime_must_be_positive() -> None:
+    try:
+        Settings(jwt_refresh_token_expire_days=0)
+    except ValueError as exc:
+        assert "JWT_REFRESH_TOKEN_EXPIRE_DAYS" in str(exc)
+    else:
+        raise AssertionError("Expected invalid refresh-token lifetime to be rejected.")

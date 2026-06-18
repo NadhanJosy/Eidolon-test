@@ -33,8 +33,22 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class AccountDeleteRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+    confirmation: Literal["DELETE MY ACCOUNT"]
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=32, max_length=512)
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = Field(default=None, min_length=32, max_length=512)
+
+
 class AuthResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: UserOut
 
@@ -91,6 +105,10 @@ class ConversationOut(BaseModel):
 
 class ConversationCreate(BaseModel):
     character_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, max_length=200)
+
+
+class ConversationUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
 
 

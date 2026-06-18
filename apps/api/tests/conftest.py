@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
+from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+
+from alembic import command
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -23,10 +27,7 @@ from app.models import Base  # noqa: E402
 
 @pytest.fixture(scope="session", autouse=True)
 async def prepare_database() -> AsyncIterator[None]:
-    async with engine.begin() as connection:
-        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        await connection.run_sync(Base.metadata.create_all)
+    await asyncio.to_thread(run_migrations)
     yield
     await engine.dispose()
 
@@ -43,6 +44,11 @@ async def truncate_tables() -> None:
         for table in reversed(Base.metadata.sorted_tables):
             await session.execute(table.delete())
         await session.commit()
+
+
+def run_migrations() -> None:
+    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    command.upgrade(config, "head")
 
 
 @pytest.fixture

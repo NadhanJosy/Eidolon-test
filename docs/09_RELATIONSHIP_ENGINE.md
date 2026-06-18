@@ -68,7 +68,7 @@ Relationship state also tracks:
 
 These fields are deterministic backend state. They should explain tone and continuity without turning the system into a manipulative dependency loop.
 
-## Update rules v1
+## Update rules
 
 Start deterministic.
 
@@ -77,16 +77,21 @@ Example:
 - positive keywords: warmth +0.3
 - apology/repair keywords: tension -0.5, trust +0.1
 - conflict keywords: tension +0.5, warmth -0.2
-- long absence later: warmth/tension can shift via jobs
+- long absence: warmth/tension/attachment can shift through reads and jobs
 
 Clamp all values to bounds.
 
-Level 2 also applies simple decay before message updates:
+Level 2 also applies simple decay before message updates, on relationship reads,
+and through due `relationship_decay` scheduled jobs:
 
 - tension drifts down after absence
 - warmth drifts toward baseline
 - attachment cools slowly
 - absence can add a tag and timeline event
+
+After a message updates relationship state, the backend queues one pending
+`relationship_decay` job per user-character pair. The scheduler is only a
+wake-up mechanism; the persisted relationship row is still the source of truth.
 
 ## Prompt injection
 

@@ -33,6 +33,9 @@ Adult mode requires:
 
 If any condition fails, mode is SFW.
 
+Character create/update requests must not persist `adult_mode_allowed=true`
+unless the character also has an explicit age of 18 or older.
+
 ## Character rules
 
 A character without explicit age must be treated as SFW.
@@ -40,6 +43,12 @@ A character without explicit age must be treated as SFW.
 A character with age under 18 must be treated as SFW and blocked from adult-mode contexts.
 
 Ambiguous age must be treated as unsafe for adult mode.
+
+User messages that include structural minor-age patterns are rejected before
+chat prompt assembly or memory extraction.
+
+Scheduled memory extraction uses the same structural blocked-content screen as
+live chat and silently skips blocked content instead of making it durable.
 
 ## Prompt safety section
 
