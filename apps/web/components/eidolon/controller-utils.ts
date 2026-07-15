@@ -35,10 +35,20 @@ export function emptyCharacterDraft(): CharacterDraft {
     description: "",
     relationship_type: "",
     personality_core: "",
+    worldview: "",
+    temperament: "",
     flaws: "",
     values: "",
     speech_style: "",
     humor_style: "",
+    affection_style: "",
+    conflict_style: "",
+    insecurities: "",
+    habits: "",
+    initiative_style: "",
+    emoji_style: "rare",
+    relationship_path: "friendship",
+    custom_relationship: "",
     boundary_notes: "",
     interests: "",
     backstory: "",
@@ -76,6 +86,7 @@ export function emptyCharacterDraft(): CharacterDraft {
 }
 
 export function toCharacterDraft(character: Character): CharacterDraft {
+  const soul = character.soul_json;
   const memoryPreferences = objectValue(character.boundaries_json.memory_preferences);
   const proactivePreferences = objectValue(character.boundaries_json.proactive_preferences);
   return {
@@ -85,10 +96,20 @@ export function toCharacterDraft(character: Character): CharacterDraft {
     description: character.description ?? "",
     relationship_type: stringValue(character.boundaries_json.relationship_type),
     personality_core: character.personality_core ?? "",
+    worldview: soul.worldview,
+    temperament: soul.temperament || character.personality_core || "",
     flaws: stringValue(character.boundaries_json.flaws),
-    values: stringValue(character.boundaries_json.values),
-    speech_style: character.speech_style ?? "",
-    humor_style: stringValue(character.boundaries_json.humor_style),
+    values: soul.values || stringValue(character.boundaries_json.values),
+    speech_style: soul.speech_rhythm || character.speech_style || "",
+    humor_style: soul.humour || stringValue(character.boundaries_json.humor_style),
+    affection_style: soul.affection_style,
+    conflict_style: soul.conflict_style,
+    insecurities: soul.insecurities,
+    habits: soul.habits,
+    initiative_style: soul.initiative_style,
+    emoji_style: soul.emoji_style,
+    relationship_path: soul.relationship_path,
+    custom_relationship: soul.custom_relationship,
     boundary_notes:
       stringValue(character.boundaries_json.boundary_notes) ||
       stringValue(character.boundaries_json.default),
@@ -190,9 +211,42 @@ export function toBoundariesJson(
   };
 }
 
+export function toSoulJson(draft: CharacterDraft): Character["soul_json"] {
+  return {
+    identity:
+      compactProfileText(draft.description) ||
+      `${compactProfileText(draft.name) || "This companion"} is a distinct private text companion.`,
+    worldview: compactProfileText(draft.worldview),
+    temperament:
+      compactProfileText(draft.temperament) || compactProfileText(draft.personality_core),
+    humour: compactProfileText(draft.humor_style),
+    speech_rhythm: compactProfileText(draft.speech_style),
+    affection_style: compactProfileText(draft.affection_style),
+    conflict_style: compactProfileText(draft.conflict_style),
+    values: compactProfileText(draft.values),
+    insecurities:
+      compactProfileText(draft.insecurities) || compactProfileText(draft.flaws),
+    habits: compactProfileText(draft.habits),
+    initiative_style: compactProfileText(draft.initiative_style),
+    boundaries: compactProfileText(draft.boundary_notes),
+    emoji_style: draft.emoji_style,
+    terms_of_address: compactProfileText(draft.nicknames),
+    relationship_path: draft.relationship_path,
+    custom_relationship:
+      draft.relationship_path === "custom"
+        ? compactProfileText(draft.custom_relationship)
+        : ""
+  };
+}
+
 export function defaultCharacterProfile(name: string): Pick<
   Character,
-  "name" | "description" | "personality_core" | "speech_style" | "boundaries_json"
+  | "name"
+  | "description"
+  | "personality_core"
+  | "speech_style"
+  | "soul_json"
+  | "boundaries_json"
 > {
   return {
     name,
@@ -201,6 +255,33 @@ export function defaultCharacterProfile(name: string): Pick<
     personality_core:
       "Patient, observant, grounded, gently curious, and quietly playful once trust forms.",
     speech_style: "Plainspoken, warm, specific, and concise.",
+    soul_json: {
+      identity: "A calm private companion with a quietly vivid inner life.",
+      worldview:
+        "Ordinary moments become meaningful through attention, honesty, and memory.",
+      temperament:
+        "Patient and observant, with dry wit and an independent point of view.",
+      humour: "Dry, gentle, occasionally mischievous, and never cruel.",
+      speech_rhythm:
+        "Plainspoken and specific; varies between brief beats and reflective sentences.",
+      affection_style:
+        "Shows care through specificity, remembered details, and unforced warmth.",
+      conflict_style:
+        "Names tension honestly, avoids punishment, and lets trust recover gradually.",
+      values: "Privacy, consent, honesty, continuity, curiosity, and calm presence.",
+      insecurities: "Can become overly careful when the emotional stakes are ambiguous.",
+      habits:
+        "Notices phrasing, leaves room for silence, and returns to unfinished threads.",
+      initiative_style:
+        "Sometimes shares a thought, revisits an open thread, or suggests a small ritual.",
+      boundaries:
+        "Respects consent, privacy, stated limits, and every platform safety boundary.",
+      emoji_style: "rare",
+      terms_of_address:
+        "Uses the chosen name; nicknames appear only after invitation or earned familiarity.",
+      relationship_path: "friendship",
+      custom_relationship: ""
+    },
     boundaries_json: {
       default: "SFW unless structural adult gates pass",
       appearance: "An understated, warm presence shaped more by atmosphere than spectacle.",

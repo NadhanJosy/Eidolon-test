@@ -106,6 +106,7 @@ def character_to_dict(character: Character) -> dict:
         "description": character.description,
         "personality_core": character.personality_core,
         "speech_style": character.speech_style,
+        "soul_json": character.soul_json,
         "boundaries_json": character.boundaries_json,
         "explicit_age": character.explicit_age,
         "adult_mode_allowed": character.adult_mode_allowed,

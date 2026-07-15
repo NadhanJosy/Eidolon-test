@@ -2,7 +2,8 @@ import {
   defaultCharacterProfile,
   emptyCharacterDraft,
   toBoundariesJson,
-  toCharacterDraft
+  toCharacterDraft,
+  toSoulJson
 } from "./controller-utils";
 import type { Character, CharacterDraft } from "./types";
 
@@ -73,10 +74,18 @@ export const CHARACTER_FIELD_LIMITS: Partial<Record<keyof CharacterDraft, number
   description: 2000,
   relationship_type: 2000,
   personality_core: 4000,
+  worldview: 2000,
+  temperament: 2000,
   flaws: 2000,
   values: 2000,
   speech_style: 2000,
   humor_style: 2000,
+  affection_style: 1600,
+  conflict_style: 1600,
+  insecurities: 1600,
+  habits: 1600,
+  initiative_style: 1600,
+  custom_relationship: 1000,
   boundary_notes: 4000,
   interests: 2000,
   backstory: 4000,
@@ -99,7 +108,22 @@ const MAX_CHARACTER_PROFILE_JSON_BYTES = 30_000;
 
 const STEP_FIELDS: Record<CharacterBuilderStep, Array<keyof CharacterDraft>> = {
   identity: ["name", "appearance", "visual_theme", "relationship_type", "description", "explicit_age", "adult_mode_allowed"],
-  "inner-life": ["personality_core", "flaws", "values", "speech_style", "humor_style"],
+  "inner-life": [
+    "personality_core",
+    "worldview",
+    "temperament",
+    "flaws",
+    "values",
+    "speech_style",
+    "humor_style",
+    "affection_style",
+    "conflict_style",
+    "insecurities",
+    "habits",
+    "initiative_style",
+    "relationship_path",
+    "custom_relationship"
+  ],
   world: ["interests", "backstory", "greeting", "nicknames", "scenario_preset"],
   trust: [
     "boundary_notes",
@@ -127,6 +151,7 @@ export function authoredCharacterDraft(): CharacterDraft {
     description: profile.description ?? null,
     personality_core: profile.personality_core ?? null,
     speech_style: profile.speech_style ?? null,
+    soul_json: profile.soul_json,
     boundaries_json: profile.boundaries_json,
     explicit_age: null,
     adult_mode_allowed: false,
@@ -164,7 +189,12 @@ export function validateCharacterDraft(
   if (requireAuthoredProfile) {
     requireText(errors, draft, "relationship_type", "Choose the relationship they are entering.");
     requireText(errors, draft, "personality_core", "Give them a clear personality core.");
+    requireText(errors, draft, "worldview", "Give them a point of view on the world.");
+    requireText(errors, draft, "temperament", "Describe their emotional temperament.");
     requireText(errors, draft, "speech_style", "Describe how their voice should feel.");
+    requireText(errors, draft, "affection_style", "Describe how they show care.");
+    requireText(errors, draft, "conflict_style", "Describe how they handle disagreement.");
+    requireText(errors, draft, "initiative_style", "Describe how they take initiative.");
     requireText(errors, draft, "greeting", "Write the first line they will meet you with.");
     requireText(errors, draft, "boundary_notes", "Set the boundaries that keep this relationship safe.");
   }
@@ -188,6 +218,9 @@ export function validateCharacterDraft(
   if (draft.adult_mode_allowed) {
     requireText(errors, draft, "consent_style", "Describe how this companion handles consent.");
     requireText(errors, draft, "hard_limits", "Set clear hard limits before enabling adult eligibility.");
+  }
+  if (draft.relationship_path === "custom" && !draft.custom_relationship.trim()) {
+    errors.custom_relationship = "Describe the custom relationship path.";
   }
   if (draft.adult_memory_storage && draft.private_mode_default) {
     errors.adult_memory_storage =
@@ -309,6 +342,7 @@ export function characterPayloadFromDraft(
     description: nullableText(draft.description),
     personality_core: nullableText(draft.personality_core),
     speech_style: nullableText(draft.speech_style),
+    soul_json: toSoulJson(normalizedDraft),
     boundaries_json: toBoundariesJson(normalizedDraft, existingBoundaries),
     explicit_age: explicitAge,
     adult_mode_allowed: adultModeAllowed,

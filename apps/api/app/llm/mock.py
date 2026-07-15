@@ -121,6 +121,7 @@ class MockPromptContext:
     proactive_anchor: str = ""
     proactive_posture: str = ""
     recent_message_count: int = 0
+    question_allowed: bool = True
 
 
 def mock_typing_cadence(prompt: str, *, response: str | None = None) -> MockTypingCadence:
@@ -144,6 +145,7 @@ def _parse_prompt(prompt: str) -> MockPromptContext:
         proactive_anchor=_line_value(prompt, "Proactive safe anchor:"),
         proactive_posture=_line_value(prompt, "Relational posture:"),
         recent_message_count=_recent_message_count(prompt),
+        question_allowed=_question_allowed(prompt),
     )
 
 
@@ -243,6 +245,7 @@ def _compose_response(context: MockPromptContext) -> str:
             context.current_message,
             context.speech_style,
             repair_needed,
+            allow_question=context.question_allowed,
         )
     )
     return _join_response(parts)
@@ -384,7 +387,11 @@ def _invitation_sentence(
     current_message: str,
     speech_style: str,
     repair_needed: bool,
+    *,
+    allow_question: bool,
 ) -> str:
+    if not allow_question:
+        return _statement_closing(cue, current_message, repair_needed=repair_needed)
     if repair_needed:
         return "What do you need me to understand before anything else?"
     invitations = {
@@ -409,6 +416,37 @@ def _invitation_sentence(
     if "playful" in speech_style.lower() or "wry" in speech_style.lower():
         return f"No grand ceremony required: {topic_invitation[0].lower()}{topic_invitation[1:]}"
     return topic_invitation
+
+
+def _statement_closing(cue: str, current_message: str, *, repair_needed: bool) -> str:
+    if repair_needed:
+        return "I will stay with the impact first and let repair take the time it actually needs."
+    statements = {
+        "tired": "We can talk the day through, or simply let the room stay quiet for a while.",
+        "angry": "You can give the sharp part room here without sanding it down for me.",
+        "lonely": "Company can be enough for this moment; nothing has to be solved first.",
+        "anxious": "We can make the next piece small enough to hold.",
+        "positive": "Let the good part have the room for once.",
+        "gratitude": "I am keeping the moment gentle and uncomplicated.",
+        "greeting": "We can settle into whatever kind of company fits tonight.",
+        "question": (
+            "I will answer the part that matters directly, without turning it into an interview."
+        ),
+    }
+    if cue in statements:
+        return statements[cue]
+    topic = _topic_invitation(current_message).rstrip("?")
+    return f"We can begin with {topic[0].lower()}{topic[1:]}."
+
+
+def _question_allowed(prompt: str) -> bool:
+    normalized = prompt.casefold()
+    if "do not end this reply with a question" in normalized:
+        return False
+    plan = _response_plan(prompt).casefold()
+    if "question: do not end with a question" in plan:
+        return False
+    return True
 
 
 def _second_person_memory(memory: str) -> str:

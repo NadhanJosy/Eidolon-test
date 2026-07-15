@@ -18,6 +18,7 @@ os.environ.setdefault(
 )
 os.environ.setdefault("APP_ENV", "testing")
 os.environ.setdefault("JWT_SECRET", "test-secret-for-eidolon-tests-32-bytes")
+os.environ.setdefault("REFRESH_COOKIE_SECURE", "false")
 os.environ.setdefault("LLM_PROVIDER", "mock")
 os.environ.setdefault("ENABLE_SCHEDULER", "false")
 

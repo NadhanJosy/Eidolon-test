@@ -1,10 +1,11 @@
-import type { Character } from "./types";
+import type { Character, CharacterSoul } from "./types";
 
 export type CharacterPayload = {
   name: string;
   description: string | null;
   personality_core: string | null;
   speech_style: string | null;
+  soul_json: CharacterSoul;
   boundaries_json: Record<string, unknown>;
   explicit_age: number | null;
   adult_mode_allowed: boolean;
@@ -30,6 +31,7 @@ export function ownedCharacter(value: unknown, ownerUserId: string): Character |
     !isNullableBoundedString(value.description, 2_000) ||
     !isNullableBoundedString(value.personality_core, 4_000) ||
     !isNullableBoundedString(value.speech_style, 2_000) ||
+    !isCharacterSoul(value.soul_json) ||
     !isBoundedProfile(value.boundaries_json) ||
     !isExplicitAge(value.explicit_age) ||
     typeof value.adult_mode_allowed !== "boolean" ||
@@ -115,10 +117,50 @@ export function characterMatchesPayload(
     character.description === payload.description &&
     character.personality_core === payload.personality_core &&
     character.speech_style === payload.speech_style &&
+    jsonValuesEqual(character.soul_json, payload.soul_json) &&
     character.explicit_age === payload.explicit_age &&
     character.adult_mode_allowed === payload.adult_mode_allowed &&
     character.content_intensity === payload.content_intensity &&
     jsonValuesEqual(character.boundaries_json, payload.boundaries_json)
+  );
+}
+
+function isCharacterSoul(value: unknown): value is CharacterSoul {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const boundedFields: Array<[keyof CharacterSoul, number]> = [
+    ["identity", 2_000],
+    ["worldview", 2_000],
+    ["temperament", 2_000],
+    ["humour", 1_200],
+    ["speech_rhythm", 1_600],
+    ["affection_style", 1_600],
+    ["conflict_style", 1_600],
+    ["values", 1_600],
+    ["insecurities", 1_600],
+    ["habits", 1_600],
+    ["initiative_style", 1_600],
+    ["boundaries", 2_000],
+    ["terms_of_address", 1_000],
+    ["custom_relationship", 1_000]
+  ];
+  if (
+    boundedFields.some(
+      ([field, maximum]) =>
+        typeof value[field] !== "string" || String(value[field]).length > maximum
+    )
+  ) {
+    return false;
+  }
+  return (
+    (value.emoji_style === "none" ||
+      value.emoji_style === "rare" ||
+      value.emoji_style === "light" ||
+      value.emoji_style === "expressive") &&
+    (value.relationship_path === "friendship" ||
+      value.relationship_path === "romantic" ||
+      value.relationship_path === "custom")
   );
 }
 

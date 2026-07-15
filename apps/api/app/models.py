@@ -104,6 +104,7 @@ class Character(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     personality_core: Mapped[str | None] = mapped_column(Text, nullable=True)
     speech_style: Mapped[str | None] = mapped_column(Text, nullable=True)
+    soul_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     boundaries_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     explicit_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     adult_mode_allowed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -255,6 +256,11 @@ class RelationshipState(TimestampMixin, Base):
     mood: Mapped[str] = mapped_column(String(80), default="steady", nullable=False)
     conflict_state: Mapped[str] = mapped_column(String(80), default="clear", nullable=False)
     repair_needed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    emotional_state_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
     tags_json: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     last_interaction_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

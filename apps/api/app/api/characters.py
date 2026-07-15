@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.companion.soul import canonical_soul_json
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_character
 from app.models import Character, User
@@ -50,11 +51,15 @@ async def create_character(
         description=payload.description,
         personality_core=payload.personality_core,
         speech_style=payload.speech_style,
-        boundaries_json=payload.boundaries_json,
+        boundaries_json={
+            **payload.boundaries_json,
+            "character_soul": payload.soul_json.model_dump(mode="json"),
+        },
         explicit_age=payload.explicit_age,
         adult_mode_allowed=payload.adult_mode_allowed,
     )
     values = payload.model_dump()
+    values["soul_json"] = canonical_soul_json(payload.soul_json)
     values["boundaries_json"], values["content_intensity"] = canonicalize_character_adult_settings(
         boundaries_json=payload.boundaries_json,
         adult_mode_allowed=payload.adult_mode_allowed,
@@ -89,6 +94,7 @@ async def update_character(
     previous_proactive_preferences = dict(proactive_preferences(character))
     updates = payload.model_dump(exclude_unset=True)
     next_boundaries = updates.get("boundaries_json", character.boundaries_json)
+    next_soul = updates.get("soul_json", character.soul_json)
     next_adult_mode_allowed = updates.get("adult_mode_allowed", character.adult_mode_allowed)
     next_content_intensity = updates.get("content_intensity", character.content_intensity)
     validate_character_adult_profile(
@@ -96,7 +102,7 @@ async def update_character(
         description=updates.get("description", character.description),
         personality_core=updates.get("personality_core", character.personality_core),
         speech_style=updates.get("speech_style", character.speech_style),
-        boundaries_json=next_boundaries,
+        boundaries_json={**next_boundaries, "character_soul": next_soul},
         explicit_age=updates.get("explicit_age", character.explicit_age),
         adult_mode_allowed=next_adult_mode_allowed,
     )
@@ -107,6 +113,7 @@ async def update_character(
             content_intensity=next_content_intensity,
         )
     )
+    updates["soul_json"] = canonical_soul_json(next_soul, character=character)
     for field, value in updates.items():
         setattr(character, field, value)
     if (

@@ -44,6 +44,14 @@ MEMORY_TRIGGERS = (
     "my boundary ",
     "please don't ",
     "inside joke",
+    "my friend ",
+    "my partner ",
+    "my sister ",
+    "my brother ",
+    "i keep ",
+    "i always struggle ",
+    "our ritual ",
+    "we call this ",
 )
 UNSAFE_MEMORY_TERMS = (
     "password",
@@ -411,7 +419,7 @@ async def retrieve_memories(
             memory.embedding = embedding
             backfilled_embedding = True
         candidate_embeddings[memory.id] = embedding
-    memories = sorted(
+    ranked = sorted(
         candidates,
         key=lambda memory: _memory_score(
             memory,
@@ -422,7 +430,8 @@ async def retrieve_memories(
             memory_embedding=candidate_embeddings.get(memory.id),
         ),
         reverse=True,
-    )[:limit]
+    )
+    memories = _select_ranked_memories(ranked, limit=limit)
     if mark_recalled:
         for memory in memories:
             memory.last_recalled_at = now
@@ -763,7 +772,15 @@ def memory_type_allowed_by_preferences(
     if memory_type == "preference" and memory_preferences.get("remember_preferences") is False:
         return False
     if (
-        memory_type in {"event", "inside_joke", "promise", "relationship_milestone"}
+        memory_type
+        in {
+            "event",
+            "inside_joke",
+            "promise",
+            "relationship_milestone",
+            "shared_lore",
+            "theme",
+        }
         and memory_preferences.get("remember_emotional_notes") is False
     ):
         return False
@@ -798,8 +815,23 @@ def _candidate_memory_type(normalized_content: str) -> str:
     )
     promise_terms = ("i promise ", "we promised ", "you promised ")
     emotional_event_terms = ("i feel ", "i felt ")
+    person_terms = (
+        "my friend ",
+        "my partner ",
+        "my sister ",
+        "my brother ",
+        "my parent ",
+    )
+    theme_terms = ("i keep ", "i always struggle ", "this keeps happening")
+    shared_lore_terms = ("our ritual ", "we call this ", "our story ")
     if "inside joke" in normalized_content:
         return "inside_joke"
+    if any(term in normalized_content for term in shared_lore_terms):
+        return "shared_lore"
+    if any(term in normalized_content for term in person_terms):
+        return "person"
+    if any(term in normalized_content for term in theme_terms):
+        return "theme"
     if any(term in normalized_content for term in boundary_terms):
         return "boundary"
     if any(term in normalized_content for term in promise_terms):
@@ -827,6 +859,12 @@ def _candidate_scores(memory_type: str, normalized_content: str) -> tuple[float,
         return 0.68, 0.74, 0.35
     if memory_type == "promise":
         return 0.7, 0.78, 0.2
+    if memory_type == "person":
+        return 0.62, 0.76, 0.12
+    if memory_type == "theme":
+        return 0.58, 0.68, 0.2
+    if memory_type == "shared_lore":
+        return 0.72, 0.78, 0.32
     if memory_type == "user_fact":
         return 0.58, 0.78, 0.05
     if memory_type == "event":
@@ -860,10 +898,17 @@ def _memory_score(
     vector_score = max(cosine_similarity(query_embedding, memory_embedding), 0.0)
     age_days = max((now - memory.created_at).total_seconds() / 86400, 0)
     recency_score = 1 / (1 + age_days / 14)
-    relationship_relevance = 0.0
+    relationship_relevance = {
+        "boundary": 0.18,
+        "inside_joke": 0.16,
+        "promise": 0.2,
+        "relationship_milestone": 0.16,
+        "shared_lore": 0.18,
+        "shared_moment": 0.14,
+    }.get(memory.memory_type, 0.04)
     if any(marker in query.lower() for marker in ("we ", "remember", "talked", "joke")):
         if memory.memory_type in {"event", "inside_joke", "relationship_milestone"}:
-            relationship_relevance = 0.15
+            relationship_relevance += 0.15
     metadata = memory.metadata_json or {}
     contradiction_penalty = 0.0
     if metadata.get("contradiction_status") == "conflicts":
@@ -884,6 +929,30 @@ def _memory_score(
         - memory.decay_score * 0.25
         - contradiction_penalty
     )
+
+
+def _select_ranked_memories(
+    ranked: list[MemoryItem],
+    *,
+    limit: int,
+) -> list[MemoryItem]:
+    selected: list[MemoryItem] = []
+    seen_content: set[str] = set()
+    contradiction_counts: dict[str, int] = {}
+    for memory in ranked:
+        key = _normalized_content(memory.content)
+        if not key or key in seen_content:
+            continue
+        group = memory.contradiction_group
+        if group and contradiction_counts.get(group, 0) >= 2:
+            continue
+        selected.append(memory)
+        seen_content.add(key)
+        if group:
+            contradiction_counts[group] = contradiction_counts.get(group, 0) + 1
+        if len(selected) >= max(0, limit):
+            break
+    return selected
 
 
 async def _find_memory_by_source_message(

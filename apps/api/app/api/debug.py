@@ -310,6 +310,32 @@ def _current_context_summary(
     }
 
 
+def _sanitize_orchestration(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {
+            "intent": "connect",
+            "tone": "neutral",
+            "time_gap": "continuous",
+            "strategy": "share_the_moment",
+            "secondary_strategy": None,
+            "desired_length": "short",
+            "rhythm": "steady",
+            "question_planned": False,
+            "initiative": "none",
+        }
+    return {
+        "intent": _bounded_string(value.get("intent"), 40, "connect"),
+        "tone": _bounded_string(value.get("tone"), 40, "neutral"),
+        "time_gap": _bounded_string(value.get("time_gap"), 40, "continuous"),
+        "strategy": _bounded_string(value.get("strategy"), 40, "share_the_moment"),
+        "secondary_strategy": (_bounded_string(value.get("secondary_strategy"), 40, "") or None),
+        "desired_length": _bounded_string(value.get("desired_length"), 40, "short"),
+        "rhythm": _bounded_string(value.get("rhythm"), 40, "steady"),
+        "question_planned": value.get("question_planned") is True,
+        "initiative": _bounded_string(value.get("initiative"), 40, "none"),
+    }
+
+
 async def _last_assembled_context(
     session: AsyncSession,
     conversation_id: uuid.UUID,
@@ -419,6 +445,7 @@ def _sanitize_context_manifest(value: object) -> dict[str, object] | None:
             ),
             "intensity": _bounded_int(safety.get("intensity"), maximum=3),
         },
+        "orchestration": _sanitize_orchestration(value.get("orchestration")),
         "time_context": _bounded_string(value.get("time_context"), 80, "not provided"),
         "current_message_chars": _bounded_int(
             value.get("current_message_chars"),

@@ -2,6 +2,57 @@
 
 Codex should update this file during `/goal` runs.
 
+## Companion intelligence overhaul - 2026-07-15
+
+- Replaced the monolithic turn path with a six-stage backend orchestration:
+  deterministic perception, continuity retrieval, safety and qualitative mood,
+  private strategy planning, modular prompt generation, and completed-response
+  evaluation. Plans remain bounded internal direction and are never chat rows.
+- Added migration `0009_companion_intelligence` with validated editable
+  `characters.soul_json` and private `relationship_states.emotional_state_json`.
+  Existing characters receive safe soul fallbacks; relationship emotion is
+  bounded, decays over time, affects wording qualitatively, and recovers from
+  conflict gradually rather than resetting after one apology.
+- Compiled identity, worldview, temperament, humour, speech rhythm, affection and
+  conflict styles, values, insecurities, habits, initiative, boundaries, emoji
+  posture, terms of address, and relationship path into separate prompt modules.
+  The character builder and editor expose these fields without sending raw JSON
+  or emotional/relationship meters to the model.
+- Added response strategies for comfort, celebration, teasing, challenge, advice,
+  listening, flirtation, reminiscence, apology, repair, disclosure, redirection,
+  and sharing the moment. Planning controls question need, response length,
+  rhythm, openings, callbacks, and contextual initiative while explicitly
+  avoiding interrogation, canned reassurance, instant intimacy, and absence
+  guilt.
+- Expanded durable memory classification with facts, people, promises, themes,
+  shared lore, and boundaries; ranking now includes relationship value alongside
+  relevance, recency, importance, confidence, pinning, emotion, contradiction,
+  and decay. Ranked results are deduplicated, active conflicts retain uncertainty,
+  and the response checker rejects unsupported shared-history inventions.
+- Added behavioral evidence for gradual familiarity and trust, character-specific
+  initiative hooks compatible with existing proactive scheduling, privacy-safe
+  orchestration categories in Debug, and seven-dimension companion evaluation
+  covering consistency, memory precision, emotional fit, naturalness, repetition,
+  initiative, and safety.
+- Preserved the existing Groq provider and exact SSE event contract. Stream chunks
+  still pass directly from `provider.stream`; hard-boundary/private-plan checks
+  run immediately before emission without buffering the generated response.
+- Added 26 focused migration and multi-turn regressions for first meetings,
+  banter, support, celebration, advice, conflict, apology, long absence,
+  relationship progression, typed soul editing, question variation, repetition,
+  contradiction uncertainty, callbacks, invented memories, private-plan
+  non-disclosure, and evaluation scoring.
+
+Validation:
+
+- `cd apps/api && pip install -e ".[dev]" && alembic upgrade head` - passed at
+  `0009_companion_intelligence`.
+- `cd apps/api && pytest -q` - passed: 220 tests; 1 opt-in live test skipped.
+- `cd apps/api && ruff format . && ruff check .` - passed; 84 files unchanged.
+- `cd apps/web && npm install && npm run lint && npm run build` - passed with no
+  audit vulnerabilities and a successful optimized Next.js production build.
+- `git diff --check` and the forbidden-dependency manifest scan - passed.
+
 ## Real model integration - 2026-07-15
 
 Status: complete and validated. This checkpoint supersedes the older mock-first

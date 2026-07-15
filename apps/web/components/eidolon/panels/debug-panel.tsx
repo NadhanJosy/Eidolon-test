@@ -74,6 +74,14 @@ export function DebugPanel({
               : "No completed context assembly for this thread"}
           </p>
         </div>
+        {manifest?.orchestration ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <DebugStat label="Intent" value={manifest.orchestration.intent} />
+            <DebugStat label="Strategy" value={manifest.orchestration.strategy} />
+            <DebugStat label="Rhythm" value={manifest.orchestration.rhythm} />
+            <DebugStat label="Initiative" value={manifest.orchestration.initiative} />
+          </div>
+        ) : null}
         <pre className="max-h-40 overflow-y-auto rounded-md border border-line bg-ink p-3 text-xs leading-5">
           {lastContext?.response_plan_summary ?? "No response plan loaded."}
         </pre>

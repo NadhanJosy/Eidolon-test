@@ -131,6 +131,43 @@ export function BuilderArea({
   );
 }
 
+export function BuilderSelect({
+  field,
+  label,
+  value,
+  options,
+  error,
+  onChange
+}: {
+  field: keyof CharacterDraft;
+  label: string;
+  value: string;
+  options: Array<{ label: string; value: string }>;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  const inputId = `character-builder-${field}`;
+  return (
+    <label className="block text-sm text-zinc-300" htmlFor={inputId}>
+      <span>{label}</span>
+      <select
+        aria-invalid={Boolean(error)}
+        className={`${inputClass} ${error ? "border-amber-700" : ""}`}
+        id={inputId}
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {error ? <span className="mt-1 block text-xs text-amber-200">{error}</span> : null}
+    </label>
+  );
+}
+
 export function BuilderToggle({
   checked,
   label,

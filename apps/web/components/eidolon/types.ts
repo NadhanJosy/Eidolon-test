@@ -32,6 +32,25 @@ export type User = {
   created_at: string;
 };
 
+export type CharacterSoul = {
+  identity: string;
+  worldview: string;
+  temperament: string;
+  humour: string;
+  speech_rhythm: string;
+  affection_style: string;
+  conflict_style: string;
+  values: string;
+  insecurities: string;
+  habits: string;
+  initiative_style: string;
+  boundaries: string;
+  emoji_style: "none" | "rare" | "light" | "expressive";
+  terms_of_address: string;
+  relationship_path: "friendship" | "romantic" | "custom";
+  custom_relationship: string;
+};
+
 export type Character = {
   id: string;
   owner_user_id: string;
@@ -39,6 +58,7 @@ export type Character = {
   description: string | null;
   personality_core: string | null;
   speech_style: string | null;
+  soul_json: CharacterSoul;
   boundaries_json: Record<string, unknown>;
   explicit_age: number | null;
   adult_mode_allowed: boolean;
@@ -327,6 +347,17 @@ export type AssembledContext = {
       privacy_mode: ConversationPrivacyMode;
     }[];
     safety: ContextSafety;
+    orchestration?: {
+      intent: string;
+      tone: string;
+      time_gap: string;
+      strategy: string;
+      secondary_strategy: string | null;
+      desired_length: string;
+      rhythm: string;
+      question_planned: boolean;
+      initiative: string;
+    };
     time_context: string;
     current_message_chars: number;
   };
@@ -381,10 +412,20 @@ export type CharacterDraft = {
   description: string;
   relationship_type: string;
   personality_core: string;
+  worldview: string;
+  temperament: string;
   flaws: string;
   values: string;
   speech_style: string;
   humor_style: string;
+  affection_style: string;
+  conflict_style: string;
+  insecurities: string;
+  habits: string;
+  initiative_style: string;
+  emoji_style: CharacterSoul["emoji_style"];
+  relationship_path: CharacterSoul["relationship_path"];
+  custom_relationship: string;
   boundary_notes: string;
   interests: string;
   backstory: string;

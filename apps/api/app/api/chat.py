@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.companion.quality import enforce_stream_chunk
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_conversation
 from app.llm.base import (
@@ -208,6 +209,7 @@ async def chat_stream(
                     usage = event.usage
                 if not event.content:
                     continue
+                enforce_stream_chunk("".join((*chunks, event.content)))
                 if first_token_ms is None:
                     first_token_ms = elapsed_ms(generation_started)
                 chunks.append(event.content)
@@ -258,6 +260,7 @@ async def chat_stream(
                 conversation_id=conversation_id,
                 user_message_id=user_message_id,
                 failure_type=exc.failure_type,
+                response_check_violations=getattr(exc, "response_check_violations", ()),
             )
             await session.commit()
             await record_generation_error(

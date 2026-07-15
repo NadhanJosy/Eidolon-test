@@ -1,14 +1,21 @@
 # Eidolon
 
 Eidolon is a private, text-only AI companion application built around continuity:
-durable memory, authored persona, relationship state, episodic callbacks, and
-proactive text presence. The backend owns every durable fact and policy decision;
-the language model is responsible only for generating the next reply.
+durable memory, a recognisable character soul, emotional state, relationship
+evolution, episodic callbacks, and proactive text presence. The backend owns
+every durable fact and policy decision; the language model is responsible only
+for generating the next reply.
 
 The current MVP includes a production-shaped FastAPI/PostgreSQL backend, a
 mobile-first Next.js interface, real GroqCloud streaming, an Ollama path for
 self-hosted inference, and an explicit deterministic mock used only for
 development and tests.
+
+Eidolon is deliberately not an avatar or simulated surveillance product. It does
+not claim sentience, awareness while offline, or fabricated actions between
+messages. Its sense of presence comes from selective recall, consistent
+characterisation, emotional continuity, and behavior that changes gradually with
+real interaction history.
 
 ## Current capabilities
 
@@ -20,13 +27,16 @@ development and tests.
   reroll, retry, Stop, and exact SSE token streaming
 - Durable message history with exactly-once completed assistant persistence and
   recoverable user turns after provider failure or cancellation
-- Bounded eight-section prompt assembly with safety, persona, relationship,
-  relevant memory, episodic continuity, recent history, response guidance, and
-  the current user message
+- A staged companion-intelligence pipeline that infers the moment, retrieves
+  continuity, projects mood and boundaries, privately plans a strategy, renders
+  modular prompts, and checks the generated reply without exposing the plan
+- Editable character souls covering worldview, temperament, humour, speech
+  rhythm, affection/conflict style, values, habits, initiative, and boundaries
 - Hybrid PostgreSQL recall using pgvector and text similarity, reversible memory
   forgetting, pinning, source-linked memories, deduplication, and conflicts
-- Relationship state, milestones, repair guidance, episodic journals, callbacks,
-  promises, open threads, and user-authored reflections
+- Bounded emotional continuity, evidence-paced relationship evolution, gradual
+  conflict repair, milestones, episodic journals, callbacks, promises, open
+  threads, and user-authored reflections
 - PostgreSQL-backed scheduled work for post-chat cognition and proactive notes,
   with advisory locking, quiet hours, cooldowns, retries, and failure isolation
 - Conversation and one-turn privacy modes that exclude private material from
@@ -52,6 +62,86 @@ PostgreSQL is the source of truth for accounts, companions, conversations,
 messages, memories, relationship state, journals, auth sessions, diagnostics,
 and scheduled jobs. Provider-side conversation storage is not used.
 
+## Companion intelligence
+
+### How a reply is produced
+
+Every standard message, streamed message, reroll, and edited turn uses the same
+backend-owned pipeline:
+
+1. Infer the user's intent, tone, subtext, time gap, and unresolved context.
+2. Retrieve relevant typed memories, episodes, promises, open threads, and
+   relationship context.
+3. Apply content boundaries and project the companion's decayed emotional
+   posture.
+4. Select a private response strategy, question policy, length, rhythm, opening,
+   callback posture, and optional initiative hook.
+5. Compile ordered prompt modules and ask the configured provider for the
+   in-character reply.
+6. Check boundaries, private-context leakage, memory support, contradictions,
+   repetition, question patterns, assistant clichés, unwanted formatting, and
+   obvious tone drift.
+
+The private response plan is direction for generation, not chat content or a
+chain-of-thought transcript. It is never returned as a normal message. Debug
+surfaces only bounded categorical orchestration data such as intent, strategy,
+rhythm, initiative kind, and whether a question was planned.
+
+### Character soul
+
+Each companion has an editable, validated `soul_json` profile covering:
+
+- identity, worldview, temperament, and values
+- humour, speech rhythm, emoji posture, and terms of address
+- affection style, conflict style, insecurities, and habits
+- initiative style, personal boundaries, and friendship/romantic/custom path
+
+Prompt assembly compiles these fields into natural identity, voice, and relating
+modules. It never dumps raw profile JSON into the model context. Legacy character
+fields remain supported as migration fallbacks.
+
+### Emotional and relationship continuity
+
+The relationship row owns a private bounded emotional state: amusement, concern,
+warmth, hurt, guardedness, and openness to repair. These values decay toward safe
+baselines and are translated into qualitative wording guidance; the emotional
+meters are never exposed in chat or prompt text.
+
+Conflict can leave the companion hurt or guarded without becoming punitive. An
+apology can begin repair, but cannot erase accumulated tension in one turn.
+Familiarity, trust, vulnerability, humour, nicknames, and affection progress from
+repeated exchanges and meaningful events rather than an XP level. Friendship is
+the default, romance is never forced, and adult behavior remains age-gated,
+consent-aware, and private.
+
+### Memory and initiative
+
+Durable memories distinguish user facts, preferences, people, events, promises,
+boundaries, recurring themes, shared lore, inside jokes, shared moments, and
+relationship milestones. Retrieval combines semantic and text relevance with
+recency, importance, confidence, emotional weight, relationship value, pinning,
+decay, and contradiction state.
+
+Results are deduplicated and unresolved conflicts retain uncertainty. A callback
+is used only when it fits the current moment; unsupported shared-history claims
+fail response validation rather than becoming a new memory. Character-specific
+initiative can revisit an open thread, mention a selected memory, share a thought,
+or suggest a small text-based activity. Existing PostgreSQL-backed proactive jobs
+provide the scheduling hooks without claiming offline awareness.
+
+### Conversational realism and quality checks
+
+Planning can choose comfort, celebration, teasing, challenge, advice, listening,
+flirtation, reminiscence, apology, repair, disclosure, redirection, or simply
+sharing the moment. It independently decides whether a question helps and varies
+length, rhythm, and openings to avoid interrogation and repeated endings.
+
+Hard-boundary and private-plan leakage checks run on the accumulated stream before
+each token chunk is emitted. The completed response is checked again before it is
+persisted. Soft quality findings such as repeated openings or tone drift are kept
+as bounded generation metadata for evaluation and regression testing, never as
+visible companion narration.
+
 ## Requirements
 
 - Git
@@ -65,11 +155,11 @@ and scheduled jobs. Provider-side conversation storage is not used.
 
 ### 1. Create local configuration
 
-From the repository root:
+From the repository root, create the files only if they do not already exist:
 
 ```bash
-cp .env.example .env
-cp apps/web/.env.example apps/web/.env.local
+test -f .env || cp .env.example .env
+test -f apps/web/.env.local || cp apps/web/.env.example apps/web/.env.local
 ```
 
 Keep `.env` and `apps/web/.env.local` untracked. They are ignored by Git.
@@ -95,6 +185,10 @@ GROQ_API_KEY=
 
 Never put `GROQ_API_KEY` in `apps/web`, a `NEXT_PUBLIC_*` variable, source
 control, logs, or browser storage.
+
+For the quickest first run, select `LLM_PROVIDER=mock`. It requires no model or
+API key and exercises the full persistence, orchestration, memory, relationship,
+and SSE application path with deterministic text.
 
 ### 2. Start PostgreSQL
 
@@ -165,8 +259,26 @@ local database data and should only be used intentionally.
 
 ## Start-command summary
 
-After the one-time installs and migrations, use three terminals from the
-repository root:
+For a first local run with the mock provider, complete the configuration step
+above, set `LLM_PROVIDER=mock` in `.env`, and run:
+
+```bash
+# One-time backend setup
+docker compose up -d postgres
+cd apps/api
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+alembic upgrade head
+```
+
+```bash
+# One-time frontend setup, from the repository root
+cd apps/web
+npm ci
+```
+
+After the one-time installs, use three terminals from the repository root:
 
 ```bash
 # Terminal 1: database
@@ -197,6 +309,9 @@ make web-dev
 ```
 
 Run the API and web targets in separate terminals.
+
+When pulling a newer revision, run `alembic upgrade head` before starting the API
+and `npm ci` whenever `apps/web/package-lock.json` changed.
 
 ## GitHub Codespaces
 
@@ -287,6 +402,11 @@ persists exactly one completed assistant row linked to that user row. Stop,
 disconnect, or provider failure discards partial assistant text and preserves a
 retryable or cancelled user turn.
 
+The companion-intelligence prompt and response checks wrap the existing provider
+stream; they do not replace Groq streaming with a buffered fake stream. A hard
+boundary or private-plan failure ends the stream safely and prevents assistant
+persistence.
+
 Successful non-private exchanges create durable `chat_postprocess` jobs. These
 jobs update candidate memories, episodic continuity, promises, callbacks, and
 open threads. Post-processing failure cannot undo a completed chat and is retried
@@ -361,6 +481,14 @@ Or, after installing both apps:
 make verify
 ```
 
+Current companion-intelligence checkpoint:
+
+- Alembic head: `0009_companion_intelligence`
+- Backend: 220 passed, 1 opt-in live test skipped
+- Focused companion and migration regressions: 26 passed
+- Ruff, ESLint, TypeScript, and the optimized Next.js production build: passed
+- npm audit: 0 known vulnerabilities at the validated lockfile state
+
 The real Groq smoke test is opt-in and excluded from CI:
 
 ```bash
@@ -373,10 +501,31 @@ It uses the configured backend key without printing it and verifies real SSE,
 grounded context, persistence, provider/model metadata, timing, token usage, and
 exactly one completed user/assistant pair after reload.
 
+## Troubleshooting
+
+- `GROQ_API_KEY is required`: either add the key to the repository-root `.env` or
+  switch development to `LLM_PROVIDER=mock`.
+- Database connection refused: run `docker compose up -d postgres`, then inspect
+  `docker compose logs postgres` and retry `alembic upgrade head`.
+- Registration or refresh fails in Codespaces: use the forwarded HTTPS URLs and
+  verify `WEB_ORIGIN`, `CORS_ORIGINS`, `NEXT_PUBLIC_API_BASE_URL`, and
+  `REFRESH_COOKIE_SECURE=true`.
+- Browser shows `Failed to fetch`: confirm the API port is forwarded, open
+  `/health` directly, and restart both servers after environment changes.
+- Port already in use: stop the old dev process or choose another port and update
+  the corresponding origin/base URL settings together.
+- To inspect API, database, provider, scheduler, memory-selection, and safe
+  orchestration state, use authenticated Debug in development. Raw prompts,
+  secrets, and emotional meters are intentionally absent.
+- `docker compose down` preserves the database volume. `docker compose down -v`
+  deletes local database data and should be used only when a destructive reset is
+  intended.
+
 ## Repository layout
 
 ```text
-apps/api/                 FastAPI app, providers, services, models, migrations, tests
+apps/api/                 FastAPI app, companion pipeline, models, migrations, tests
+apps/api/app/companion/   Soul, perception, emotion, planning, and response checks
 apps/web/                 Next.js interface and client-side controllers
 docs/                     Product, architecture, data, prompt, safety, UX, and ops docs
 infra/caddy/              Example reverse-proxy configuration
@@ -395,6 +544,7 @@ Useful detailed references:
 - `docs/06_API_CONTRACT.md`
 - `docs/07_PROMPT_ASSEMBLY.md`
 - `docs/08_MEMORY_SYSTEM.md`
+- `docs/09_RELATIONSHIP_ENGINE.md`
 - `docs/10_BACKGROUND_JOBS.md`
 - `docs/11_SAFETY_AND_BOUNDARIES.md`
 - `docs/12_FRONTEND_UX.md`

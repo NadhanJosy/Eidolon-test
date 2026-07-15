@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.companion.domain import CharacterSoul, EmotionalState, ResponsePlan, TurnPerception
+from app.companion.emotion import project_emotional_state
+from app.companion.perception import infer_turn_perception
+from app.companion.soul import character_soul
 from app.models import (
     Character,
     Conversation,
@@ -25,7 +29,11 @@ from app.services.conversation_scenario import (
 from app.services.journal import list_journals
 from app.services.memory import retrieve_memories
 from app.services.relationship import get_current_relationship, get_or_create_relationship
-from app.services.response_planner import build_response_plan, list_pending_proactive_events
+from app.services.response_planner import (
+    build_response_plan,
+    build_structured_response_plan,
+    list_pending_proactive_events,
+)
 from app.services.safety import adult_gate_status
 
 
@@ -39,6 +47,10 @@ class ReasoningContext:
     time_context: str
     pending_proactive_events: list[str]
     response_plan: str
+    structured_plan: ResponsePlan
+    perception: TurnPerception
+    emotional_state: EmotionalState
+    soul: CharacterSoul
     scenario_mode: ConversationScenarioMode
     scenario_text: str | None
 
@@ -55,6 +67,21 @@ async def build_reasoning_context(
     current_message_id: uuid.UUID | None = None,
 ) -> ReasoningContext:
     is_private_turn = privacy_mode == "private"
+    # Stage 1: perceive the turn from the live thread before durable retrieval.
+    recent_messages = await _list_recent_messages(
+        session,
+        conversation.id,
+        limit=14,
+        include_private=is_private_turn,
+        exclude_message_id=current_message_id,
+    )
+    perception = infer_turn_perception(
+        current_message,
+        recent_messages=recent_messages,
+        journals=[],
+    )
+
+    # Stage 2: retrieve relationship, durable memories, and episodic context.
     if is_private_turn:
         relationship = await get_or_create_relationship(session, user.id, character.id)
     else:
@@ -69,13 +96,6 @@ async def build_reasoning_context(
     )
     journal_candidates = await list_journals(session, user.id, character.id, limit=50)
     journals = rank_relevant_journals(journal_candidates, query=current_message, limit=4)
-    recent_messages = await _list_recent_messages(
-        session,
-        conversation.id,
-        limit=14,
-        include_private=is_private_turn,
-        exclude_message_id=current_message_id,
-    )
     pending_proactive_events = await list_pending_proactive_events(
         session,
         user_id=user.id,
@@ -83,6 +103,7 @@ async def build_reasoning_context(
         conversation_id=conversation.id,
     )
     now = utc_now()
+    # Stage 3: resolve structural boundaries and the companion's decayed mood.
     safety_status = adult_gate_status(
         user,
         character,
@@ -91,6 +112,22 @@ async def build_reasoning_context(
     )
     time_context = now.strftime("%A, %Y-%m-%d %H:%M UTC")
     scenario = effective_conversation_scenario(conversation, character)
+    emotional_state = project_emotional_state(relationship, now=now)
+    soul = character_soul(character)
+    # Stage 4: choose a bounded private response strategy before generation.
+    structured_plan = build_structured_response_plan(
+        character=character,
+        relationship=relationship,
+        memories=memories,
+        journals=journals,
+        recent_messages=recent_messages,
+        current_message=current_message,
+        content_mode=safety_status["effective_mode"],
+        safety_status=safety_status,
+        soul=soul,
+        perception=perception,
+        emotion=emotional_state,
+    )
     response_plan = build_response_plan(
         character=character,
         relationship=relationship,
@@ -114,6 +151,10 @@ async def build_reasoning_context(
         time_context=time_context,
         pending_proactive_events=pending_proactive_events,
         response_plan=response_plan,
+        structured_plan=structured_plan,
+        perception=perception,
+        emotional_state=emotional_state,
+        soul=soul,
         scenario_mode=scenario.mode,
         scenario_text=scenario.text,
     )

@@ -4,6 +4,7 @@ import {
   BuilderArea,
   BuilderField,
   BuilderSection,
+  BuilderSelect,
   type BuilderStepProps,
   BuilderToggle
 } from "./character-builder-fields";
@@ -12,6 +13,7 @@ import {
   resolvedDeviceTimeZone,
   SCENARIO_PRESETS
 } from "./character-builder-model";
+import type { CharacterDraft } from "./types";
 
 export function IdentityStep({
   draft,
@@ -108,6 +110,28 @@ export function InnerLifeStep({ draft, errors, onChange }: BuilderStepProps) {
       />
       <div className="grid gap-4 sm:grid-cols-2">
         <BuilderArea
+          error={errors.worldview}
+          field="worldview"
+          label="Worldview"
+          maxLength={CHARACTER_FIELD_LIMITS.worldview}
+          onChange={(value) => onChange("worldview", value)}
+          required
+          rows={4}
+          value={draft.worldview}
+        />
+        <BuilderArea
+          error={errors.temperament}
+          field="temperament"
+          label="Temperament"
+          maxLength={CHARACTER_FIELD_LIMITS.temperament}
+          onChange={(value) => onChange("temperament", value)}
+          required
+          rows={4}
+          value={draft.temperament}
+        />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <BuilderArea
           error={errors.flaws}
           field="flaws"
           label="Flaws"
@@ -126,6 +150,101 @@ export function InnerLifeStep({ draft, errors, onChange }: BuilderStepProps) {
           value={draft.values}
         />
       </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <BuilderArea
+          error={errors.affection_style}
+          field="affection_style"
+          label="Affection style"
+          maxLength={CHARACTER_FIELD_LIMITS.affection_style}
+          onChange={(value) => onChange("affection_style", value)}
+          required
+          rows={3}
+          value={draft.affection_style}
+        />
+        <BuilderArea
+          error={errors.conflict_style}
+          field="conflict_style"
+          label="Conflict and repair style"
+          maxLength={CHARACTER_FIELD_LIMITS.conflict_style}
+          onChange={(value) => onChange("conflict_style", value)}
+          required
+          rows={3}
+          value={draft.conflict_style}
+        />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <BuilderArea
+          error={errors.insecurities}
+          field="insecurities"
+          label="Insecurities"
+          maxLength={CHARACTER_FIELD_LIMITS.insecurities}
+          onChange={(value) => onChange("insecurities", value)}
+          rows={3}
+          value={draft.insecurities}
+        />
+        <BuilderArea
+          error={errors.habits}
+          field="habits"
+          label="Conversational habits"
+          maxLength={CHARACTER_FIELD_LIMITS.habits}
+          onChange={(value) => onChange("habits", value)}
+          rows={3}
+          value={draft.habits}
+        />
+      </div>
+      <BuilderArea
+        error={errors.initiative_style}
+        field="initiative_style"
+        label="Initiative style"
+        maxLength={CHARACTER_FIELD_LIMITS.initiative_style}
+        onChange={(value) => onChange("initiative_style", value)}
+        required
+        rows={3}
+        value={draft.initiative_style}
+      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <BuilderSelect
+          error={errors.relationship_path}
+          field="relationship_path"
+          label="Relationship path"
+          onChange={(value) =>
+            onChange("relationship_path", value as CharacterDraft["relationship_path"])
+          }
+          options={[
+            { label: "Friendship", value: "friendship" },
+            { label: "Romantic, if earned", value: "romantic" },
+            { label: "Custom", value: "custom" }
+          ]}
+          value={draft.relationship_path}
+        />
+        <BuilderSelect
+          error={errors.emoji_style}
+          field="emoji_style"
+          label="Emoji use"
+          onChange={(value) =>
+            onChange("emoji_style", value as CharacterDraft["emoji_style"])
+          }
+          options={[
+            { label: "None", value: "none" },
+            { label: "Rare", value: "rare" },
+            { label: "Light", value: "light" },
+            { label: "Expressive", value: "expressive" }
+          ]}
+          value={draft.emoji_style}
+        />
+      </div>
+      {draft.relationship_path === "custom" ? (
+        <BuilderArea
+          error={errors.custom_relationship}
+          field="custom_relationship"
+          label="Custom relationship path"
+          maxLength={CHARACTER_FIELD_LIMITS.custom_relationship}
+          onChange={(value) => onChange("custom_relationship", value)}
+          required
+          rows={3}
+          value={draft.custom_relationship}
+        />
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <BuilderArea
           error={errors.speech_style}

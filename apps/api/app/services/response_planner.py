@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.companion.domain import CharacterSoul, EmotionalState, ResponsePlan, TurnPerception
+from app.companion.emotion import project_emotional_state
+from app.companion.perception import infer_turn_perception
+from app.companion.planning import plan_response
+from app.companion.soul import character_soul
 from app.models import (
     Character,
     EpisodicJournal,
@@ -80,18 +86,61 @@ def build_response_plan(
     scenario_mode: str = "default",
     scenario_text: str | None = None,
 ) -> str:
-    profile = character.boundaries_json if isinstance(character.boundaries_json, dict) else {}
-    pieces = [
-        f"Tone: {_tone(character, relationship)}",
-        f"Continuity: {_continuity(recent_messages, pending_proactive_events)}",
-        f"Memory focus: {_memory_focus(memories)}",
-        f"Episode focus: {_episode_focus(journals)}",
-        f"Scene: {_scene_focus(scenario_mode, scenario_text)}",
-        f"Boundaries: {_boundary_focus(content_mode, safety_status, profile)}",
-        f"Timing: {time_context}",
-        f"Next move: {_next_move(current_message, relationship, journals)}",
-    ]
-    return _compact("; ".join(piece for piece in pieces if piece), 1200)
+    structured = build_structured_response_plan(
+        character=character,
+        relationship=relationship,
+        memories=memories,
+        journals=journals,
+        recent_messages=recent_messages,
+        current_message=current_message,
+        content_mode=content_mode,
+        safety_status=safety_status,
+    )
+    continuity = _continuity(recent_messages, pending_proactive_events)
+    memory_focus = _memory_focus(memories)
+    episode_focus = _episode_focus(journals)
+    scene = _scene_focus(scenario_mode, scenario_text)
+    summary = structured.private_summary()
+    return _compact(
+        f"{summary}; Continuity: {continuity}; Memory focus: {memory_focus}; "
+        f"Episode focus: {episode_focus}; Scene: {scene}; Timing: {time_context}",
+        1200,
+    )
+
+
+def build_structured_response_plan(
+    *,
+    character: Character,
+    relationship: RelationshipState,
+    memories: Sequence[MemoryItem],
+    journals: Sequence[EpisodicJournal],
+    recent_messages: Sequence[Message],
+    current_message: str,
+    content_mode: str,
+    safety_status: dict,
+    soul: CharacterSoul | None = None,
+    perception: TurnPerception | None = None,
+    emotion: EmotionalState | None = None,
+) -> ResponsePlan:
+    selected_soul = soul or character_soul(character)
+    selected_perception = perception or infer_turn_perception(
+        current_message,
+        recent_messages=list(recent_messages),
+        journals=list(journals),
+    )
+    selected_emotion = emotion or project_emotional_state(relationship)
+    plan = plan_response(
+        soul=selected_soul,
+        perception=selected_perception,
+        emotion=selected_emotion,
+        relationship=relationship,
+        memories=memories,
+        journals=journals,
+        recent_messages=recent_messages,
+        content_mode=content_mode,
+        safety_status=safety_status,
+    )
+    return replace(plan, continuity=_compact(plan.continuity, 260))
 
 
 def _scene_focus(mode: str, text: str | None) -> str:
@@ -145,7 +194,11 @@ def _memory_focus(memories: Sequence[MemoryItem]) -> str:
     if not memories:
         return "no selected durable memories; avoid claiming recall"
     pinned = [memory for memory in memories if memory.pinned]
-    contradiction = [memory for memory in memories if memory.contradiction_group]
+    contradiction = [
+        memory
+        for memory in memories
+        if (memory.metadata_json or {}).get("contradiction_status") == "conflicts"
+    ]
     if contradiction:
         return "selected memories include a contradiction; acknowledge uncertainty if relevant"
     target = pinned[0] if pinned else max(memories, key=lambda memory: memory.importance)

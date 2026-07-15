@@ -26,6 +26,14 @@ Test categories:
 - natural mock cue, continuity, repair, empty-context, and hidden-state
   non-disclosure behavior at provider and persisted API boundaries
 - prompt assembly
+- modular companion orchestration: perception, typed soul compilation,
+  qualitative emotion, strategy/question/length/rhythm planning, private-plan
+  non-disclosure, and completed-response checks
+- multi-turn first meeting, banter, support, celebration, advice, conflict,
+  apology, recurring interest, contradiction, natural callback, long absence,
+  boundary, initiative, and gradual progression scenarios
+- response evaluation scores for consistency, memory precision, emotional fit,
+  naturalness, repetition, initiative, and safety
 - memory creation/retrieval, deterministic normalized feature embeddings,
   hybrid related-phrase ranking, edit recomputation, legacy-null backfill, and
   raw-vector API non-disclosure
@@ -491,7 +499,9 @@ Use:
 Cover context order/trimming/deduplication, exactly-once persistence, stop and
 disconnect cancellation, timeout, 429/5xx retries, malformed chunks, provider
 fallback, safe error classification, generation telemetry, and asynchronous
-memory-job failure isolation.
+memory-job failure isolation. The same checks must exercise ordinary, reroll,
+edit, and Groq-compatible SSE paths without buffering or replacing provider
+streaming.
 
 Mock-provider assertions must reject diagnostic markers such as provider
 prefixes, prompt labels, response-plan narration, memory metadata, relationship
@@ -513,8 +523,12 @@ MVP is acceptable when:
 - message persists after refresh
 - unread companion messages persist until their rendered boundary is marked read
 - character profile affects prompt
+- character soul is editable and compiled without raw JSON
 - memory can be stored/retrieved
+- unresolved memory contradictions preserve uncertainty and invented memories
+  are rejected
 - relationship state updates
+- emotional continuity decays and conflict repair remains gradual
 - relationship absence decay persists on reads and jobs
 - debug panel exposes state safely
 - tests pass

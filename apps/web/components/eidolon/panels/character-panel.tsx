@@ -88,6 +88,20 @@ export function CharacterPanel({
           onChange={(value) => setDraft({ ...draft, personality_core: value })}
         />
         <TextAreaField
+          label="Worldview"
+          value={draft.worldview}
+          minHeight="min-h-16"
+          maxLength={CHARACTER_FIELD_LIMITS.worldview}
+          onChange={(value) => setDraft({ ...draft, worldview: value })}
+        />
+        <TextAreaField
+          label="Temperament"
+          value={draft.temperament}
+          minHeight="min-h-16"
+          maxLength={CHARACTER_FIELD_LIMITS.temperament}
+          onChange={(value) => setDraft({ ...draft, temperament: value })}
+        />
+        <TextAreaField
           label="Flaws"
           value={draft.flaws}
           minHeight="min-h-16"
@@ -101,6 +115,80 @@ export function CharacterPanel({
           maxLength={CHARACTER_FIELD_LIMITS.values}
           onChange={(value) => setDraft({ ...draft, values: value })}
         />
+        <TextAreaField
+          label="Affection style"
+          value={draft.affection_style}
+          minHeight="min-h-16"
+          maxLength={CHARACTER_FIELD_LIMITS.affection_style}
+          onChange={(value) => setDraft({ ...draft, affection_style: value })}
+        />
+        <TextAreaField
+          label="Conflict and repair style"
+          value={draft.conflict_style}
+          minHeight="min-h-16"
+          maxLength={CHARACTER_FIELD_LIMITS.conflict_style}
+          onChange={(value) => setDraft({ ...draft, conflict_style: value })}
+        />
+        <TextAreaField
+          label="Insecurities"
+          value={draft.insecurities}
+          minHeight="min-h-16"
+          maxLength={CHARACTER_FIELD_LIMITS.insecurities}
+          onChange={(value) => setDraft({ ...draft, insecurities: value })}
+        />
+        <TextAreaField
+          label="Conversational habits"
+          value={draft.habits}
+          minHeight="min-h-16"
+          maxLength={CHARACTER_FIELD_LIMITS.habits}
+          onChange={(value) => setDraft({ ...draft, habits: value })}
+        />
+        <TextAreaField
+          label="Initiative style"
+          value={draft.initiative_style}
+          minHeight="min-h-16"
+          maxLength={CHARACTER_FIELD_LIMITS.initiative_style}
+          onChange={(value) => setDraft({ ...draft, initiative_style: value })}
+        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SelectField
+            label="Relationship path"
+            onChange={(value) =>
+              setDraft({
+                ...draft,
+                relationship_path: value as CharacterDraft["relationship_path"]
+              })
+            }
+            options={[
+              ["friendship", "Friendship"],
+              ["romantic", "Romantic, if earned"],
+              ["custom", "Custom"]
+            ]}
+            value={draft.relationship_path}
+          />
+          <SelectField
+            label="Emoji use"
+            onChange={(value) =>
+              setDraft({ ...draft, emoji_style: value as CharacterDraft["emoji_style"] })
+            }
+            options={[
+              ["none", "None"],
+              ["rare", "Rare"],
+              ["light", "Light"],
+              ["expressive", "Expressive"]
+            ]}
+            value={draft.emoji_style}
+          />
+        </div>
+        {draft.relationship_path === "custom" ? (
+          <TextAreaField
+            label="Custom relationship path"
+            value={draft.custom_relationship}
+            minHeight="min-h-16"
+            maxLength={CHARACTER_FIELD_LIMITS.custom_relationship}
+            onChange={(value) => setDraft({ ...draft, custom_relationship: value })}
+          />
+        ) : null}
         <TextAreaField
           label="Backstory"
           maxLength={CHARACTER_FIELD_LIMITS.backstory}
@@ -426,6 +514,35 @@ function TextAreaField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  options: Array<[string, string]>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block text-xs text-zinc-400">
+      {label}
+      <select
+        className={inputClass}
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      >
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={optionValue} value={optionValue}>
+            {optionLabel}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

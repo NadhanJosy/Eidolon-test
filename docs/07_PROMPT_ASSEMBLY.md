@@ -10,7 +10,25 @@ The prompt service must be centralized and unit-tested.
 
 The backend decides what matters. The LLM does not browse the database directly.
 
-## Prompt sections
+## Turn orchestration
+
+Every standard, edit, reroll, and streamed turn follows the same backend-owned
+pipeline:
+
+1. infer intent, tone, subtext, time gap, and unresolved context
+2. retrieve relevant typed memories, episodes, and relationship context
+3. determine structural boundaries and project the companion's bounded mood
+4. choose a private response strategy and delivery plan
+5. compile modules and generate the in-character reply
+6. check repetition, contradictions, tone drift, invented memory, question
+   patterns, plan leakage, and hard boundaries
+
+The private plan contains direction, not hidden prose reasoning. It is never
+rendered in chat or stored as a message. Debug receives only a strict categorical
+summary such as intent, strategy, rhythm, initiative kind, and whether a question
+was planned.
+
+## Prompt modules
 
 ### 1. Platform and safety instructions
 
@@ -23,20 +41,23 @@ boundaries first:
 - no real-world harm instructions
 - respect SFW/adult mode gates
 
-### 2. Character profile
+### 2-4. Character soul: identity, voice, and relating
 
 Include:
 
 - name
 - age if explicit
-- personality_core
-- speech_style
-- description
-- boundaries
+- compiled identity, worldview, and temperament
+- humour, speech rhythm, emoji posture, and terms-of-address guidance
+- affection and conflict style, values, insecurities, habits, and initiative
+- personal boundaries and gradual relationship-path guidance
 - consent style, soft limits, hard limits, and aftercare style when present
 - adult_mode_allowed only as structural context
 
-### 3. Relationship state and milestones
+Raw `soul_json` is never dumped into the prompt. Legacy character fields are
+compiled as fallbacks for migrated profiles.
+
+### 5. Relationship state, emotional posture, and milestones
 
 Translate backend variables into a qualitative relationship stage and posture.
 Never send raw relationship scores or hidden system terminology to the model.
@@ -49,12 +70,20 @@ only a qualitative scene category, and the context manifest records only
 `default|custom` plus bounded text length. Raw scene prose must not enter Debug
 or generic system-event content.
 
-### 4. Concise user facts
+Bounded emotion values are translated to wording guidance such as amused,
+concerned, warm, hurt-but-open, or guarded. Raw meters are never included.
+
+### 6. Turn perception
+
+Include compact backend-inferred intent, tone, subtext, time-gap, and unresolved
+context. These are instructions to respond to the moment, not durable facts.
+
+### 7. Concise user facts
 
 Include deduplicated relevant preferences, boundaries, and stable facts without
 confidence/importance scores.
 
-### 5. Relevant long-term memories
+### 8. Relevant long-term memories
 
 Include only retrieved relevant memories.
 
@@ -62,7 +91,10 @@ Include only deduplicated retrieved memories prioritized by relevance, recency,
 emotional importance, and pinning. Send natural content, not storage labels or
 scores.
 
-### 6. Episodic continuity, promises, and unresolved threads
+Conflicting active memories must retain uncertainty language. A contradiction
+group identifier alone does not make an otherwise resolved memory uncertain.
+
+### 9. Episodic continuity, promises, and unresolved threads
 
 Include selected episode summaries, promises/callbacks, and deliberate open
 threads without raw metadata or scores. The private response planner is folded
@@ -78,7 +110,14 @@ already received a companion reply are not unresolved.
 The private response planner may use the same bounded signals to preserve an
 open loop or callback accurately. It must not invent missing shared history.
 
-### 7. Recent messages
+### 10. Private response direction
+
+Compile the selected strategy, optional secondary strategy, question policy,
+target length, rhythm, opening approach, callback policy, initiative hook, and
+specific habits to avoid. This is concise direction rather than a transcript of
+reasoning, and the reply must never narrate it.
+
+### 11. Recent messages
 
 Include a bounded recent history window.
 
@@ -94,12 +133,11 @@ in-room coherence, but recall timestamps and all other durable state remain
 unchanged. Returning to standard mode cannot pull private prose back into model
 context.
 
-### 8. Current message
+### 12. Current message
 
 The latest user message.
 
-The current message is last. Response-style instructions belong in section 1 so
-the request order stays stable and testable.
+The current message is last so request order stays stable and testable.
 
 ## Prompt rules
 
@@ -170,7 +208,7 @@ Prompt assembly should expose a prompt_version string for debugging.
 Current value:
 
 ```text
-ordered_bounded_companion_context_v6
+modular_companion_intelligence_v7
 ```
 
 ## Private context manifests
@@ -187,7 +225,7 @@ records only:
 - effective safety mode, bounded gate reasons, and intensity
 - time context and current-message character count
 - provider, generation kind, prompt version/size, assembly time, and bounded
-  response-plan summary
+  orchestration categories
 
 It does not record raw prompt text, message prose, memory content, journal
 summaries, profile prose, credentials, or secrets. The manifest is attached to

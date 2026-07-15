@@ -72,6 +72,7 @@ Fields:
 - description nullable text
 - personality_core nullable text
 - speech_style nullable text
+- soul_json JSON, a validated editable character-soul profile
 - boundaries_json JSON
 - explicit_age nullable integer
 - adult_mode_allowed boolean default false
@@ -79,7 +80,14 @@ Fields:
 - created_at datetime
 - updated_at datetime
 
-Character `boundaries_json` stores the richer authored profile for the MVP,
+Character `soul_json` stores identity, worldview, temperament, humour, speech
+rhythm, affection and conflict styles, values, insecurities, habits, initiative,
+personal boundaries, emoji posture, terms of address, and relationship-path
+guidance. The API validates it as a typed model and prompt assembly compiles it
+into natural modules rather than sending raw JSON. Legacy persona columns remain
+supported and provide migration/default fallbacks.
+
+Character `boundaries_json` stores the operational authored profile for the MVP,
 including relationship type, scenario preset, memory preferences, proactive
 preferences, and structured consent guidance such as consent style, soft limits,
 hard limits, and aftercare style.
@@ -213,12 +221,16 @@ The API does not serialize raw embedding vectors. They are backend-owned recall
 state and are recomputed whenever memory content changes.
 
 Memory types:
+- user_fact
 - preference
 - interest
 - person
 - place
 - date
 - event
+- promise
+- theme
+- shared_lore
 - shared_moment
 - inside_joke
 - boundary
@@ -241,6 +253,7 @@ Fields:
 - mood string default steady
 - conflict_state string default clear
 - repair_needed boolean default false
+- emotional_state_json JSON, private bounded emotional continuity state
 - tags_json JSON list
 - last_interaction_at nullable datetime
 - metadata_json JSON, including timeline entries, milestone ids, recent_changes,
@@ -255,6 +268,18 @@ Recommended bounds:
 - tension: 0 to 100
 - familiarity: 0 to 100
 - attachment: 0 to 100
+
+`emotional_state_json` tracks bounded amusement, concern, warmth, hurt,
+guardedness, repair openness, recent cause tags, and an update timestamp. Each
+dimension decays toward a safe baseline at a temperament-appropriate rate.
+These values are backend-only: APIs and prompts expose only qualitative posture
+such as warm, concerned, guarded, or hurt-but-open-to-repair. A single apology
+can start repair but cannot erase accumulated hurt or immediately restore trust.
+
+`metadata_json.evidence_counts` records bounded behavioral evidence such as
+exchanges, meaningful events, conflicts, and repairs. Familiarity, nicknames,
+vulnerability, humour, and affection guidance advances from repeated evidence
+and meaningful events rather than presenting an XP level to the model or user.
 
 Stateful user messages may include `metadata_json.relationship_effect`, a
 compact source-linked record of the relationship deltas and milestone ids

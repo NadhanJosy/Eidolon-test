@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.companion.domain import CharacterSoul
 from app.security import normalize_email
 
 MAX_CHARACTER_DESCRIPTION_LENGTH = 2000
@@ -119,6 +120,7 @@ class CharacterOut(BaseModel):
     description: str | None
     personality_core: str | None
     speech_style: str | None
+    soul_json: CharacterSoul
     boundaries_json: dict[str, Any]
     explicit_age: int | None
     adult_mode_allowed: bool
@@ -134,6 +136,7 @@ class CharacterCreate(BaseModel):
     description: str | None = Field(default=None, max_length=MAX_CHARACTER_DESCRIPTION_LENGTH)
     personality_core: str | None = Field(default=None, max_length=MAX_CHARACTER_CORE_LENGTH)
     speech_style: str | None = Field(default=None, max_length=MAX_CHARACTER_STYLE_LENGTH)
+    soul_json: CharacterSoul = Field(default_factory=CharacterSoul)
     boundaries_json: dict[str, Any] = Field(default_factory=dict)
     explicit_age: int | None = Field(default=None, ge=0, le=150)
     adult_mode_allowed: bool = False
@@ -155,6 +158,7 @@ class CharacterUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=MAX_CHARACTER_DESCRIPTION_LENGTH)
     personality_core: str | None = Field(default=None, max_length=MAX_CHARACTER_CORE_LENGTH)
     speech_style: str | None = Field(default=None, max_length=MAX_CHARACTER_STYLE_LENGTH)
+    soul_json: CharacterSoul | None = None
     boundaries_json: dict[str, Any] | None = None
     explicit_age: int | None = Field(default=None, ge=0, le=150)
     adult_mode_allowed: bool | None = None
@@ -177,6 +181,7 @@ class CharacterUpdate(BaseModel):
         for field_name in (
             "name",
             "boundaries_json",
+            "soul_json",
             "adult_mode_allowed",
             "content_intensity",
         ):

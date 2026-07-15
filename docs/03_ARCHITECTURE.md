@@ -206,16 +206,22 @@ smoke test is opt-in and excluded from CI.
 3. Backend validates conversation ownership.
 4. Backend stores user message.
 5. Backend loads character.
-6. Backend loads relationship state.
-7. Backend retrieves relevant memories.
-8. Backend assembles prompt.
-9. Backend calls LLM provider.
-10. Backend streams response to frontend.
-11. Backend stores the completed assistant message exactly once, with bounded
+6. Backend infers intent, tone, subtext, time gap, and unresolved context.
+7. Backend retrieves relevant typed memories, episodes, and relationship state.
+8. Backend projects bounded emotional state and applies safety/content gates.
+9. Backend chooses a private response strategy, question policy, length, rhythm,
+   and optional initiative hook.
+10. Backend compiles character soul and turn context into ordered prompt modules.
+11. Backend calls the configured LLM provider and streams its response through
+    the existing SSE contract.
+12. Backend checks chunks for hard-boundary or private-plan leakage before SSE
+    emission, then checks the completed reply for contradictions, invented
+    history, repetition, interrogation, and tone drift.
+13. Backend stores the completed assistant message exactly once, with bounded
     generation telemetry and no prompt text.
-12. Backend updates relationship state.
-13. Backend queues PostgreSQL-backed post-chat memory/journal/proactive work.
-14. Failure or cancellation keeps the user message retryable and stores no
+14. Backend updates relationship and emotional state.
+15. Backend queues PostgreSQL-backed post-chat memory/journal/proactive work.
+16. Failure or cancellation keeps the user message retryable and stores no
     partial assistant text.
 
 Frontend character and conversation selection is versioned. Overlapping stale
@@ -226,20 +232,12 @@ fully loaded character/thread pair before surfacing a readable error.
 
 Prompt assembly must be centralized and testable.
 
-Prompt sections:
-
-1. Platform and safety instructions
-2. Character identity, personality, style, and boundaries
-3. Relationship state and milestones
-4. Concise user facts
-5. Relevant long-term memories
-6. Episodic summaries, promises, and unresolved threads
-7. Recent conversation history
-8. Current user message
-
-Response-quality guidance belongs in the first section so the current message
-remains last. The renderer applies a configured context budget, deduplicates
-memory text, and trims older/lower-priority context before the current turn.
+The renderer compiles typed backend state into discrete safety, soul identity,
+voice, relating, relationship, perception, user-fact, memory, episode, private
+response-direction, recent-history, and current-turn modules. It never dumps raw
+profile JSON, relationship meters, or a chain-of-thought plan. The current turn
+remains last, and configured context budgets trim older or lower-priority context
+before any high-priority instruction or current-message content.
 
 ## Background jobs
 

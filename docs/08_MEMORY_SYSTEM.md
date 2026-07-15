@@ -44,6 +44,8 @@ Level 2 additionally supports:
 - active context from recent messages
 - semantic memories with importance, confidence, emotional weight, pinning,
   decay, contradiction metadata, and normalized local feature embeddings
+- distinct facts, preferences, people, events, promises, boundaries, recurring
+  themes, and shared lore so retrieval and callbacks can value them differently
 - episodic journals for summaries, callbacks, unresolved threads, emotional
   tags, milestones, anniversaries, repair arcs, inside jokes, shared moments,
   shared references, and redacted adult-mode episodes
@@ -100,6 +102,8 @@ Extract only stable/useful facts:
 - important dates
 - meaningful events
 - explicit promises
+- recurring themes stated as patterns rather than one-off moods
+- named shared rituals or lore explicitly established in conversation
 - inside jokes
 - explicit boundaries
 
@@ -240,8 +244,10 @@ Implemented:
 - PostgreSQL `<=>` nearest-vector candidates combined with a deterministic
   pinned/recent candidate cohort before final hybrid ranking
 - hybrid vector similarity plus keyword, recency, importance, confidence,
-  emotional weight, pinning, relationship relevance, contradiction, and decay
-  scoring
+  emotional weight, pinning, memory-type relationship value, contradiction, and
+  decay scoring
+- exact-content deduplication after ranking and a bounded maximum of two active
+  items from any unresolved contradiction group
 - embedding generation on create, dedupe/merge, edit, and relationship
   milestone creation
 - lazy backfill of legacy null embeddings during retrieval
@@ -276,6 +282,15 @@ Current behavior:
   stale links
 - retrieval scoring penalizes unresolved conflicts, with an extra penalty for
   older memories that have been contradicted by a newer item
+- prompt rendering labels only genuinely active conflicts as uncertain, and the
+  completed-response check rejects a selected conflicting memory stated as
+  settled fact without qualifying uncertainty
+
+Callbacks remain optional. Retrieval can suggest a promise, person, theme,
+shared-lore item, or milestone, but the response plan uses it only when it fits
+the present intent and tone. Generated claims such as a shared anniversary or
+past event are rejected when neither selected memory nor recent transcript
+supports them.
 
 ## Memory viewer
 

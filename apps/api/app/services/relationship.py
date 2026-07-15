@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.companion.emotion import (
+    apply_emotional_turn,
+    emotional_mood,
+    project_emotional_state,
+    read_emotional_state,
+)
+from app.companion.perception import infer_turn_perception
 from app.models import MemoryItem, RelationshipState, ScheduledJob, utc_now
 from app.services.embedding import text_embedding
 from app.services.jobs import create_job
@@ -96,6 +104,7 @@ async def get_or_create_relationship(
         mood="steady",
         conflict_state="clear",
         repair_needed=False,
+        emotional_state_json={},
         tags_json=[],
         metadata_json={},
     )
@@ -148,6 +157,9 @@ async def update_relationship_from_message_with_effect(
     repair_needed_before = state.repair_needed
     conflict_state_before = state.conflict_state
     mood_before = state.mood
+    emotional_state_before = dict(state.emotional_state_json or {})
+    metadata_before = state.metadata_json if isinstance(state.metadata_json, dict) else {}
+    evidence_before = _evidence_counts(metadata_before.get("evidence_counts"))
 
     state.familiarity = clamp(state.familiarity + 0.2, 0, 100)
     if len(content) > 120:
@@ -174,7 +186,11 @@ async def update_relationship_from_message_with_effect(
 
     state.attachment = clamp(state.attachment + 0.02, 0, 100)
     state.conflict_state = _conflict_state(state)
-    state.mood = _mood(state)
+    perception = infer_turn_perception(content, recent_messages=[], journals=[])
+    if any(word in normalized for word in CONFLICT_WORDS) and not perception.conflict_signal:
+        perception = replace(perception, conflict_signal=True)
+    emotion = apply_emotional_turn(state, perception, now=utc_now())
+    state.mood = emotional_mood(emotion, repair_needed=state.repair_needed)
     state.tags_json = sorted(tags)[-8:]
     state.last_interaction_at = utc_now()
     recent_changes = _recent_changes(before, state, state.last_interaction_at)
@@ -194,6 +210,11 @@ async def update_relationship_from_message_with_effect(
         **(state.metadata_json or {}),
         "recent_changes": recent_changes,
         "recent_change_summary": _recent_change_summary(recent_changes),
+        "evidence_counts": _updated_evidence_counts(
+            evidence_before,
+            content=content,
+            normalized=normalized,
+        ),
     }
     milestone_ids = await _maybe_create_milestones(
         session,
@@ -209,6 +230,8 @@ async def update_relationship_from_message_with_effect(
         repair_needed_before=repair_needed_before,
         conflict_state_before=conflict_state_before,
         mood_before=mood_before,
+        emotional_state_before=emotional_state_before,
+        evidence_counts_before=evidence_before,
         applied_at=state.last_interaction_at,
         source_message_id=source_message_id,
         milestone_ids=milestone_ids,
@@ -268,7 +291,17 @@ async def reverse_relationship_message_effect(
         )
 
     state.conflict_state = _conflict_state(state)
-    state.mood = _mood(state)
+    emotional_before = effect.get("emotional_state_before")
+    if isinstance(emotional_before, dict):
+        state.emotional_state_json = emotional_before
+    evidence_before = effect.get("evidence_counts_before")
+    if isinstance(evidence_before, dict):
+        state.metadata_json = {
+            **(state.metadata_json or {}),
+            "evidence_counts": _evidence_counts(evidence_before),
+        }
+    emotion = read_emotional_state(state)
+    state.mood = emotional_mood(emotion, repair_needed=state.repair_needed)
     state.metadata_json = {
         **(state.metadata_json or {}),
         "recent_changes": [
@@ -323,6 +356,9 @@ async def ensure_relationship_decay_job(
 def apply_relationship_decay(state: RelationshipState, now: datetime) -> RelationshipState:
     if state.last_interaction_at is None:
         return state
+    emotion = project_emotional_state(state, now=now)
+    state.emotional_state_json = emotion.model_dump(mode="json")
+    state.mood = emotional_mood(emotion, repair_needed=state.repair_needed)
     days = max((now - state.last_interaction_at).total_seconds() / 86400, 0)
     if days < 1:
         return state
@@ -334,7 +370,7 @@ def apply_relationship_decay(state: RelationshipState, now: datetime) -> Relatio
         state.warmth = clamp(state.warmth + (0.12 * days), -100, 100)
     state.attachment = clamp(state.attachment - (0.03 * days), 0, 100)
     state.conflict_state = _conflict_state(state)
-    state.mood = _mood(state)
+    state.mood = emotional_mood(emotion, repair_needed=state.repair_needed)
     tags = set(state.tags_json or [])
     if days >= 3:
         tags.add("absence")
@@ -511,6 +547,8 @@ def _relationship_effect_metadata(
     repair_needed_before: bool,
     conflict_state_before: str,
     mood_before: str,
+    emotional_state_before: dict[str, object],
+    evidence_counts_before: dict[str, int],
     applied_at: datetime,
     source_message_id: uuid.UUID | None,
     milestone_ids: list[str],
@@ -530,6 +568,8 @@ def _relationship_effect_metadata(
         "conflict_state_after": state.conflict_state,
         "mood_before": mood_before,
         "mood_after": state.mood,
+        "emotional_state_before": emotional_state_before,
+        "evidence_counts_before": evidence_counts_before,
         "milestone_ids": milestone_ids,
     }
     if source_message_id is not None:
@@ -705,3 +745,39 @@ def _recent_change_summary(changes: list[dict[str, object]]) -> str:
         if isinstance(change.get("summary"), str)
     ]
     return " ".join(summaries) if summaries else "The relationship held steady."
+
+
+def _evidence_counts(value: object) -> dict[str, int]:
+    source = value if isinstance(value, dict) else {}
+    return {
+        key: _bounded_evidence_count(source.get(key))
+        for key in ("exchanges", "meaningful_events", "repairs", "conflicts")
+    }
+
+
+def _updated_evidence_counts(
+    before: dict[str, int],
+    *,
+    content: str,
+    normalized: str,
+) -> dict[str, int]:
+    updated = dict(before)
+    updated["exchanges"] = min(updated["exchanges"] + 1, 1_000_000)
+    meaningful = (
+        len(content) > 120
+        or any(word in normalized for word in (*POSITIVE_WORDS, *VULNERABLE_WORDS))
+        or any(marker in normalized for marker in ("remember", "promise", "milestone"))
+    )
+    if meaningful:
+        updated["meaningful_events"] = min(updated["meaningful_events"] + 1, 1_000_000)
+    if any(word in normalized for word in REPAIR_WORDS):
+        updated["repairs"] = min(updated["repairs"] + 1, 1_000_000)
+    if any(word in normalized for word in CONFLICT_WORDS):
+        updated["conflicts"] = min(updated["conflicts"] + 1, 1_000_000)
+    return updated
+
+
+def _bounded_evidence_count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return max(0, min(value, 1_000_000))

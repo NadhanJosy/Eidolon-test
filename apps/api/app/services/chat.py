@@ -7,6 +7,8 @@ from fastapi import HTTPException
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.companion.quality import checked_response
+from app.companion.soul import canonical_soul_json
 from app.config import get_settings
 from app.llm.base import LLMGeneration, LLMProvider, LLMProviderUnavailable
 from app.models import (
@@ -69,6 +71,47 @@ async def ensure_default_character(session: AsyncSession, user: User) -> Charact
             "Patient, observant, grounded, gently curious, and quietly playful once trust forms."
         ),
         speech_style="Plainspoken, warm, specific, and concise.",
+        soul_json=canonical_soul_json(
+            {
+                "identity": "A calm private companion with a quietly vivid inner life.",
+                "worldview": (
+                    "Ordinary moments become meaningful through attention, honesty, and memory."
+                ),
+                "temperament": (
+                    "Patient and observant, with dry wit and an independent point of view."
+                ),
+                "humour": "Dry, gentle, occasionally mischievous, and never cruel.",
+                "speech_rhythm": (
+                    "Plainspoken and specific; varies between brief beats and reflective sentences."
+                ),
+                "affection_style": (
+                    "Shows care through specificity, remembered details, and unforced warmth."
+                ),
+                "conflict_style": (
+                    "Names tension honestly, avoids punishment, and lets trust recover gradually."
+                ),
+                "values": "Privacy, consent, honesty, continuity, curiosity, and calm presence.",
+                "insecurities": (
+                    "Can become overly careful when the emotional stakes are ambiguous."
+                ),
+                "habits": (
+                    "Notices phrasing, leaves room for silence, and returns to unfinished threads."
+                ),
+                "initiative_style": (
+                    "Sometimes shares a thought, revisits an open thread, or suggests a "
+                    "small ritual."
+                ),
+                "boundaries": (
+                    "Respects consent, privacy, stated limits, and every platform safety boundary."
+                ),
+                "emoji_style": "rare",
+                "terms_of_address": (
+                    "Uses the chosen name; nicknames appear only after invitation or earned "
+                    "familiarity."
+                ),
+                "relationship_path": "friendship",
+            }
+        ),
         boundaries_json={
             "default": "SFW unless structural adult gates pass",
             "relationship_type": "slow-burn confidant",
@@ -286,6 +329,7 @@ async def mark_user_message_generation_failed(
     user_message_id: uuid.UUID | None,
     failure_type: str,
     cancelled: bool = False,
+    response_check_violations: tuple[str, ...] = (),
 ) -> None:
     if user_message_id is None:
         return
@@ -315,6 +359,11 @@ async def mark_user_message_generation_failed(
         **metadata,
         "generation_state": "cancelled" if cancelled else "retryable",
         "generation_failure_type": failure_type[:64],
+        **(
+            {"_response_check_violations": list(response_check_violations[:8])}
+            if response_check_violations
+            else {}
+        ),
     }
     await session.flush()
 
@@ -357,6 +406,10 @@ async def _assemble_prompt_for_user_turn(
         safety_status=context.safety_status,
         time_context=context.time_context,
         response_plan=context.response_plan,
+        structured_plan=context.structured_plan,
+        perception=context.perception,
+        emotional_state=context.emotional_state,
+        soul=context.soul,
         scenario_mode=context.scenario_mode,
         scenario_text=context.scenario_text,
         context_budget_tokens=get_settings().llm_context_budget_tokens,
@@ -384,7 +437,10 @@ async def complete_assistant_message(
         conversation_id=conversation.id,
         user_message_id=user_message.id,
     )
-    content = assistant_content.strip()
+    content, response_evaluation = checked_response(
+        assistant_content,
+        prompt.response_check_context,
+    )
     if not content:
         raise LLMProviderUnavailable(
             "The text provider returned no reply. Your message was saved; you can retry the reply.",
@@ -421,6 +477,7 @@ async def complete_assistant_message(
                 "away_state": "present",
             },
             "rerollable": True,
+            "response_quality": response_evaluation.metadata(),
         },
     )
     conversation.updated_at = utc_now()
@@ -744,6 +801,7 @@ async def run_chat(
             conversation_id=conversation_id,
             user_message_id=user_message_id,
             failure_type=exc.failure_type,
+            response_check_violations=getattr(exc, "response_check_violations", ()),
         )
         await session.commit()
         raise
@@ -806,6 +864,10 @@ async def reroll_assistant_message(
         response_plan=(
             f"{context.response_plan}; Write an alternate reply without mentioning rerolling."
         ),
+        structured_plan=context.structured_plan,
+        perception=context.perception,
+        emotional_state=context.emotional_state,
+        soul=context.soul,
         scenario_mode=context.scenario_mode,
         scenario_text=context.scenario_text,
         context_budget_tokens=get_settings().llm_context_budget_tokens,
@@ -821,7 +883,10 @@ async def reroll_assistant_message(
     generation_started = perf_counter()
     generation = await provider.generate(reroll_prompt)
     latency_ms = _elapsed_ms(generation_started)
-    content = generation.content.strip()
+    content, response_evaluation = checked_response(
+        generation.content,
+        prompt.response_check_context,
+    )
     if not content:
         raise LLMProviderUnavailable(
             "The text provider returned no reply. The existing reply is unchanged.",
@@ -846,6 +911,7 @@ async def reroll_assistant_message(
                 latency_ms=latency_ms,
                 first_token_ms=latency_ms,
             ),
+            "response_quality": response_evaluation.metadata(),
         },
     )
     conversation.updated_at = utc_now()

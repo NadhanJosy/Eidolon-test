@@ -505,8 +505,24 @@ function validAssembledContext(value: unknown, characterId: string): value is As
     completeUniqueList(manifest.journal_items, 8, validContextJournal) &&
     completeUniqueList(manifest.recent_messages, 12, validRecentMessage) &&
     validContextSafety(manifest.safety) &&
+    (manifest.orchestration === undefined || validOrchestration(manifest.orchestration)) &&
     boundedText(manifest.time_context, 80) &&
     integerRange(manifest.current_message_chars, 0, 6_000)
+  );
+}
+
+function validOrchestration(value: unknown): boolean {
+  return (
+    record(value) &&
+    boundedText(value.intent, 40) &&
+    boundedText(value.tone, 40) &&
+    boundedText(value.time_gap, 40) &&
+    boundedText(value.strategy, 40) &&
+    (value.secondary_strategy === null || boundedText(value.secondary_strategy, 40)) &&
+    boundedText(value.desired_length, 40) &&
+    boundedText(value.rhythm, 40) &&
+    typeof value.question_planned === "boolean" &&
+    boundedText(value.initiative, 40)
   );
 }
 

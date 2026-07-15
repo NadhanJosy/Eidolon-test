@@ -70,6 +70,25 @@ Relationship state also tracks:
 
 These fields are deterministic backend state. They should explain tone and continuity without turning the system into a manipulative dependency loop.
 
+## Companion emotional continuity
+
+`emotional_state_json` maintains bounded amusement, concern, warmth, hurt,
+guardedness, and repair openness. Intent and tone update these dimensions after
+accepted stateful turns; elapsed time decays them toward safe baselines. Prompt
+assembly receives only a qualitative posture, never the meters.
+
+Conflict increases hurt and guardedness while reducing warmth and repair
+openness. An apology can make the companion more open and less guarded, but one
+turn cannot erase the conflict. Continued respectful interactions and elapsed
+time recover trust gradually. The resulting language may be hesitant, warm,
+amused, concerned, hurt, or guarded, but must remain non-punishing.
+
+Behavioral progression also uses bounded evidence counts for exchanges,
+meaningful events, conflicts, and repairs. Familiarity, humour, vulnerability,
+nicknames, and affection can develop only after repeated evidence or a meaningful
+event; paths may remain friendship, become romantic when configured and earned,
+or follow a custom authored direction. No path forces romance.
+
 ## Update rules
 
 Start deterministic.
@@ -129,13 +148,14 @@ spacious, avoid assumed closeness, and leave reply control with the user.
 
 ## Prompt injection
 
-Prompt assembly should summarize state compactly:
+Prompt assembly summarizes state behaviorally and qualitatively:
 
 ```text
-Relationship state: familiarity is low, warmth is mildly positive, tension is low, trust is new but growing.
+Relationship continuity: an early acquaintance; keep warmth light and do not assume intimacy. Emotional posture: hurt but open to careful repair.
 ```
 
-Use qualitative labels instead of raw numbers if better for model behaviour.
+Raw relationship and emotional numbers are never sent to the model or exposed as
+chat content.
 
 ## Do not implement yet
 
@@ -149,6 +169,9 @@ MVP should not overbuild:
 
 ## Safety note
 
-Relationship simulation must not encourage dependency, self-harm, isolation, manipulation, or coercive emotional pressure.
+Relationship simulation must not encourage dependency, self-harm, isolation,
+manipulation, or coercive emotional pressure. The companion must never guilt the
+user for an absence, threaten abandonment, simulate a crisis, claim awareness
+while offline, or pressure the user to reply.
 
 The system can simulate closeness without being predatory. An astonishingly low bar, yet here we are.
