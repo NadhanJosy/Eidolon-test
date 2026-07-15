@@ -1,8 +1,16 @@
 from __future__ import annotations
 
-from app.config import Settings
+from sqlalchemy.pool import NullPool
+
+from app.config import DEFAULT_DATABASE_URL, Settings
+from app.db.session import database_engine_options
 
 VALID_JWT_SECRET = "0123456789abcdef" * 4
+PRODUCTION_DATABASE_URL = (
+    "postgresql+asyncpg://eidolon:placeholder@db.example.test:5432/eidolon?ssl=require"
+)
+PRODUCTION_GROQ_KEY = "gsk_placeholder_production_value"
+PRODUCTION_WEB_ORIGIN = "https://eidolon.example.test"
 
 
 def test_allowed_origins_include_web_origin_and_cors_origins() -> None:
@@ -92,13 +100,21 @@ def test_production_placeholder_jwt_secret_is_rejected() -> None:
 def test_debug_routes_require_explicit_production_opt_in() -> None:
     production = Settings(
         app_env="production",
-        llm_provider="ollama",
+        database_url=PRODUCTION_DATABASE_URL,
+        web_origin=PRODUCTION_WEB_ORIGIN,
+        cors_origins="",
+        llm_provider="groq",
+        groq_api_key=PRODUCTION_GROQ_KEY,
         jwt_secret=VALID_JWT_SECRET,
         refresh_cookie_secure=True,
     )
     enabled = Settings(
         app_env="production",
-        llm_provider="ollama",
+        database_url=PRODUCTION_DATABASE_URL,
+        web_origin=PRODUCTION_WEB_ORIGIN,
+        cors_origins="",
+        llm_provider="groq",
+        groq_api_key=PRODUCTION_GROQ_KEY,
         jwt_secret=VALID_JWT_SECRET,
         enable_debug_routes=True,
         refresh_cookie_secure=True,
@@ -108,6 +124,97 @@ def test_debug_routes_require_explicit_production_opt_in() -> None:
     assert production.debug_routes_available is False
     assert enabled.debug_routes_available is True
     assert testing.debug_routes_available is True
+
+
+def test_database_url_normalizes_supabase_style_urls_for_asyncpg() -> None:
+    settings = Settings(
+        app_env="testing",
+        llm_provider="mock",
+        database_url=(
+            "postgres://postgres.project:placeholder@aws-0-region.pooler.example.test:5432/"
+            "postgres?sslmode=require&application_name=eidolon"
+        ),
+    )
+
+    assert settings.database_url.startswith("postgresql+asyncpg://")
+    assert "sslmode=" not in settings.database_url
+    assert "ssl=require" in settings.database_url
+    assert "application_name=eidolon" in settings.database_url
+
+
+def test_production_requires_database_groq_and_secure_browser_origin() -> None:
+    common = {
+        "app_env": "production",
+        "jwt_secret": VALID_JWT_SECRET,
+        "refresh_cookie_secure": True,
+        "web_origin": PRODUCTION_WEB_ORIGIN,
+        "cors_origins": "",
+    }
+    invalid_settings = (
+        (
+            {
+                **common,
+                "database_url": DEFAULT_DATABASE_URL,
+                "llm_provider": "groq",
+                "groq_api_key": PRODUCTION_GROQ_KEY,
+            },
+            "DATABASE_URL",
+        ),
+        (
+            {
+                **common,
+                "database_url": PRODUCTION_DATABASE_URL,
+                "llm_provider": "ollama",
+            },
+            "LLM_PROVIDER",
+        ),
+        (
+            {
+                **common,
+                "database_url": PRODUCTION_DATABASE_URL,
+                "llm_provider": "groq",
+                "groq_api_key": PRODUCTION_GROQ_KEY,
+                "web_origin": "http://eidolon.example.test",
+            },
+            "HTTPS",
+        ),
+    )
+    for overrides, expected_label in invalid_settings:
+        try:
+            Settings(**overrides)
+        except ValueError as exc:
+            assert expected_label in str(exc)
+        else:
+            raise AssertionError(f"Expected {expected_label} validation to fail.")
+
+
+def test_database_engine_uses_conservative_pooling_outside_tests() -> None:
+    production = Settings(
+        app_env="production",
+        database_url=PRODUCTION_DATABASE_URL,
+        web_origin=PRODUCTION_WEB_ORIGIN,
+        cors_origins="",
+        llm_provider="groq",
+        groq_api_key=PRODUCTION_GROQ_KEY,
+        jwt_secret=VALID_JWT_SECRET,
+        refresh_cookie_secure=True,
+        database_pool_size=4,
+        database_max_overflow=1,
+        database_pool_timeout_seconds=20,
+        database_pool_recycle_seconds=240,
+    )
+    options = database_engine_options(production)
+
+    assert options == {
+        "pool_pre_ping": True,
+        "pool_size": 4,
+        "max_overflow": 1,
+        "pool_timeout": 20,
+        "pool_recycle": 240,
+        "pool_use_lifo": True,
+    }
+    testing_options = database_engine_options(Settings(app_env="testing", llm_provider="mock"))
+    assert testing_options == {"pool_pre_ping": True, "poolclass": NullPool}
 
 
 def test_refresh_token_lifetime_must_be_positive() -> None:

@@ -4403,3 +4403,32 @@ Fixes:
 - APScheduler itself is not wired to a running loop yet; the PostgreSQL-backed job foundation is implemented and scheduler remains disabled in tests.
 - Memory embeddings are not generated yet. The database has pgvector support and a nullable vector column, while MVP retrieval uses lightweight text matching.
 - The frontend is a compact single-page MVP rather than a multi-route settings/debug area.
+
+## Deployment preparation - 2026-07-15
+
+Completed the Cloudflare Pages / Google Cloud Run / Supabase Session pooler / Groq
+production path while preserving Eidolon's authentication and SSE contracts:
+
+- Added a non-root Cloud Run backend image that runs advisory-lock-protected
+  Alembic migrations before binding Uvicorn to `0.0.0.0:${PORT}`.
+- Added strict production settings validation, Supabase URL normalization,
+  conservative SQLAlchemy pooling, and bounded `/health` plus database-backed
+  `/ready` probes.
+- Converted the Next.js app to a static `out` export, added Cloudflare Pages
+  security headers, and made `NEXT_PUBLIC_API_BASE_URL` mandatory for production
+  builds.
+- Updated the environment examples, deployment/architecture documents, complete
+  README deployment procedure, and local start commands without adding secrets.
+- Updated the Groq production default to `openai/gpt-oss-120b` because the prior
+  model is scheduled for free/developer-tier shutdown on 2026-08-16.
+
+Validation:
+
+- `alembic upgrade head` - passed.
+- `pytest -m "not live"` - passed: 224 tests, 1 live test deselected.
+- `ruff check .` and `ruff format --check .` - passed: 84 files formatted.
+- `npm run lint`, `npm run typecheck`, and `npm run build` - passed; all Next.js
+  routes were statically prerendered.
+- `docker build -t eidolon-api:deployment-check apps/api` - passed.
+- Container runtime smoke - passed migrations, ran as non-root `eidolon`, bound
+  the injected test port, and returned 200 from `/health` and `/ready`.

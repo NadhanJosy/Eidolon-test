@@ -52,9 +52,9 @@ Development:
 - explicit deterministic mock provider for automated tests and UI scaffolding
 
 Production:
-- GroqCloud first through the replaceable provider interface
-- Ollama remains the zero-recurring-cost self-hosted path
-- local target remains an 8B quantized model
+- Groq through the replaceable provider interface
+- production startup requires the Groq provider and a server-side key
+- Ollama remains a development/self-hosting option, not a Cloud Run fallback
 
 No provider key or inference call may enter the browser. The default Groq path
 uses the user's configured account; core state and provider history remain in
@@ -78,18 +78,11 @@ No Redis/Celery for MVP.
 
 ## Deployment target
 
-- Oracle Cloud Always Free ARM VM
-- Ubuntu
-- Caddy
-- systemd
-- PostgreSQL
-- Ollama
-- FastAPI
-
-Frontend may be hosted on:
-- Vercel Hobby
-- Cloudflare Pages
-- or served separately later
+- Cloudflare Pages static Next.js export
+- Google Cloud Run FastAPI container
+- Supabase PostgreSQL through its Session pooler
+- Groq inference from the backend only
+- Eidolon's existing authentication and PostgreSQL refresh sessions
 
 ## Monitoring
 

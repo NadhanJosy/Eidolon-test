@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -16,6 +16,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+MIGRATION_ADVISORY_LOCK_KEY = 0x4549444F4C4F4E
 
 
 def run_migrations_offline() -> None:
@@ -32,10 +33,29 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    if connection.dialect.name != "postgresql":
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
 
-    with context.begin_transaction():
-        context.run_migrations()
+    connection.execute(
+        text("SELECT pg_advisory_lock(:lock_key)"),
+        {"lock_key": MIGRATION_ADVISORY_LOCK_KEY},
+    )
+    connection.commit()
+    try:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+    finally:
+        if connection.in_transaction():
+            connection.rollback()
+        connection.execute(
+            text("SELECT pg_advisory_unlock(:lock_key)"),
+            {"lock_key": MIGRATION_ADVISORY_LOCK_KEY},
+        )
+        connection.commit()
 
 
 async def run_async_migrations() -> None:

@@ -1019,6 +1019,9 @@ async def test_stream_persists_final_assistant_without_duplicate(client: AsyncCl
         body = await response.aread()
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, no-transform"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.headers["content-type"].startswith("text/event-stream")
     text = body.decode()
     assert "event: message_start" in text
     assert "event: token" in text

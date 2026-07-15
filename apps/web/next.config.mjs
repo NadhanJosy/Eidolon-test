@@ -1,27 +1,19 @@
-const responseHeaders = [
-  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-  { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
-  {
-    key: "Permissions-Policy",
-    value: "browsing-topics=(), camera=(), geolocation=(), microphone=(), payment=(), usb=()"
-  },
-  { key: "Referrer-Policy", value: "no-referrer" },
-  { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
-  { key: "X-Permitted-Cross-Domain-Policies", value: "none" }
-];
+const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+
+if (process.env.NODE_ENV === "production") {
+  if (!configuredApiBaseUrl) {
+    throw new Error("NEXT_PUBLIC_API_BASE_URL is required for a production frontend build.");
+  }
+  const apiUrl = new URL(configuredApiBaseUrl);
+  if (!new Set(["http:", "https:"]).has(apiUrl.protocol) || apiUrl.username || apiUrl.password) {
+    throw new Error("NEXT_PUBLIC_API_BASE_URL must be an HTTP(S) URL without credentials.");
+  }
+}
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  poweredByHeader: false,
-  async headers() {
-    return [
-      {
-        source: "/(.*)",
-        headers: responseHeaders
-      }
-    ];
-  }
+  output: "export",
+  poweredByHeader: false
 };
 
 export default nextConfig;

@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi import FastAPI
 from httpx import AsyncClient
 from pytest import MonkeyPatch
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings
-from app.main import lifespan
+from app.db.session import get_session
+from app.main import app, lifespan
 
 
 async def test_health_exact(client: AsyncClient) -> None:
@@ -20,6 +22,32 @@ async def test_health_db(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+async def test_ready_verifies_database_without_exposing_failure_details(
+    client: AsyncClient,
+) -> None:
+    response = await client.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "database": "ok"}
+    assert response.headers["cache-control"] == "no-store"
+
+    class UnavailableSession:
+        async def execute(self, _: object) -> None:
+            raise SQLAlchemyError("postgresql://private-user:private-password@private-host")
+
+    async def unavailable_session():
+        yield UnavailableSession()
+
+    app.dependency_overrides[get_session] = unavailable_session
+    try:
+        unavailable = await client.get("/ready")
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+    assert unavailable.status_code == 503
+    assert unavailable.json() == {"status": "unavailable", "database": "unavailable"}
+    assert "private" not in unavailable.text
 
 
 async def test_health_llm_mock(client: AsyncClient) -> None:

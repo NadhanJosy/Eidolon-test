@@ -2,23 +2,25 @@
 
 ## Risk: free-tier instability
 
-Oracle/Vercel/GitHub free tiers may change, throttle, reclaim, or limit resources.
+Cloudflare, Google Cloud, Supabase, Groq, and GitHub free tiers may change,
+throttle, reclaim, or limit resources.
 
 Mitigation:
 - design as zero-cost personal MVP, not guaranteed free-at-scale platform
 - keep deployment portable
 - backup data
 
-## Risk: CPU inference too slow
+## Risk: managed-service limits or outage
 
-Ollama on ARM CPU may produce slow responses.
+Groq, Cloud Run, or Supabase may throttle, pause, exhaust quota, or become
+temporarily unavailable.
 
 Mitigation:
-- stream responses
-- keep prompts compact
-- use mock/small model for background jobs
-- limit concurrency
-- accept slower texting-like cadence
+- preserve the provider abstraction and portable PostgreSQL schema
+- use bounded retries and readable failure states
+- keep prompts compact and stream responses
+- cap Cloud Run instances and SQLAlchemy pool connections
+- back up user data and monitor `/ready`
 
 ## Risk: Codex overbuilds
 

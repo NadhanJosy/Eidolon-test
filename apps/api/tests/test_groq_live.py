@@ -25,7 +25,7 @@ async def test_live_groq_stream_smoke(
     provider = GroqProvider(
         api_key=api_key,
         base_url="https://api.groq.com/openai/v1",
-        model=os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        model=os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
         temperature=0.2,
         max_output_tokens=32,
         timeout_seconds=30,

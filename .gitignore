@@ -22,6 +22,7 @@ out/
 dist/
 .turbo/
 .vercel/
+*.tsbuildinfo
 
 # Logs/data
 *.log

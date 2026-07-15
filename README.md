@@ -1,206 +1,77 @@
 # Eidolon
 
-Eidolon is a private, text-only AI companion application built around continuity:
-durable memory, a recognisable character soul, emotional state, relationship
-evolution, episodic callbacks, and proactive text presence. The backend owns
-every durable fact and policy decision; the language model is responsible only
-for generating the next reply.
+Eidolon is a private, text-only AI companion application built around durable
+memory, character continuity, relationship state, and streamed conversation.
+The FastAPI backend owns all durable state and safety decisions; the language
+model generates text only.
 
-The current MVP includes a production-shaped FastAPI/PostgreSQL backend, a
-mobile-first Next.js interface, real GroqCloud streaming, an Ollama path for
-self-hosted inference, and an explicit deterministic mock used only for
-development and tests.
+This repository is configured for the following production deployment:
 
-Eidolon is deliberately not an avatar or simulated surveillance product. It does
-not claim sentience, awareness while offline, or fabricated actions between
-messages. Its sense of presence comes from selective recall, consistent
-characterisation, emotional continuity, and behavior that changes gradually with
-real interaction history.
-
-## Current capabilities
-
-- Account registration, login, refresh-token rotation, logout, rate limiting,
-  private export, scoped data cleanup, and account deletion
-- Multiple companions with authored persona, greeting, atmosphere, boundaries,
-  adult eligibility, memory posture, and proactive-presence preferences
-- Multiple conversations with search, unread state, shared scenes, edit/delete,
-  reroll, retry, Stop, and exact SSE token streaming
-- Durable message history with exactly-once completed assistant persistence and
-  recoverable user turns after provider failure or cancellation
-- A staged companion-intelligence pipeline that infers the moment, retrieves
-  continuity, projects mood and boundaries, privately plans a strategy, renders
-  modular prompts, and checks the generated reply without exposing the plan
-- Editable character souls covering worldview, temperament, humour, speech
-  rhythm, affection/conflict style, values, habits, initiative, and boundaries
-- Hybrid PostgreSQL recall using pgvector and text similarity, reversible memory
-  forgetting, pinning, source-linked memories, deduplication, and conflicts
-- Bounded emotional continuity, evidence-paced relationship evolution, gradual
-  conflict repair, milestones, episodic journals, callbacks, promises, open
-  threads, and user-authored reflections
-- PostgreSQL-backed scheduled work for post-chat cognition and proactive notes,
-  with advisory locking, quiet hours, cooldowns, retries, and failure isolation
-- Conversation and one-turn privacy modes that exclude private material from
-  later learning, relationship changes, journals, and proactive work
-- Privacy-safe provider readiness, generation telemetry, and authenticated debug
-  diagnostics without prompts, message text, keys, exception bodies, or URLs
-- Mobile-first text interface with Memories, Relationship, Moments, Settings,
-  companion onboarding, reduced-motion support, and a lightweight web manifest
-
-## Architecture
-
-| Layer | Implementation |
+| Layer | Production service |
 | --- | --- |
-| Web | Next.js App Router, React, TypeScript, Tailwind CSS |
-| API | FastAPI, Pydantic v2, SQLAlchemy 2 async, APScheduler |
-| Database | PostgreSQL 16, pgvector, pg_trgm, Alembic migrations |
-| Streaming | Server-Sent Events from provider to FastAPI to browser |
-| Inference | GroqCloud first, Ollama supported, explicit mock for dev/tests |
-| Local infrastructure | Docker Compose for PostgreSQL only |
-| Production path | Oracle Cloud Always Free ARM, systemd, Caddy, Ollama |
+| Frontend | Cloudflare Pages, static Next.js export |
+| Backend | Google Cloud Run, containerized FastAPI |
+| Database | Supabase PostgreSQL through the Session pooler |
+| AI | Groq, called only by the backend |
+| Authentication | Eidolon's existing JWT access tokens and rotating HttpOnly refresh sessions |
 
-PostgreSQL is the source of truth for accounts, companions, conversations,
-messages, memories, relationship state, journals, auth sessions, diagnostics,
-and scheduled jobs. Provider-side conversation storage is not used.
+Supabase Auth is not used. Database credentials, Groq keys, JWT secrets, and
+refresh tokens never belong in the frontend.
 
-## Companion intelligence
+## Repository and deployment roots
 
-### How a reply is produced
+| Target | Root directory | Build/start setting | Output/port |
+| --- | --- | --- | --- |
+| Cloudflare Pages | `apps/web` | `npm run build` | `out` |
+| Cloud Run build context | `apps/api` | `Dockerfile` | container port `8080` |
+| Local backend | `apps/api` | `uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload` | `8000` |
+| Local frontend | `apps/web` | `npm run dev` | `3000` |
 
-Every standard message, streamed message, reroll, and edited turn uses the same
-backend-owned pipeline:
+Cloud Run injects `PORT`; the image starts Uvicorn on `0.0.0.0:${PORT}`. Do not
+set `PORT` as a user-defined Cloud Run variable.
 
-1. Infer the user's intent, tone, subtext, time gap, and unresolved context.
-2. Retrieve relevant typed memories, episodes, promises, open threads, and
-   relationship context.
-3. Apply content boundaries and project the companion's decayed emotional
-   posture.
-4. Select a private response strategy, question policy, length, rhythm, opening,
-   callback posture, and optional initiative hook.
-5. Compile ordered prompt modules and ask the configured provider for the
-   in-character reply.
-6. Check boundaries, private-context leakage, memory support, contradictions,
-   repetition, question patterns, assistant clichés, unwanted formatting, and
-   obvious tone drift.
+## What is included
 
-The private response plan is direction for generation, not chat content or a
-chain-of-thought transcript. It is never returned as a normal message. Debug
-surfaces only bounded categorical orchestration data such as intent, strategy,
-rhythm, initiative kind, and whether a question was planned.
+- Account registration, login, rotating refresh sessions, logout, throttling,
+  private export, scoped cleanup, and account deletion
+- Multiple authored companions and conversations
+- Exact Server-Sent Events (SSE) streaming from Groq through FastAPI to the
+  browser
+- PostgreSQL-backed messages, memories, journals, relationships, diagnostics,
+  auth sessions, and scheduled jobs
+- Hybrid pgvector and text-similarity recall
+- Backend-owned persona prompts, relationship evolution, safety gates, private
+  turns, and adult-mode eligibility
+- A deterministic mock provider for development and tests only
+- Alembic migrations and PostgreSQL advisory locks for safe concurrent container
+  startup
 
-### Character soul
+## Local start
 
-Each companion has an editable, validated `soul_json` profile covering:
+Requirements:
 
-- identity, worldview, temperament, and values
-- humour, speech rhythm, emoji posture, and terms of address
-- affection style, conflict style, insecurities, and habits
-- initiative style, personal boundaries, and friendship/romantic/custom path
-
-Prompt assembly compiles these fields into natural identity, voice, and relating
-modules. It never dumps raw profile JSON into the model context. Legacy character
-fields remain supported as migration fallbacks.
-
-### Emotional and relationship continuity
-
-The relationship row owns a private bounded emotional state: amusement, concern,
-warmth, hurt, guardedness, and openness to repair. These values decay toward safe
-baselines and are translated into qualitative wording guidance; the emotional
-meters are never exposed in chat or prompt text.
-
-Conflict can leave the companion hurt or guarded without becoming punitive. An
-apology can begin repair, but cannot erase accumulated tension in one turn.
-Familiarity, trust, vulnerability, humour, nicknames, and affection progress from
-repeated exchanges and meaningful events rather than an XP level. Friendship is
-the default, romance is never forced, and adult behavior remains age-gated,
-consent-aware, and private.
-
-### Memory and initiative
-
-Durable memories distinguish user facts, preferences, people, events, promises,
-boundaries, recurring themes, shared lore, inside jokes, shared moments, and
-relationship milestones. Retrieval combines semantic and text relevance with
-recency, importance, confidence, emotional weight, relationship value, pinning,
-decay, and contradiction state.
-
-Results are deduplicated and unresolved conflicts retain uncertainty. A callback
-is used only when it fits the current moment; unsupported shared-history claims
-fail response validation rather than becoming a new memory. Character-specific
-initiative can revisit an open thread, mention a selected memory, share a thought,
-or suggest a small text-based activity. Existing PostgreSQL-backed proactive jobs
-provide the scheduling hooks without claiming offline awareness.
-
-### Conversational realism and quality checks
-
-Planning can choose comfort, celebration, teasing, challenge, advice, listening,
-flirtation, reminiscence, apology, repair, disclosure, redirection, or simply
-sharing the moment. It independently decides whether a question helps and varies
-length, rhythm, and openings to avoid interrogation and repeated endings.
-
-Hard-boundary and private-plan leakage checks run on the accumulated stream before
-each token chunk is emitted. The completed response is checked again before it is
-persisted. Soft quality findings such as repeated openings or tone drift are kept
-as bounded generation metadata for evaluation and regression testing, never as
-visible companion narration.
-
-## Requirements
-
-- Git
 - Docker with Docker Compose
 - Python 3.12 or newer
 - Node.js 22 and npm
-- A Groq API key for real Groq replies, or explicit mock mode for local UI work
-- Ollama only when selecting the self-hosted provider
+- Git
 
-## Quick start
-
-### 1. Create local configuration
-
-From the repository root, create the files only if they do not already exist:
+Create local configuration from the repository root:
 
 ```bash
 test -f .env || cp .env.example .env
 test -f apps/web/.env.local || cp apps/web/.env.example apps/web/.env.local
 ```
 
-Keep `.env` and `apps/web/.env.local` untracked. They are ignored by Git.
+The example selects `LLM_PROVIDER=mock`, so local development does not require a
+Groq key. `.env` and `apps/web/.env.local` are ignored by Git.
 
-Choose one backend provider in `.env`.
-
-For real Groq streaming:
-
-```dotenv
-APP_ENV=development
-LLM_PROVIDER=groq
-GROQ_API_KEY=your-private-server-side-key
-GROQ_MODEL=llama-3.3-70b-versatile
-```
-
-For deterministic local development without a model call:
-
-```dotenv
-APP_ENV=development
-LLM_PROVIDER=mock
-GROQ_API_KEY=
-```
-
-Never put `GROQ_API_KEY` in `apps/web`, a `NEXT_PUBLIC_*` variable, source
-control, logs, or browser storage.
-
-For the quickest first run, select `LLM_PROVIDER=mock`. It requires no model or
-API key and exercises the full persistence, orchestration, memory, relationship,
-and SSE application path with deterministic text.
-
-### 2. Start PostgreSQL
+Start PostgreSQL:
 
 ```bash
 docker compose up -d postgres
 ```
 
-The Compose service exposes PostgreSQL on `localhost:5432`, creates the
-development database, and enables pgvector and pg_trgm through
-`scripts/init-db.sql`.
-
-### 3. Install and migrate the API
+Install, migrate, and start the backend:
 
 ```bash
 cd apps/api
@@ -208,23 +79,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 alembic upgrade head
-```
-
-### 4. Start the API
-
-Still in `apps/api` with the virtual environment active:
-
-```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The API reads `apps/api/.env` first and the repository-root `.env` second. The
-personal development scheduler starts with the API by default. Set
-`ENABLE_SCHEDULER=false` for API-only work.
-
-### 5. Install and start the web app
-
-In a second terminal:
+In a second terminal, install and start the frontend:
 
 ```bash
 cd apps/web
@@ -232,61 +90,23 @@ npm ci
 npm run dev
 ```
 
-Open:
+Open <http://localhost:3000>. Useful backend endpoints are:
 
-- Web app: <http://localhost:3000>
 - API documentation: <http://localhost:8000/docs>
-- API health: <http://localhost:8000/health>
-- Database health: <http://localhost:8000/health/db>
-- Model health: <http://localhost:8000/health/llm>
+- Liveness: <http://localhost:8000/health>
+- Readiness/database connectivity: <http://localhost:8000/ready>
+- Database diagnostic: <http://localhost:8000/health/db>
+- Provider diagnostic: <http://localhost:8000/health/llm>
 
-Verify the services from a terminal:
-
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/health/db
-curl http://localhost:8000/health/llm
-```
-
-Stop local PostgreSQL when finished:
+After the one-time installs, the three recurring start commands are:
 
 ```bash
-docker compose down
-```
-
-The named database volume is retained. `docker compose down -v` also deletes
-local database data and should only be used intentionally.
-
-## Start-command summary
-
-For a first local run with the mock provider, complete the configuration step
-above, set `LLM_PROVIDER=mock` in `.env`, and run:
-
-```bash
-# One-time backend setup
-docker compose up -d postgres
-cd apps/api
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-alembic upgrade head
-```
-
-```bash
-# One-time frontend setup, from the repository root
-cd apps/web
-npm ci
-```
-
-After the one-time installs, use three terminals from the repository root:
-
-```bash
-# Terminal 1: database
+# Terminal 1, repository root
 docker compose up -d postgres
 ```
 
 ```bash
-# Terminal 2: API
+# Terminal 2, repository root
 cd apps/api
 source .venv/bin/activate
 alembic upgrade head
@@ -294,283 +114,340 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ```bash
-# Terminal 3: web
+# Terminal 3, repository root
 cd apps/web
 npm run dev
 ```
 
-Equivalent Make targets are available:
+Stop local PostgreSQL with `docker compose down`. The named volume is retained;
+`docker compose down -v` intentionally deletes it.
+
+### Run the production container locally
+
+With local PostgreSQL running and the root `.env` configured:
 
 ```bash
-make db-up
-source apps/api/.venv/bin/activate
-make api-dev
-make web-dev
+docker build -t eidolon-api ./apps/api
+docker run --rm --network host --env-file .env -e PORT=8080 eidolon-api
 ```
 
-Run the API and web targets in separate terminals.
+The container runs `alembic upgrade head` before Uvicorn. Each migration process
+takes the same PostgreSQL advisory lock, so concurrent Cloud Run starts serialize
+schema upgrades instead of racing them. A failed migration prevents the API from
+starting.
 
-When pulling a newer revision, run `alembic upgrade head` before starting the API
-and `npm ci` whenever `apps/web/package-lock.json` changed.
+## Production environment
 
-## GitHub Codespaces
+### Cloud Run variables
 
-Forward ports 3000 and 8000, then use their HTTPS URLs instead of browser-side
-`localhost`.
+Configure these on the Cloud Run backend. Values marked secret should be sourced
+from Google Secret Manager or the Cloud Run secret UI, not a checked-in file.
 
-In the repository-root `.env`:
+| Variable | Required production value |
+| --- | --- |
+| `APP_ENV` | `production` |
+| `DATABASE_URL` | Secret: Supabase Session pooler URL on port `5432` |
+| `GROQ_API_KEY` | Secret: Groq server-side API key |
+| `JWT_SECRET` | Secret: random 32-4096-byte Eidolon signing value |
+| `LLM_PROVIDER` | `groq` |
+| `WEB_ORIGIN` | Exact HTTPS Cloudflare production origin, without a trailing slash |
+| `CORS_ORIGINS` | Comma-separated additional exact HTTPS origins, or the same production origin |
+| `REFRESH_COOKIE_SECURE` | `true` |
+| `REFRESH_COOKIE_SAMESITE` | `none` for default `pages.dev` -> `run.app` hosting; see auth note below |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` by default, or another enabled production model |
+
+Recommended database pool values are intentionally conservative:
 
 ```dotenv
-WEB_ORIGIN=https://<codespace-name>-3000.app.github.dev
-CORS_ORIGINS=https://<codespace-name>-3000.app.github.dev
-REFRESH_COOKIE_SECURE=true
+DATABASE_POOL_SIZE=5
+DATABASE_MAX_OVERFLOW=0
+DATABASE_POOL_TIMEOUT_SECONDS=30
+DATABASE_POOL_RECYCLE_SECONDS=300
 ```
 
-In `apps/web/.env.local`:
+The maximum possible database connections from this service are approximately
+`(DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW) * Cloud Run max instances`. Keep
+that total below the Supabase plan's available connection allowance.
+
+Other supported runtime controls are documented in `.env.example`, including
+token lifetimes, login/registration throttling, Groq timeouts/retries, and the
+PostgreSQL-backed scheduler.
+
+Production startup deliberately fails when:
+
+- `DATABASE_URL`, `GROQ_API_KEY`, or `JWT_SECRET` is absent or still a placeholder
+- the database is not PostgreSQL through the async driver
+- the selected provider is mock or Ollama
+- secure refresh cookies are disabled
+- browser origins are absent, wildcarded, non-HTTPS, or contain a path
+
+There is no production fallback to SQLite, an in-memory database, or generated
+mock replies.
+
+### Cloudflare Pages variable
+
+Set exactly one public build variable in Cloudflare Pages:
 
 ```dotenv
-NEXT_PUBLIC_API_BASE_URL=https://<codespace-name>-8000.app.github.dev
+NEXT_PUBLIC_API_BASE_URL=https://your-cloud-run-service-url
 ```
 
-Restart both dev servers after changing environment variables. If the frontend
-and backend are hosted on genuinely different sites, use
-`REFRESH_COOKIE_SAMESITE=none` together with `REFRESH_COOKIE_SECURE=true`.
+It is embedded into browser JavaScript at build time and is therefore public.
+Never create `NEXT_PUBLIC_DATABASE_URL`, `NEXT_PUBLIC_GROQ_API_KEY`,
+`NEXT_PUBLIC_JWT_SECRET`, or any equivalent secret variable. Production frontend
+builds fail when `NEXT_PUBLIC_API_BASE_URL` is missing or is not an HTTP(S) URL.
 
-If registration reports `Failed to fetch`, check the forwarded API URL, port
-visibility, `WEB_ORIGIN`, `CORS_ORIGINS`, and the browser network panel first.
+## Supabase setup
 
-## Model providers
+1. Create a Supabase project.
+2. In the database Connect dialog, select **Session pooler**, not Transaction
+   pooler or the direct IPv6 connection.
+3. Confirm the connection uses the shared pooler hostname and port `5432`.
+4. URL-encode special characters in the database password.
+5. Store the resulting URL as the Cloud Run `DATABASE_URL` secret. Use the
+   SQLAlchemy driver prefix and encrypted connection parameter:
 
-### Groq
-
-Groq is the default real provider. The supported settings are documented in
-`.env.example`; the main controls are:
-
-```dotenv
-LLM_PROVIDER=groq
-GROQ_API_KEY=your-private-server-side-key
-GROQ_MODEL=llama-3.3-70b-versatile
-GROQ_BASE_URL=https://api.groq.com/openai/v1
-LLM_TEMPERATURE=0.8
-LLM_MAX_OUTPUT_TOKENS=1200
-LLM_TIMEOUT_SECONDS=45
-LLM_CONTEXT_BUDGET_TOKENS=8000
-LLM_MAX_RETRIES=2
-LLM_RETRY_BASE_SECONDS=0.5
+```text
+postgresql+asyncpg://postgres.<project-ref>:<url-encoded-password>@aws-0-<region>.pooler.supabase.com:5432/postgres?ssl=require
 ```
 
-Startup fails clearly if Groq is selected without a key. Transient 429, server,
-timeout, and transport failures use bounded retries. Authentication, quota,
-model, context, malformed-response, refusal, and empty-response failures are
-classified into safe user-visible outcomes.
+Plain `postgres://` and `postgresql://` prefixes are normalized to
+`postgresql+asyncpg://`. `sslmode=require` is normalized to the `asyncpg`
+`ssl=require` form.
 
-### Ollama
+The initial Alembic migration enables `vector` and `pg_trgm` and then creates the
+Eidolon schema. The supplied Supabase database user must retain permission to
+enable those supported extensions and create tables.
 
-For self-hosted inference:
+## Deploy the backend to Cloud Run
 
-```dotenv
-LLM_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:8b
-```
+The backend Docker build context is exactly `apps/api`.
 
-Install and run Ollama separately. Tests do not require it.
-
-### Mock
-
-Mock mode is allowed only in development or testing:
-
-```dotenv
-APP_ENV=development
-LLM_PROVIDER=mock
-```
-
-It is deterministic and suitable for UI work and tests. A live provider never
-falls back to fake mock text.
-
-### Fallbacks
-
-`LLM_FALLBACK_PROVIDER` and `LLM_FALLBACK_MODEL` are optional. Fallback occurs
-only before the primary provider emits text. Eidolon never joins fallback text
-onto a partial response and never persists a partial assistant message.
-
-## Streaming and post-chat behavior
-
-The browser submits a user turn and consumes typed SSE events from FastAPI. The
-accepted user row is committed before provider inference. A successful stream
-persists exactly one completed assistant row linked to that user row. Stop,
-disconnect, or provider failure discards partial assistant text and preserves a
-retryable or cancelled user turn.
-
-The companion-intelligence prompt and response checks wrap the existing provider
-stream; they do not replace Groq streaming with a buffered fake stream. A hard
-boundary or private-plan failure ends the stream safely and prevents assistant
-persistence.
-
-Successful non-private exchanges create durable `chat_postprocess` jobs. These
-jobs update candidate memories, episodic continuity, promises, callbacks, and
-open threads. Post-processing failure cannot undo a completed chat and is retried
-independently from PostgreSQL.
-
-## Authentication and privacy
-
-- Access tokens are short-lived and held in browser memory.
-- Refresh tokens use an HttpOnly `eidolon_refresh` cookie scoped to `/auth`.
-- Production requires a private 32-4096-byte `JWT_SECRET` and secure cookies.
-- Login and registration throttles are enforced through PostgreSQL before
-  expensive password hashing.
-- Private turns remain visible to their owner but are excluded from later prompt
-  history, memory extraction, journals, relationship effects, and proactive work.
-- Adult mode requires a user age gate, an explicitly adult companion, consent
-  settings, and structural content boundaries.
-
-Generate a production JWT secret with:
+Example Artifact Registry and build commands, run from the repository root:
 
 ```bash
-openssl rand -hex 32
+export PROJECT_ID=your-google-cloud-project
+export REGION=your-cloud-run-region
+export REPOSITORY=eidolon
+
+gcloud config set project "$PROJECT_ID"
+gcloud services enable artifactregistry.googleapis.com run.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com
+gcloud artifacts repositories create "$REPOSITORY" --repository-format=docker --location="$REGION"
+gcloud builds submit apps/api --tag "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/eidolon-api:latest"
 ```
 
-## Scheduler and proactive messages
+Create these three Secret Manager secrets through the Google Cloud console or
+CLI, with a current enabled version for each:
 
-APScheduler wakes the worker, but PostgreSQL owns durable job state, retries,
-locks, and outcomes. The runtime uses advisory locking so multiple API processes
-do not process the same scheduler tick concurrently. Configuration includes:
+- `eidolon-database-url` -> Supabase Session pooler URL
+- `eidolon-groq-api-key` -> Groq API key
+- `eidolon-jwt-secret` -> output of `openssl rand -hex 32`
 
-- `ENABLE_SCHEDULER`
-- `SCHEDULER_INTERVAL_SECONDS`
-- `SCHEDULER_JOB_LIMIT`
-- `SCHEDULER_MAX_RETRIES`
-- `SCHEDULER_RETRY_BASE_SECONDS`
-- `PROACTIVE_INACTIVITY_HOURS`
-- `PROACTIVE_COOLDOWN_HOURS`
+Give the Cloud Run runtime identity `roles/secretmanager.secretAccessor` on those
+three secrets. A dedicated identity keeps the scope explicit:
 
-Companion-level preferences add timezone-aware morning/goodnight windows, quiet
-hours, and note cooldowns.
+```bash
+gcloud iam service-accounts create eidolon-api-runtime \
+  --display-name "Eidolon Cloud Run runtime"
+
+export RUNTIME_SERVICE_ACCOUNT="eidolon-api-runtime@$PROJECT_ID.iam.gserviceaccount.com"
+
+for SECRET in eidolon-database-url eidolon-groq-api-key eidolon-jwt-secret; do
+  gcloud secrets add-iam-policy-binding "$SECRET" \
+    --member "serviceAccount:$RUNTIME_SERVICE_ACCOUNT" \
+    --role roles/secretmanager.secretAccessor
+done
+```
+
+Deploy after replacing the two origin placeholders with the final Cloudflare
+Pages production origin:
+
+```bash
+gcloud run deploy eidolon-api \
+  --image "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/eidolon-api:latest" \
+  --region "$REGION" \
+  --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+  --allow-unauthenticated \
+  --port 8080 \
+  --timeout 300 \
+  --concurrency 20 \
+  --max-instances 2 \
+  --set-secrets DATABASE_URL=eidolon-database-url:latest,GROQ_API_KEY=eidolon-groq-api-key:latest,JWT_SECRET=eidolon-jwt-secret:latest \
+  --set-env-vars APP_ENV=production,LLM_PROVIDER=groq,GROQ_MODEL=openai/gpt-oss-120b,WEB_ORIGIN=https://your-project.pages.dev,CORS_ORIGINS=https://your-project.pages.dev,REFRESH_COOKIE_SECURE=true,REFRESH_COOKIE_SAMESITE=none,DATABASE_POOL_SIZE=5,DATABASE_MAX_OVERFLOW=0,ENABLE_DEBUG_ROUTES=false
+```
+
+Public Cloud Run ingress is necessary for the browser to call the API; Eidolon
+still enforces its own authentication on private application routes. `/health`
+is liveness-only. `/ready` executes `SELECT 1` and returns only bounded status
+fields, never a connection string or exception detail. In Cloud Run health-check
+settings, use `/health` for liveness and `/ready` for readiness/startup checks.
+
+The Cloud Run request timeout must exceed the configured Groq timeout so SSE
+requests can finish cleanly. The stream response sends `Cache-Control: no-cache,
+no-transform` and `X-Accel-Buffering: no`; Cloudflare Pages does not proxy the
+stream because the browser calls Cloud Run directly.
+
+Groq model IDs are operational configuration and can be deprecated. The previous
+`llama-3.3-70b-versatile` default is scheduled to leave Groq's free/developer
+tiers on 2026-08-16, so this deployment defaults to its documented production
+replacement. Check Groq's current model/deprecation pages before each deploy.
+
+### Scheduler behavior on Cloud Run
+
+Scheduled jobs remain durable and PostgreSQL-locked. With Cloud Run's default
+request-based CPU and scale-to-zero behavior, APScheduler can only make progress
+while an instance is active, so proactive delivery is best-effort/catch-up rather
+than wall-clock exact. Always-allocated CPU and a minimum instance improve timing
+but can add cost. Set `ENABLE_SCHEDULER=false` if proactive work is not wanted on
+this deployment.
+
+## Deploy the frontend to Cloudflare Pages
+
+Create a Pages project connected to this repository with these exact settings:
+
+| Cloudflare setting | Value |
+| --- | --- |
+| Framework preset | Next.js (Static HTML Export) |
+| Root directory | `apps/web` |
+| Build command | `npm run build` |
+| Build output directory | `out` |
+| Production variable | `NEXT_PUBLIC_API_BASE_URL=https://<Cloud Run service URL>` |
+
+Use Node.js 22 for the Pages build environment. `next.config.mjs` sets
+`output: "export"`, and `public/_headers` supplies the static security headers
+that Cloudflare copies into the deployment.
+
+After the first Pages deployment, make sure its exact production origin matches
+both `WEB_ORIGIN` and `CORS_ORIGINS` on Cloud Run. Add preview origins explicitly
+when testing authenticated preview deployments; credentialed CORS intentionally
+does not accept `*`.
+
+## Authentication across the two hosts
+
+Eidolon preserves its existing authentication:
+
+- access tokens are short-lived and held in browser memory
+- refresh tokens are random, hashed in PostgreSQL, rotated, and delivered only
+  through the HttpOnly `eidolon_refresh` cookie
+- browser API calls use `credentials: include`
+- login, registration, refresh, and logout validate the request origin
+
+The default `pages.dev` and `run.app` domains are cross-site, so configure
+`REFRESH_COOKIE_SECURE=true` and `REFRESH_COOKIE_SAMESITE=none`. Some browsers or
+privacy modes block third-party cookies entirely. For the most reliable session
+refresh, use custom subdomains under one registrable domain, for example
+`app.example.com` and `api.example.com`, while still keeping CORS origins exact.
+
+## Production verification
+
+After both deployments:
+
+```bash
+export API_URL=https://your-cloud-run-service-url
+curl --fail "$API_URL/health"
+curl --fail "$API_URL/ready"
+```
+
+Expected responses:
+
+```json
+{"status":"ok","service":"eidolon-api"}
+```
+
+```json
+{"status":"ready","database":"ok"}
+```
+
+Then open the Cloudflare site, register a test account, send a message, verify
+incremental token rendering, reload the page, and confirm the refresh session and
+conversation history survive. Check the browser network panel for an unbuffered
+`text/event-stream` response from `/chat/stream`.
 
 ## Validation
 
-Start PostgreSQL before backend tests:
+Start local PostgreSQL first:
 
 ```bash
 docker compose up -d postgres
 ```
 
-Backend:
+Backend checks:
 
 ```bash
 cd apps/api
-source .venv/bin/activate
+pip install -e ".[dev]"
 alembic upgrade head
 pytest -m "not live"
 ruff check .
 ruff format --check .
 ```
 
-Frontend:
+Frontend checks:
 
 ```bash
 cd apps/web
 npm ci
 npm run lint
+npm run typecheck
 npm run build
 ```
 
-Or, after installing both apps:
+Container check:
 
 ```bash
-make verify
+docker build -t eidolon-api ./apps/api
 ```
 
-Current companion-intelligence checkpoint:
-
-- Alembic head: `0009_companion_intelligence`
-- Backend: 220 passed, 1 opt-in live test skipped
-- Focused companion and migration regressions: 26 passed
-- Ruff, ESLint, TypeScript, and the optimized Next.js production build: passed
-- npm audit: 0 known vulnerabilities at the validated lockfile state
-
-The real Groq smoke test is opt-in and excluded from CI:
+The opt-in Groq test makes a real provider call and is excluded from normal test
+runs:
 
 ```bash
 cd apps/api
-source .venv/bin/activate
 RUN_GROQ_LIVE_TEST=1 pytest -q -m live tests/test_groq_live.py
 ```
 
-It uses the configured backend key without printing it and verifies real SSE,
-grounded context, persistence, provider/model metadata, timing, token usage, and
-exactly one completed user/assistant pair after reload.
-
 ## Troubleshooting
 
-- `GROQ_API_KEY is required`: either add the key to the repository-root `.env` or
-  switch development to `LLM_PROVIDER=mock`.
-- Database connection refused: run `docker compose up -d postgres`, then inspect
-  `docker compose logs postgres` and retry `alembic upgrade head`.
-- Registration or refresh fails in Codespaces: use the forwarded HTTPS URLs and
-  verify `WEB_ORIGIN`, `CORS_ORIGINS`, `NEXT_PUBLIC_API_BASE_URL`, and
-  `REFRESH_COOKIE_SECURE=true`.
-- Browser shows `Failed to fetch`: confirm the API port is forwarded, open
-  `/health` directly, and restart both servers after environment changes.
-- Port already in use: stop the old dev process or choose another port and update
-  the corresponding origin/base URL settings together.
-- To inspect API, database, provider, scheduler, memory-selection, and safe
-  orchestration state, use authenticated Debug in development. Raw prompts,
-  secrets, and emotional meters are intentionally absent.
-- `docker compose down` preserves the database volume. `docker compose down -v`
-  deletes local database data and should be used only when a destructive reset is
-  intended.
+- `DATABASE_URL must be set explicitly`: set the Cloud Run secret to the
+  Supabase Session pooler URL, not the local example URL.
+- Supabase connection failure: confirm Session mode, port `5432`, password URL
+  encoding, `ssl=require`, and project availability.
+- `GROQ_API_KEY is required`: add an enabled secret version and map it to the
+  Cloud Run environment variable.
+- Frontend build says `NEXT_PUBLIC_API_BASE_URL` is required: add it to the
+  Cloudflare Pages production build variables and redeploy.
+- Browser CORS failure: compare the browser `Origin` exactly with `WEB_ORIGIN`
+  and `CORS_ORIGINS`; omit paths and trailing slashes.
+- Login works but reload signs out: verify `SameSite=None; Secure`, credentialed
+  requests, and the browser's third-party-cookie policy; custom same-site
+  subdomains are the robust fix.
+- `/health` passes but `/ready` fails: the API process is alive but cannot query
+  Supabase. Inspect Cloud Run logs; the endpoint intentionally hides details.
+- Stream ends early: verify the Cloud Run timeout, Groq timeout, and response
+  headers. Do not place a buffering proxy between the browser and Cloud Run.
 
 ## Repository layout
 
 ```text
-apps/api/                 FastAPI app, companion pipeline, models, migrations, tests
-apps/api/app/companion/   Soul, perception, emotion, planning, and response checks
-apps/web/                 Next.js interface and client-side controllers
-docs/                     Product, architecture, data, prompt, safety, UX, and ops docs
-infra/caddy/              Example reverse-proxy configuration
-infra/systemd/            Example API systemd unit
-infra/deploy/             Example SSH deployment script
+apps/api/                 FastAPI app, Dockerfile, Alembic, models, and tests
+apps/web/                 Static-export Next.js frontend
+docs/                     Product, architecture, data, safety, UX, and ops docs
+infra/                    Legacy self-hosting examples retained for reference
 scripts/init-db.sql       Local PostgreSQL extension initialization
-scripts/backup-db.example.sh
-docker-compose.yml        Local PostgreSQL service
-Makefile                  Common development and validation commands
+docker-compose.yml        Local PostgreSQL 16 + pgvector
+Makefile                  Common local and validation commands
 ```
 
-Useful detailed references:
+## Product boundaries
 
-- `docs/03_ARCHITECTURE.md`
-- `docs/05_DATA_MODEL.md`
-- `docs/06_API_CONTRACT.md`
-- `docs/07_PROMPT_ASSEMBLY.md`
-- `docs/08_MEMORY_SYSTEM.md`
-- `docs/09_RELATIONSHIP_ENGINE.md`
-- `docs/10_BACKGROUND_JOBS.md`
-- `docs/11_SAFETY_AND_BOUNDARIES.md`
-- `docs/12_FRONTEND_UX.md`
-- `docs/13_DEPLOYMENT_TARGET.md`
-- `docs/14_TESTING_AND_ACCEPTANCE.md`
-- `docs/GOAL_PROGRESS.md`
+Eidolon supports fictional adult text roleplay only within structural safety
+boundaries. It does not permit minors or ambiguous ages in sexual contexts,
+sexual coercion or exploitation, illegal sexual content, or real-world
+instructions for harm, stalking, abuse, or exploitation. Adult mode requires the
+user age gate and an explicitly adult companion.
 
-## Backup and deployment
+Voice, avatars, images, video, AR, Live2D, fine-tuning, Redis, Celery,
+Kubernetes, LangChain, and external vector databases are outside the MVP.
 
-Before trusting Eidolon with important data, configure regular PostgreSQL
-backups. `scripts/backup-db.example.sh` is a reviewed starting point; generated
-backup files belong under ignored `backups/`, never in Git.
-
-The personal production target is an Oracle Cloud Always Free ARM VM with
-PostgreSQL 16/pgvector, FastAPI under systemd, Caddy for HTTPS, and Ollama for a
-zero-recurring-cost inference path. Example files live under `infra/`. Review and
-adapt them before use; they contain no cloud resources, credentials, or private
-addresses.
-
-## Deliberate non-goals
-
-The MVP intentionally excludes voice, audio, avatars, image/video generation,
-AR, Live2D, native mobile clients, fine-tuning, Kubernetes, Redis, Celery,
-LangChain, and external vector databases. Immersion comes from text and durable
-state, not multimedia or dependency weight.
-
-## Core rule
-
-The backend owns state. The language model generates text.
+The core rule remains: the backend owns state; the language model generates
+text.

@@ -3,15 +3,15 @@
 ## High-level diagram
 
 ```text
-Browser / PWA
+Browser / Cloudflare Pages static app
   ↓
 Next.js frontend
   ↓ HTTP/SSE
-FastAPI backend
+FastAPI backend on Google Cloud Run
   ↓
-PostgreSQL + pgvector
+Supabase PostgreSQL Session pooler + pgvector
   ↓
-Typed LLM provider interface → GroqCloud (default), Ollama, or explicit dev mock
+Typed LLM provider interface → Groq production, Ollama/dev mock outside production
 ```
 
 ## Main architectural rule

@@ -1,4 +1,4 @@
-.PHONY: help db-up db-down db-logs api-install api-migrate api-test api-lint api-format api-format-check api-dev web-install web-lint web-build web-dev verify
+.PHONY: help db-up db-down db-logs api-install api-migrate api-test api-lint api-format api-format-check api-dev web-install web-lint web-typecheck web-build web-dev verify
 
 help:
 	@echo "Eidolon commands"
@@ -7,6 +7,7 @@ help:
 	@echo "  make api-test    Run backend tests"
 	@echo "  make api-lint    Run backend lint"
 	@echo "  make api-dev     Start FastAPI"
+	@echo "  make web-typecheck Run frontend TypeScript checks"
 	@echo "  make web-dev     Start Next.js"
 	@echo "  make verify      Run available checks"
 
@@ -41,10 +42,13 @@ api-dev:
 	cd apps/api && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 web-install:
-	cd apps/web && npm install
+	cd apps/web && npm ci
 
 web-lint:
 	cd apps/web && npm run lint
+
+web-typecheck:
+	cd apps/web && npm run typecheck
 
 web-build:
 	cd apps/web && npm run build
@@ -58,4 +62,5 @@ verify:
 	$(MAKE) api-lint
 	$(MAKE) api-format-check
 	$(MAKE) web-lint
+	$(MAKE) web-typecheck
 	$(MAKE) web-build
