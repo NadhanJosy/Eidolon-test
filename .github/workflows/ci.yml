@@ -42,7 +42,7 @@ jobs:
           if [ -f apps/api/pyproject.toml ]; then
             cd apps/api
             alembic upgrade head
-            pytest
+            pytest -m "not live"
             ruff check .
             ruff format --check .
           fi

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { apiJson } from "@/lib/api";
 
+import { completeHealthPayload } from "./companion-state-contract";
 import type { RuntimeHealthState, RuntimeStatus } from "./types";
 
 const initialRuntimeStatus: RuntimeStatus = {
@@ -12,11 +13,6 @@ const initialRuntimeStatus: RuntimeStatus = {
   llm: "checking",
   llmProvider: null,
   checkedAt: null
-};
-
-type HealthPayload = {
-  status?: unknown;
-  provider?: unknown;
 };
 
 export function useRuntimeStatus() {
@@ -50,28 +46,26 @@ export function useRuntimeStatus() {
 }
 
 function healthStateFromResult(
-  result: PromiseSettledResult<HealthPayload>
+  result: PromiseSettledResult<unknown>
 ): RuntimeHealthState {
   if (result.status === "rejected") {
     return "offline";
   }
-  return result.value.status === "ok" || result.value.status === "degraded"
-    ? result.value.status
-    : "degraded";
+  return completeHealthPayload(result.value)?.status ?? "degraded";
 }
 
-function providerFromResult(result: PromiseSettledResult<HealthPayload>): string | null {
-  if (result.status === "fulfilled" && typeof result.value.provider === "string") {
-    return result.value.provider;
+function providerFromResult(result: PromiseSettledResult<unknown>): string | null {
+  if (result.status === "fulfilled") {
+    return completeHealthPayload(result.value)?.provider ?? null;
   }
   return null;
 }
 
 async function fetchRuntimeStatus(): Promise<RuntimeStatus> {
   const [apiResult, dbResult, llmResult] = await Promise.allSettled([
-    apiJson<HealthPayload>("/health"),
-    apiJson<HealthPayload>("/health/db"),
-    apiJson<HealthPayload>("/health/llm")
+    apiJson<unknown>("/health"),
+    apiJson<unknown>("/health/db"),
+    apiJson<unknown>("/health/llm")
   ]);
 
   return {

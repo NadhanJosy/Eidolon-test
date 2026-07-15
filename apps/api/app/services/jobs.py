@@ -58,6 +58,7 @@ async def claim_due_jobs(
 async def mark_job_done(session: AsyncSession, job: ScheduledJob) -> ScheduledJob:
     job.status = "done"
     job.last_error = None
+    _clear_job_lock(job)
     await session.flush()
     return job
 
@@ -66,5 +67,41 @@ async def mark_job_failed(session: AsyncSession, job: ScheduledJob, error: str) 
     job.status = "failed"
     job.retry_count += 1
     job.last_error = error[:1000]
+    _clear_job_lock(job)
     await session.flush()
     return job
+
+
+async def mark_job_retry(
+    session: AsyncSession,
+    job: ScheduledJob,
+    *,
+    error: str,
+    run_at: datetime,
+) -> ScheduledJob:
+    job.status = "pending"
+    job.run_at = run_at
+    job.retry_count += 1
+    job.last_error = error[:1000]
+    _clear_job_lock(job)
+    await session.flush()
+    return job
+
+
+async def mark_job_deferred(
+    session: AsyncSession,
+    job: ScheduledJob,
+    *,
+    run_at: datetime,
+) -> ScheduledJob:
+    job.status = "pending"
+    job.run_at = run_at
+    job.last_error = None
+    _clear_job_lock(job)
+    await session.flush()
+    return job
+
+
+def _clear_job_lock(job: ScheduledJob) -> None:
+    job.locked_at = None
+    job.locked_by = None

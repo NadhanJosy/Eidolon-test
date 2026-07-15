@@ -6,13 +6,15 @@ export function SettingsPanel({
   displayName,
   setDisplayName,
   onSaveName,
-  onLogout
+  onLogout,
+  accountActionId
 }: {
   user: User;
   displayName: string;
   setDisplayName: (value: string) => void;
   onSaveName: () => void;
   onLogout: () => void;
+  accountActionId: string | null;
 }) {
   return (
     <>
@@ -26,12 +28,13 @@ export function SettingsPanel({
         Display name
         <input
           className={inputClass}
+          maxLength={120}
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value)}
         />
       </label>
       <button className={primaryButtonClass} onClick={onSaveName} type="button">
-        Save settings
+        {accountActionId === "profile" ? "Saving..." : "Save settings"}
       </button>
       <p className="rounded-md border border-line bg-ink p-3 text-xs leading-5 text-zinc-500">
         Logout clears the browser token only. PostgreSQL remains the source of truth for messages,

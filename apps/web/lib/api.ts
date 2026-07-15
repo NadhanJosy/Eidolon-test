@@ -3,10 +3,12 @@ const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
 export class ApiError extends Error {
   status: number;
+  debugMessage: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, debugMessage = message) {
     super(message);
     this.status = status;
+    this.debugMessage = debugMessage;
   }
 }
 
@@ -33,10 +35,15 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     return await fetch(`${apiBaseUrl}${path}`, {
       ...options,
       headers,
-      cache: "no-store"
+      cache: "no-store",
+      credentials: "include"
     });
   } catch (caught) {
-    throw new ApiError(networkFailureMessage(apiBaseUrl, path, caught), 0);
+    throw new ApiError(
+      "Eidolon cannot reach its private service right now. Check that the backend is running and try again.",
+      0,
+      networkFailureDebugMessage(apiBaseUrl, path, caught)
+    );
   }
 }
 
@@ -62,10 +69,7 @@ export async function apiJson<T>(
 
 export async function apiErrorFromResponse(response: Response, path: string): Promise<ApiError> {
   const detail = await readErrorDetail(response);
-  return new ApiError(
-    `Eidolon API ${response.status} on ${path}: ${detail}`,
-    response.status
-  );
+  return new ApiError(detail, response.status, `Eidolon API ${response.status} on ${path}: ${detail}`);
 }
 
 function inferCodespacesApiBaseUrl(location: Pick<Location, "hostname" | "protocol">) {
@@ -103,15 +107,9 @@ async function readErrorDetail(response: Response): Promise<string> {
   return "The backend did not accept that request.";
 }
 
-function networkFailureMessage(apiBaseUrl: string, path: string, caught: unknown): string {
+function networkFailureDebugMessage(apiBaseUrl: string, path: string, caught: unknown): string {
   const browserMessage = caught instanceof Error ? caught.message : "network error";
-  return [
-    `Could not reach Eidolon API at ${apiBaseUrl}${path}.`,
-    `Browser reported: ${browserMessage}.`,
-    "In Codespaces, set NEXT_PUBLIC_API_BASE_URL to the forwarded API URL",
-    "and set the backend WEB_ORIGIN or CORS_ORIGINS to the forwarded web URL.",
-    "Restart the Next.js dev server after changing NEXT_PUBLIC_API_BASE_URL."
-  ].join(" ");
+  return `Could not reach ${apiBaseUrl}${path}. Browser reported: ${browserMessage}.`;
 }
 
 function trimTrailingSlash(value: string) {

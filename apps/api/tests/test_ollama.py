@@ -19,7 +19,7 @@ async def test_ollama_generate_uses_mocked_http() -> None:
     )
 
     try:
-        assert await provider.generate("hello") == "mocked ollama"
+        assert (await provider.generate("hello")).content == "mocked ollama"
     finally:
         await client.aclose()
 
@@ -38,7 +38,7 @@ async def test_ollama_stream_uses_mocked_http() -> None:
     )
 
     try:
-        chunks = [chunk async for chunk in provider.stream("hello")]
+        chunks = [event.content async for event in provider.stream("hello")]
         assert chunks == ["hel", "lo"]
     finally:
         await client.aclose()

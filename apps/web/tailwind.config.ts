@@ -5,13 +5,20 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#0d0d0f",
-        panel: "#171719",
-        line: "#2d2d32",
-        paper: "#f4f4f5",
-        ember: "#f59e0b",
-        moss: "#65a30d",
-        tide: "#0891b2"
+        ink: "#090908",
+        panel: "#121210",
+        line: "#302d28",
+        paper: "#f3eee5",
+        ember: "#c68c5b",
+        moss: "#9b9b78",
+        tide: "#a97a62"
+      },
+      boxShadow: {
+        veil: "0 28px 80px rgba(0, 0, 0, 0.42)",
+        ember: "0 18px 56px rgba(122, 73, 50, 0.16)"
+      },
+      letterSpacing: {
+        editorial: "0.18em"
       }
     }
   },
@@ -19,4 +26,3 @@ const config: Config = {
 };
 
 export default config;
-

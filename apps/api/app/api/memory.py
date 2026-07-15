@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -10,12 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_character
 from app.models import MemoryItem, User
-from app.schemas import DeleteResponse, MemoryCreate, MemoryForgetResponse, MemoryOut, MemoryUpdate
+from app.schemas import (
+    DeleteResponse,
+    MemoryCreate,
+    MemoryForgetResponse,
+    MemoryOut,
+    MemoryResolveResponse,
+    MemoryUpdate,
+)
 from app.services.memory import (
+    MemoryConflictResolutionError,
     clear_memories,
     create_memory,
     delete_memory,
     forget_low_value_memories,
+    forget_memory,
+    resolve_memory_conflict,
+    restore_memory,
     retrieve_memories,
     update_memory,
 )
@@ -28,12 +39,16 @@ async def list_memories(
     character_id: uuid.UUID,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    state: Literal["active", "forgotten", "all"] = Query(default="active"),
 ) -> list[MemoryItem]:
     character = await require_character(character_id, user, session)
+    conditions = [MemoryItem.user_id == user.id, MemoryItem.character_id == character.id]
+    if state == "active":
+        conditions.append(MemoryItem.forgotten_at.is_(None))
+    elif state == "forgotten":
+        conditions.append(MemoryItem.forgotten_at.is_not(None))
     result = await session.execute(
-        select(MemoryItem)
-        .where(MemoryItem.user_id == user.id, MemoryItem.character_id == character.id)
-        .order_by(MemoryItem.created_at.desc())
+        select(MemoryItem).where(*conditions).order_by(MemoryItem.created_at.desc())
     )
     return list(result.scalars().all())
 
@@ -119,6 +134,58 @@ async def patch_memory(
     await session.commit()
     await session.refresh(memory)
     return memory
+
+
+@router.post("/{memory_id}/forget", response_model=MemoryOut)
+async def forget_one_memory(
+    character_id: uuid.UUID,
+    memory_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MemoryItem:
+    character = await require_character(character_id, user, session)
+    memory = await _require_memory(session, user.id, character.id, memory_id)
+    await forget_memory(session, memory)
+    await session.commit()
+    await session.refresh(memory)
+    return memory
+
+
+@router.post("/{memory_id}/restore", response_model=MemoryOut)
+async def restore_one_memory(
+    character_id: uuid.UUID,
+    memory_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MemoryItem:
+    character = await require_character(character_id, user, session)
+    memory = await _require_memory(session, user.id, character.id, memory_id)
+    await restore_memory(session, memory)
+    await session.commit()
+    await session.refresh(memory)
+    return memory
+
+
+@router.post("/{memory_id}/resolve", response_model=MemoryResolveResponse)
+async def resolve_memory(
+    character_id: uuid.UUID,
+    memory_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MemoryResolveResponse:
+    character = await require_character(character_id, user, session)
+    memory = await _require_memory(session, user.id, character.id, memory_id)
+    try:
+        resolved_memory, removed_ids = await resolve_memory_conflict(session, memory)
+    except MemoryConflictResolutionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await session.refresh(resolved_memory)
+    return MemoryResolveResponse(
+        memory=resolved_memory,
+        removed=len(removed_ids),
+        removed_memory_ids=removed_ids,
+    )
 
 
 @router.delete("/{memory_id}", response_model=DeleteResponse)

@@ -17,13 +17,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     scheduler = None
     app.state.scheduler_enabled = settings.enable_scheduler
+    app.state.scheduler = None
     if settings.enable_scheduler:
         scheduler = start_background_scheduler(settings=settings)
+        app.state.scheduler = scheduler
     try:
         yield
     finally:
         if scheduler is not None:
             scheduler.shutdown(wait=False)
+        app.state.scheduler = None
 
 
 def create_app() -> FastAPI:

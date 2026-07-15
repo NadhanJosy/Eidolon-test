@@ -34,6 +34,9 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "live: opt-in tests that call a configured external provider",
+]
 
 [tool.ruff]
 line-length = 100

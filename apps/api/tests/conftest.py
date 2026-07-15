@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 
 from alembic import command
 
@@ -23,12 +24,24 @@ os.environ.setdefault("ENABLE_SCHEDULER", "false")
 from app.db.session import AsyncSessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Base  # noqa: E402
+from app.services.scheduler import SCHEDULER_ADVISORY_LOCK_KEY  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
 async def prepare_database() -> AsyncIterator[None]:
     await asyncio.to_thread(run_migrations)
-    yield
+    async with engine.connect() as scheduler_guard:
+        await scheduler_guard.execute(
+            text("SELECT pg_advisory_lock(:lock_key)"),
+            {"lock_key": SCHEDULER_ADVISORY_LOCK_KEY},
+        )
+        try:
+            yield
+        finally:
+            await scheduler_guard.execute(
+                text("SELECT pg_advisory_unlock(:lock_key)"),
+                {"lock_key": SCHEDULER_ADVISORY_LOCK_KEY},
+            )
     await engine.dispose()
 
 

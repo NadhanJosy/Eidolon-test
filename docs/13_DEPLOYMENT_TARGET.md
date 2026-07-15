@@ -9,23 +9,23 @@ Production target:
 - PostgreSQL 16 + pgvector
 - FastAPI via systemd
 - Caddy reverse proxy
-- Ollama local runtime
+- GroqCloud initially, with Ollama as the self-hosted zero-cost migration path
 - optional static frontend on Vercel Hobby or Cloudflare Pages
 
 ## Development target
 
 - GitHub Codespaces
 - Docker Compose PostgreSQL
-- mock LLM provider
+- GroqCloud for real-model development; explicit mock provider for tests
 
 ## Production services
 
 Expected services:
 
 - postgresql
-- ollama
 - eidolon-api.service
 - caddy
+- ollama when using local inference
 
 ## Ports
 
@@ -48,11 +48,19 @@ Production must provide:
 - DATABASE_URL
 - JWT_SECRET
 - WEB_ORIGIN
-- LLM_PROVIDER=ollama
-- OLLAMA_BASE_URL
-- OLLAMA_MODEL
+- LLM_PROVIDER=groq
+- GROQ_API_KEY
+- GROQ_MODEL
+
+For self-hosted inference, select `LLM_PROVIDER=ollama` and provide
+`OLLAMA_BASE_URL` and `OLLAMA_MODEL` instead.
 
 Do not commit production secrets.
+
+Generate `JWT_SECRET` with `openssl rand -hex 32`. Eidolon requires 32-4096
+UTF-8 bytes and rejects placeholders, replacement markers, and low-diversity
+production values. Rotating it invalidates access tokens and auth-throttle HMAC
+fingerprints; PostgreSQL refresh sessions remain independently usable.
 
 ## Deployment philosophy
 

@@ -59,13 +59,16 @@ async def require_conversation(
     conversation_id,
     user: User,
     session: AsyncSession,
+    *,
+    for_update: bool = False,
 ) -> Conversation:
-    result = await session.execute(
-        select(Conversation).where(
-            Conversation.id == conversation_id,
-            Conversation.user_id == user.id,
-        )
+    statement = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.user_id == user.id,
     )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await session.execute(statement)
     conversation = result.scalar_one_or_none()
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation was not found.")

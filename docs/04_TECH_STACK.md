@@ -13,6 +13,10 @@
 - TypeScript
 - Tailwind CSS
 - native fetch/EventSource or fetch streaming
+- native Next metadata routes for manifest/robots and safe-area viewport support
+
+The MVP uses standalone web-app metadata but no service worker or offline data
+cache. This keeps the client light and leaves private durable state on the server.
 
 Avoid:
 - Framer Motion
@@ -44,13 +48,17 @@ Avoid:
 ## LLM runtime
 
 Development:
-- mock provider
+- GroqCloud for real-model testing
+- explicit deterministic mock provider for automated tests and UI scaffolding
 
 Production:
-- Ollama
-- target 8B quantized model
+- GroqCloud first through the replaceable provider interface
+- Ollama remains the zero-recurring-cost self-hosted path
+- local target remains an 8B quantized model
 
-No paid inference APIs in MVP.
+No provider key or inference call may enter the browser. The default Groq path
+uses the user's configured account; core state and provider history remain in
+Eidolon's PostgreSQL, and Ollama remains selectable without changing chat logic.
 
 ## Auth
 

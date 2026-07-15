@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from app.models import (
 )
 from app.schemas import AccountDeleteRequest, DeleteResponse, ExportOut
 from app.security import verify_password
+from app.services.auth_session import clear_refresh_cookie
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -85,6 +86,7 @@ async def export_account(
 @router.delete("", response_model=DeleteResponse)
 async def delete_account(
     payload: AccountDeleteRequest,
+    response: Response,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DeleteResponse:
@@ -93,6 +95,7 @@ async def delete_account(
 
     result = await session.execute(delete(User).where(User.id == user.id))
     await session.commit()
+    clear_refresh_cookie(response)
     return DeleteResponse(deleted=int(result.rowcount or 0))
 
 
@@ -108,6 +111,7 @@ def character_to_dict(character: Character) -> dict:
         "adult_mode_allowed": character.adult_mode_allowed,
         "content_intensity": character.content_intensity,
         "created_at": character.created_at.isoformat(),
+        "updated_at": character.updated_at.isoformat(),
     }
 
 
@@ -116,7 +120,10 @@ def conversation_to_dict(conversation: Conversation) -> dict:
         "id": str(conversation.id),
         "character_id": str(conversation.character_id),
         "title": conversation.title,
+        "metadata_json": conversation.metadata_json,
+        "last_read_at": conversation.last_read_at.isoformat(),
         "created_at": conversation.created_at.isoformat(),
+        "updated_at": conversation.updated_at.isoformat(),
     }
 
 
@@ -134,6 +141,7 @@ def message_to_dict(message: Message) -> dict:
 def memory_to_dict(memory: MemoryItem) -> dict:
     return {
         "id": str(memory.id),
+        "user_id": str(memory.user_id),
         "character_id": str(memory.character_id),
         "source_message_id": str(memory.source_message_id) if memory.source_message_id else None,
         "memory_type": memory.memory_type,
@@ -144,13 +152,18 @@ def memory_to_dict(memory: MemoryItem) -> dict:
         "pinned": memory.pinned,
         "decay_score": memory.decay_score,
         "contradiction_group": memory.contradiction_group,
+        "last_recalled_at": isoformat_or_none(memory.last_recalled_at),
+        "forgotten_at": isoformat_or_none(memory.forgotten_at),
+        "metadata_json": memory.metadata_json,
         "created_at": memory.created_at.isoformat(),
+        "updated_at": memory.updated_at.isoformat(),
     }
 
 
 def journal_to_dict(journal: EpisodicJournal) -> dict:
     return {
         "id": str(journal.id),
+        "user_id": str(journal.user_id),
         "character_id": str(journal.character_id),
         "conversation_id": str(journal.conversation_id) if journal.conversation_id else None,
         "journal_type": journal.journal_type,
@@ -160,13 +173,16 @@ def journal_to_dict(journal: EpisodicJournal) -> dict:
         "unresolved_threads_json": journal.unresolved_threads_json,
         "callbacks_json": journal.callbacks_json,
         "importance": journal.importance,
+        "metadata_json": journal.metadata_json,
         "created_at": journal.created_at.isoformat(),
+        "updated_at": journal.updated_at.isoformat(),
     }
 
 
 def relationship_to_dict(relationship: RelationshipState) -> dict:
     return {
         "id": str(relationship.id),
+        "user_id": str(relationship.user_id),
         "character_id": str(relationship.character_id),
         "trust": relationship.trust,
         "intimacy": relationship.intimacy,
@@ -178,16 +194,30 @@ def relationship_to_dict(relationship: RelationshipState) -> dict:
         "conflict_state": relationship.conflict_state,
         "repair_needed": relationship.repair_needed,
         "tags_json": relationship.tags_json,
+        "last_interaction_at": isoformat_or_none(relationship.last_interaction_at),
+        "metadata_json": relationship.metadata_json,
+        "created_at": relationship.created_at.isoformat(),
+        "updated_at": relationship.updated_at.isoformat(),
     }
 
 
 def job_to_dict(job: ScheduledJob) -> dict:
     return {
         "id": str(job.id),
+        "user_id": str(job.user_id) if job.user_id else None,
         "character_id": str(job.character_id) if job.character_id else None,
         "job_type": job.job_type,
         "run_at": job.run_at.isoformat(),
         "status": job.status,
+        "locked_at": isoformat_or_none(job.locked_at),
+        "locked_by": job.locked_by,
         "payload_json": job.payload_json,
         "retry_count": job.retry_count,
+        "last_error": job.last_error,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
     }
+
+
+def isoformat_or_none(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None

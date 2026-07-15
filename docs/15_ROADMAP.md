@@ -61,6 +61,7 @@
 - retrieval
 - prompt injection
 - memory viewer/debug
+- reversible forgotten state with restore and retrieval exclusion
 
 ## Stage 8: Relationship
 
@@ -108,7 +109,8 @@
 
 Only after MVP works:
 
-- zero-cost embedding generation if it can run acceptably on the production VM
+- optional higher-fidelity local embedding encoder if it fits the production
+  VM; the MVP already uses deterministic zero-cost feature embeddings
 - browser notifications after proactive text is reliable
 - PWA install polish
 - richer local backup/export UX

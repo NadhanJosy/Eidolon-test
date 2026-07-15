@@ -65,6 +65,8 @@ Relationship state also tracks:
 - repair_needed
 - tags_json
 - timeline entries in metadata_json
+- one-time milestone ids in metadata_json
+- recent human-readable changes in metadata_json
 
 These fields are deterministic backend state. They should explain tone and continuity without turning the system into a manipulative dependency loop.
 
@@ -92,6 +94,38 @@ and through due `relationship_decay` scheduled jobs:
 After a message updates relationship state, the backend queues one pending
 `relationship_decay` job per user-character pair. The scheduler is only a
 wake-up mechanism; the persisted relationship row is still the source of truth.
+
+Level 2 milestone detection records one-time timeline entries when meaningful
+thresholds are crossed, such as first warmth, a first seed of trust, or a
+steady conversational rhythm. Each milestone also creates a
+`relationship_milestone` memory item so prompt retrieval and the memory panel can
+surface the moment later. Milestones are stored by id in relationship metadata
+to prevent duplicate memories from repeated messages.
+
+Each message update also stores a short `recent_changes` list and
+`recent_change_summary` in relationship `metadata_json`. These entries translate
+the latest backend-owned numeric deltas into user-facing language such as trust,
+warmth, rhythm, tension, and closeness shifts. They are intentionally small,
+bounded to the latest exchange, and safe to omit when no metadata exists; the
+relationship timeline remains the longer durable history.
+
+Accepted stateful user messages store a compact `relationship_effect` object in
+message metadata. It records the exact metric deltas, added tags, source
+message id, and any milestone ids created by that turn. Latest-turn edits use
+this effect to reverse the old relationship delta before applying the revised
+message, and remove timeline/milestone entries tied to the edited source. Older
+legacy turns without effect metadata are left unchanged rather than guessed.
+
+When a milestone is later surfaced through a proactive note, its id is recorded
+in `proactive_milestones_noted` inside relationship metadata. This keeps
+scheduled presence from repeating the same milestone marker.
+
+Proactive presence also reduces the persisted state to one qualitative posture:
+new, warming, trusted, close, careful, or repair. This fixed backend-owned
+guidance changes the authored fallback and local-provider tone without exposing
+scores. Careful or repair postures suppress delayed double-texts and milestone
+celebrations at both queue and delivery time. Other check-ins become more
+spacious, avoid assumed closeness, and leave reply control with the user.
 
 ## Prompt injection
 

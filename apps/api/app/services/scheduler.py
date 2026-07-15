@@ -4,25 +4,52 @@ import logging
 import os
 import socket
 import uuid
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.db.session import AsyncSessionLocal
-from app.models import Conversation, Message, ScheduledJob, utc_now
-from app.services.jobs import claim_due_jobs, mark_job_done, mark_job_failed
-from app.services.memory import maybe_extract_memory
+from app.llm.factory import get_llm_provider
+from app.models import Character, Conversation, Message, ScheduledJob, User, utc_now
+from app.services.conversation_privacy import conversation_is_private, message_is_private
+from app.services.jobs import (
+    claim_due_jobs,
+    mark_job_deferred,
+    mark_job_done,
+    mark_job_failed,
+    mark_job_retry,
+)
+from app.services.journal import maybe_create_journal_from_conversation
+from app.services.memory import (
+    analyze_memory_candidate,
+    maybe_extract_memory,
+    memory_preferences_from_boundaries,
+)
 from app.services.proactive import (
+    LOCAL_NOTE_TIME_KEYS,
     PROACTIVE_JOB_SCHEDULES,
     create_inactivity_proactive_message,
+    ensure_proactive_jobs,
+    proactive_block_reason,
+    proactive_deferred_until,
+    proactive_relationship_delivery_block,
 )
 from app.services.relationship import ensure_relationship_decay_job, get_current_relationship
 
 logger = logging.getLogger(__name__)
 
 PROACTIVE_JOB_TYPES = set(PROACTIVE_JOB_SCHEDULES) | {"proactive_message_create"}
+SCHEDULER_ADVISORY_LOCK_KEY = 0x4549444F4C4F4E
+
+
+class ScheduledJobDeferred(Exception):
+    def __init__(self, *, run_at: datetime, reason: str) -> None:
+        super().__init__(reason)
+        self.run_at = run_at
+        self.reason = reason
 
 
 async def process_due_jobs(
@@ -39,14 +66,41 @@ async def process_due_jobs(
         limit=limit or runtime_settings.scheduler_job_limit,
     )
     for job in jobs:
-        try:
-            await _run_job(session, job, runtime_settings)
-            await mark_job_done(session, job)
-        except ValueError as exc:
-            await mark_job_failed(session, job, str(exc))
-        except Exception:  # noqa: BLE001 - failed job rows need safe, deterministic state
-            await mark_job_failed(session, job, "Job failed during execution.")
+        await _process_claimed_job(session, job, runtime_settings)
     return len(jobs)
+
+
+async def process_job_by_id(
+    session: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    settings: Settings | None = None,
+) -> bool:
+    runtime_settings = settings or get_settings()
+    result = await session.execute(
+        select(ScheduledJob)
+        .where(ScheduledJob.id == job_id, ScheduledJob.status == "pending")
+        .with_for_update(skip_locked=True)
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        return False
+    job.status = "running"
+    job.locked_at = utc_now()
+    job.locked_by = _worker_id()
+    await session.flush()
+    await _process_claimed_job(session, job, runtime_settings)
+    return True
+
+
+async def run_post_chat_job(job_id: uuid.UUID) -> None:
+    """Best-effort immediate processing; the durable pending row remains the fallback."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await process_job_by_id(session, job_id=job_id)
+            await session.commit()
+    except Exception:  # noqa: BLE001 - chat has already committed successfully
+        logger.warning("Post-chat processing will be retried by the durable scheduler.")
 
 
 def start_background_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
@@ -70,6 +124,8 @@ def start_background_scheduler(settings: Settings | None = None) -> AsyncIOSched
 async def _run_scheduler_tick(*, settings: Settings, worker_id: str) -> None:
     try:
         async with AsyncSessionLocal() as session:
+            if not await _acquire_scheduler_tick_lock(session):
+                return
             await process_due_jobs(session, worker_id=worker_id, settings=settings)
             await session.commit()
     except Exception:  # noqa: BLE001 - background failures should not crash API startup
@@ -87,6 +143,9 @@ async def _run_job(
     if job.job_type == "memory_extract":
         await _run_memory_extract_job(session, job)
         return
+    if job.job_type == "chat_postprocess":
+        await _run_chat_postprocess_job(session, job)
+        return
     if job.job_type in PROACTIVE_JOB_TYPES:
         await _run_proactive_job(session, job, settings)
         return
@@ -102,7 +161,74 @@ async def _run_proactive_job(
     settings: Settings,
 ) -> None:
     conversation = await _conversation_from_job(session, job)
+    if conversation_is_private(conversation):
+        _merge_payload(
+            job,
+            {
+                "result": "skipped_private_conversation",
+                "skip_reason": "conversation_private",
+            },
+        )
+        return
     payload = job.payload_json or {}
+    proactive_type = str(payload.get("proactive_type") or job.job_type)
+    character = await session.get(Character, conversation.character_id)
+    if character is None:
+        raise ValueError("Character for scheduled job was not found.")
+    now = utc_now()
+    block_reason = proactive_block_reason(character, proactive_type, now=now)
+    if block_reason is not None:
+        _merge_payload(
+            job,
+            {
+                "result": "skipped_by_user_controls",
+                "skip_reason": block_reason,
+                "proactive_type": proactive_type,
+            },
+        )
+        return
+    relationship_block = await proactive_relationship_delivery_block(
+        session,
+        conversation,
+        proactive_type,
+    )
+    if relationship_block is not None:
+        _merge_payload(
+            job,
+            {
+                "result": "skipped_by_relationship_state",
+                "skip_reason": f"relationship_{relationship_block.key}",
+                "relationship_posture": relationship_block.key,
+                "proactive_type": proactive_type,
+            },
+        )
+        return
+    if proactive_type in LOCAL_NOTE_TIME_KEYS or payload.get("respect_local_time") is True:
+        deferred = proactive_deferred_until(character, proactive_type, now=now)
+        if deferred is not None:
+            run_at, reason = deferred
+            raise ScheduledJobDeferred(run_at=run_at, reason=reason)
+    latest_message = await _latest_conversation_message(session, conversation)
+    if latest_message is not None and message_is_private(latest_message):
+        _merge_payload(
+            job,
+            {
+                "result": "skipped_private_turn",
+                "skip_reason": "latest_turn_private",
+                "proactive_type": proactive_type,
+            },
+        )
+        return
+    if _user_returned_after_job(job, latest_message):
+        _merge_payload(
+            job,
+            {
+                "result": "skipped_user_returned",
+                "skip_reason": "user_returned",
+                "proactive_type": proactive_type,
+            },
+        )
+        return
     message = await create_inactivity_proactive_message(
         session,
         conversation,
@@ -115,7 +241,8 @@ async def _run_proactive_job(
             default=settings.proactive_cooldown_hours,
         ),
         force=_bool_payload(payload.get("force"), default=True),
-        proactive_type=str(payload.get("proactive_type") or job.job_type),
+        proactive_type=proactive_type,
+        provider=get_llm_provider(settings),
     )
     if message is None:
         _merge_payload(job, {"result": "skipped_by_cooldown_or_state"})
@@ -124,8 +251,13 @@ async def _run_proactive_job(
         job,
         {
             "result": "message_created",
+            "defer_reason": None,
+            "deferred_until": None,
             "message_id": str(message.id),
             "proactive_type": message.metadata_json.get("proactive_type"),
+            "relationship_posture": message.metadata_json.get("relationship_posture"),
+            "generation_source": message.metadata_json.get("generation_source"),
+            "generation_reason": message.metadata_json.get("generation_reason"),
         },
     )
 
@@ -133,21 +265,34 @@ async def _run_proactive_job(
 async def _run_memory_extract_job(session: AsyncSession, job: ScheduledJob) -> None:
     if job.user_id is None or job.character_id is None:
         raise ValueError("Memory extract job is missing user or character.")
+    character = await session.get(Character, job.character_id)
+    if character is None:
+        raise ValueError("Character for memory extract job was not found.")
+    memory_preferences = memory_preferences_from_boundaries(character.boundaries_json)
     messages = await _memory_extract_messages(session, job)
     extracted = 0
     skipped = 0
+    accepted_types: dict[str, int] = {}
+    skip_reasons: dict[str, int] = {}
     for message in messages:
+        decision = analyze_memory_candidate(
+            message.content,
+            memory_preferences=memory_preferences,
+        )
         memory = await maybe_extract_memory(
             session,
             user_id=job.user_id,
             character_id=job.character_id,
             message_id=message.id,
             content=message.content,
+            memory_preferences=memory_preferences,
         )
         if memory is None:
             skipped += 1
+            _increment_count(skip_reasons, decision.reason)
         else:
             extracted += 1
+            _increment_count(accepted_types, memory.memory_type)
     _merge_payload(
         job,
         {
@@ -155,8 +300,89 @@ async def _run_memory_extract_job(session: AsyncSession, job: ScheduledJob) -> N
             "messages_checked": len(messages),
             "extracted_count": extracted,
             "skipped_count": skipped,
+            "accepted_types": accepted_types,
+            "skip_reasons": skip_reasons,
         },
     )
+
+
+async def _run_chat_postprocess_job(session: AsyncSession, job: ScheduledJob) -> None:
+    if job.user_id is None or job.character_id is None:
+        raise ValueError("Post-chat job is missing user or character.")
+    conversation = await _conversation_from_job(session, job)
+    character = await session.get(Character, job.character_id)
+    user = await session.get(User, job.user_id)
+    if character is None or user is None:
+        raise ValueError("Post-chat job owner or character was not found.")
+    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+    if payload.get("memory_allowed") is True:
+        await _run_memory_extract_job(session, job)
+    else:
+        _merge_payload(
+            job,
+            {
+                "memory_result": "skipped_by_privacy_or_profile",
+                "messages_checked": 0,
+                "extracted_count": 0,
+            },
+        )
+    journal = await maybe_create_journal_from_conversation(
+        session,
+        user=user,
+        character=character,
+        conversation=conversation,
+    )
+    await ensure_proactive_jobs(
+        session,
+        conversation=conversation,
+        user_id=user.id,
+        character_id=character.id,
+    )
+    _merge_payload(
+        job,
+        {
+            "result": "chat_postprocess_complete",
+            "journal_id": str(journal.id) if journal is not None else None,
+        },
+    )
+
+
+async def _process_claimed_job(
+    session: AsyncSession,
+    job: ScheduledJob,
+    settings: Settings,
+) -> None:
+    try:
+        await _run_job(session, job, settings)
+        await mark_job_done(session, job)
+    except ScheduledJobDeferred as exc:
+        payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+        raw_count = payload.get("deferred_count", 0)
+        deferred_count = raw_count if isinstance(raw_count, int) and raw_count >= 0 else 0
+        _merge_payload(
+            job,
+            {
+                "result": "deferred_for_local_time",
+                "defer_reason": exc.reason,
+                "deferred_count": deferred_count + 1,
+                "deferred_until": exc.run_at.isoformat(),
+            },
+        )
+        await mark_job_deferred(session, job, run_at=exc.run_at)
+    except ValueError as exc:
+        await mark_job_failed(session, job, str(exc))
+    except Exception:  # noqa: BLE001 - failed job rows need safe, deterministic state
+        logger.warning("Scheduled job %s failed unexpectedly.", job.id)
+        if job.retry_count < settings.scheduler_max_retries:
+            retry_delay = _retry_delay_seconds(job.retry_count, settings)
+            await mark_job_retry(
+                session,
+                job,
+                error="Transient job failure; retry scheduled.",
+                run_at=utc_now() + timedelta(seconds=retry_delay),
+            )
+        else:
+            await mark_job_failed(session, job, "Job failed during execution.")
 
 
 async def _run_relationship_decay_job(session: AsyncSession, job: ScheduledJob) -> None:
@@ -198,19 +424,45 @@ async def _conversation_from_job(
     return conversation
 
 
+async def _latest_conversation_message(
+    session: AsyncSession,
+    conversation: Conversation,
+) -> Message | None:
+    result = await session.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation.id)
+        .order_by(desc(Message.created_at))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+def _user_returned_after_job(job: ScheduledJob, latest_message: Message | None) -> bool:
+    if latest_message is None or latest_message.role != "user":
+        return False
+    return latest_message.created_at > job.created_at
+
+
 async def _memory_extract_messages(session: AsyncSession, job: ScheduledJob) -> list[Message]:
     payload = job.payload_json or {}
     if payload.get("message_id"):
         message = await _message_from_job(session, job)
+        conversation = await _conversation_from_job(session, job)
+        if conversation_is_private(conversation) or message_is_private(message):
+            return []
         return [message]
 
     conversation = await _conversation_from_job(session, job)
+    if conversation_is_private(conversation):
+        return []
     limit = _positive_int(payload.get("limit"), default=20)
+    message_privacy = Message.metadata_json["privacy_mode"].as_string()
     result = await session.execute(
         select(Message)
         .where(
             Message.conversation_id == conversation.id,
             Message.role == "user",
+            or_(message_privacy.is_(None), message_privacy != "private"),
         )
         .order_by(desc(Message.created_at))
         .limit(min(limit, 50))
@@ -274,9 +526,27 @@ def _bool_payload(value: object, *, default: bool) -> bool:
     return default
 
 
+def _increment_count(counts: dict[str, int], key: str | None) -> None:
+    label = key or "unknown"
+    counts[label] = counts.get(label, 0) + 1
+
+
 def _merge_payload(job: ScheduledJob, updates: dict[str, object]) -> None:
     job.payload_json = {**(job.payload_json or {}), **updates}
 
 
 def _worker_id() -> str:
     return f"api:{socket.gethostname()}:{os.getpid()}"
+
+
+async def _acquire_scheduler_tick_lock(session: AsyncSession) -> bool:
+    result = await session.execute(
+        text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
+        {"lock_key": SCHEDULER_ADVISORY_LOCK_KEY},
+    )
+    return bool(result.scalar_one())
+
+
+def _retry_delay_seconds(retry_count: int, settings: Settings) -> int:
+    exponent = min(max(retry_count, 0), 8)
+    return min(settings.scheduler_retry_base_seconds * (2**exponent), 86_400)

@@ -3,16 +3,70 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import RelationshipState, ScheduledJob, utc_now
+from app.models import MemoryItem, RelationshipState, ScheduledJob, utc_now
+from app.services.embedding import text_embedding
 from app.services.jobs import create_job
 
 POSITIVE_WORDS = ("thanks", "thank you", "kind", "glad", "happy", "appreciate", "good")
 REPAIR_WORDS = ("sorry", "apologize", "my fault")
 CONFLICT_WORDS = ("angry", "upset", "hate", "annoyed", "frustrated")
 VULNERABLE_WORDS = ("afraid", "lonely", "worried", "sad", "miss", "trust")
+RELATIONSHIP_MILESTONES = (
+    {
+        "id": "first_warmth",
+        "field": "warmth",
+        "threshold": 1.0,
+        "summary": "A warmer rhythm has started to form.",
+        "memory": "A warmer rhythm has started to form between the user and character.",
+        "tags": ["milestone", "warm"],
+    },
+    {
+        "id": "trust_seed",
+        "field": "trust",
+        "threshold": 0.5,
+        "summary": "A first seed of trust has taken hold.",
+        "memory": "A first seed of trust has taken hold in the relationship.",
+        "tags": ["milestone", "trust"],
+    },
+    {
+        "id": "steady_rhythm",
+        "field": "familiarity",
+        "threshold": 1.0,
+        "summary": "The conversation has begun to feel like a recurring rhythm.",
+        "memory": "The conversation has begun to feel like a recurring rhythm.",
+        "tags": ["milestone", "rhythm"],
+    },
+    {
+        "id": "repair_arc",
+        "field": "trust",
+        "threshold": 0.25,
+        "summary": "A repair moment was handled gently enough to matter.",
+        "memory": "A repair moment was handled gently enough to matter.",
+        "tags": ["milestone", "repair"],
+        "requires_tag": "repair",
+    },
+)
+RELATIONSHIP_CHANGE_LABELS = (
+    ("trust", "Trust"),
+    ("intimacy", "Closeness"),
+    ("warmth", "Warmth"),
+    ("tension", "Tension"),
+    ("familiarity", "Rhythm"),
+    ("attachment", "Attachment"),
+)
+RELATIONSHIP_EFFECT_VERSION = "relationship_effect_v1"
+RELATIONSHIP_METRIC_BOUNDS = {
+    "trust": (-100.0, 100.0),
+    "intimacy": (0.0, 100.0),
+    "warmth": (-100.0, 100.0),
+    "tension": (0.0, 100.0),
+    "familiarity": (0.0, 100.0),
+    "attachment": (0.0, 100.0),
+}
+RELATIONSHIP_EFFECT_KEYS = tuple(RELATIONSHIP_METRIC_BOUNDS)
 
 
 async def get_or_create_relationship(
@@ -67,11 +121,33 @@ async def update_relationship_from_message(
     character_id: uuid.UUID,
     content: str,
 ) -> RelationshipState:
+    state, _effect = await update_relationship_from_message_with_effect(
+        session,
+        user_id,
+        character_id,
+        content,
+    )
+    return state
+
+
+async def update_relationship_from_message_with_effect(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    content: str,
+    *,
+    source_message_id: uuid.UUID | None = None,
+) -> tuple[RelationshipState, dict[str, object]]:
     state = await get_or_create_relationship(session, user_id, character_id)
     apply_relationship_decay(state, utc_now())
     normalized = content.lower()
     before = _snapshot(state)
+    before_values = _snapshot_values(before)
     tags: set[str] = set(state.tags_json or [])
+    tags_before = set(tags)
+    repair_needed_before = state.repair_needed
+    conflict_state_before = state.conflict_state
+    mood_before = state.mood
 
     state.familiarity = clamp(state.familiarity + 0.2, 0, 100)
     if len(content) > 120:
@@ -101,18 +177,115 @@ async def update_relationship_from_message(
     state.mood = _mood(state)
     state.tags_json = sorted(tags)[-8:]
     state.last_interaction_at = utc_now()
+    recent_changes = _recent_changes(before, state, state.last_interaction_at)
+    timeline_event = {
+        "at": state.last_interaction_at.isoformat(),
+        "kind": "message_update",
+        "summary": _event_summary(before, state),
+        "tags": sorted(tags),
+    }
+    if source_message_id is not None:
+        timeline_event["source_message_id"] = str(source_message_id)
     state.metadata_json = _append_timeline_event(
         state.metadata_json or {},
-        {
-            "at": state.last_interaction_at.isoformat(),
-            "kind": "message_update",
-            "summary": _event_summary(before, state),
-            "tags": sorted(tags),
-        },
+        timeline_event,
+    )
+    state.metadata_json = {
+        **(state.metadata_json or {}),
+        "recent_changes": recent_changes,
+        "recent_change_summary": _recent_change_summary(recent_changes),
+    }
+    milestone_ids = await _maybe_create_milestones(
+        session,
+        state,
+        before,
+        tags,
+        source_message_id=source_message_id,
+    )
+    effect = _relationship_effect_metadata(
+        state,
+        before_values=before_values,
+        tags_before=tags_before,
+        repair_needed_before=repair_needed_before,
+        conflict_state_before=conflict_state_before,
+        mood_before=mood_before,
+        applied_at=state.last_interaction_at,
+        source_message_id=source_message_id,
+        milestone_ids=milestone_ids,
     )
     await ensure_relationship_decay_job(session, user_id, character_id)
     await session.flush()
-    return state
+    return state, effect
+
+
+async def reverse_relationship_message_effect(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    effect: object,
+) -> bool:
+    if not isinstance(effect, dict) or effect.get("version") != RELATIONSHIP_EFFECT_VERSION:
+        return False
+    deltas = effect.get("deltas")
+    if not isinstance(deltas, dict):
+        return False
+
+    parsed_deltas: dict[str, float] = {}
+    for key in RELATIONSHIP_EFFECT_KEYS:
+        value = deltas.get(key)
+        if not isinstance(value, int | float):
+            return False
+        parsed_deltas[key] = float(value)
+
+    state = await get_or_create_relationship(session, user_id, character_id)
+    for key, delta in parsed_deltas.items():
+        minimum, maximum = RELATIONSHIP_METRIC_BOUNDS[key]
+        current = float(getattr(state, key))
+        setattr(state, key, clamp(current - delta, minimum, maximum))
+
+    tags = set(state.tags_json or [])
+    added_tags = _metadata_list(effect.get("added_tags"))
+    tags.difference_update(added_tags)
+    state.tags_json = sorted(tags)[-8:]
+
+    repair_needed_before = effect.get("repair_needed_before")
+    if isinstance(repair_needed_before, bool):
+        state.repair_needed = repair_needed_before
+
+    source_message_id = _effect_source_message_id(effect)
+    milestone_ids = set(_metadata_list(effect.get("milestone_ids")))
+    if source_message_id is not None:
+        state.metadata_json = _remove_relationship_effect_entries(
+            state.metadata_json or {},
+            source_message_id=source_message_id,
+            milestone_ids=milestone_ids,
+        )
+        await _delete_relationship_milestone_memories(
+            session,
+            user_id=user_id,
+            character_id=character_id,
+            source_message_id=source_message_id,
+        )
+
+    state.conflict_state = _conflict_state(state)
+    state.mood = _mood(state)
+    state.metadata_json = {
+        **(state.metadata_json or {}),
+        "recent_changes": [
+            {
+                "at": utc_now().isoformat(),
+                "key": "edit_recalculation",
+                "label": "Recalculated",
+                "direction": "flat",
+                "magnitude": "subtle",
+                "delta": 0.0,
+                "summary": "The latest edited turn was recalculated for relationship continuity.",
+            }
+        ],
+        "recent_change_summary": "The latest edited turn was recalculated.",
+    }
+    await session.flush()
+    return True
 
 
 async def ensure_relationship_decay_job(
@@ -230,6 +403,199 @@ def _snapshot(state: RelationshipState) -> tuple[float, float, float, float, flo
     )
 
 
+async def _maybe_create_milestones(
+    session: AsyncSession,
+    state: RelationshipState,
+    before: tuple[float, float, float, float, float, float],
+    tags: set[str],
+    *,
+    source_message_id: uuid.UUID | None = None,
+) -> list[str]:
+    metadata = state.metadata_json if isinstance(state.metadata_json, dict) else {}
+    seen = set(_metadata_list(metadata.get("milestones")))
+    created: list[str] = []
+    now = state.last_interaction_at or utc_now()
+    for milestone in RELATIONSHIP_MILESTONES:
+        milestone_id = str(milestone["id"])
+        required_tag = milestone.get("requires_tag")
+        if milestone_id in seen:
+            continue
+        if isinstance(required_tag, str) and required_tag not in tags:
+            continue
+        if not _crossed_milestone(before, state, milestone):
+            continue
+        event = {
+            "at": now.isoformat(),
+            "kind": "milestone",
+            "milestone_id": milestone_id,
+            "summary": milestone["summary"],
+            "tags": milestone["tags"],
+        }
+        if source_message_id is not None:
+            event["source_message_id"] = str(source_message_id)
+        state.metadata_json = _append_timeline_event(state.metadata_json or {}, event)
+        await _create_milestone_memory(
+            session,
+            state,
+            milestone,
+            now,
+            source_message_id=source_message_id,
+        )
+        seen.add(milestone_id)
+        created.append(milestone_id)
+    if created:
+        state.metadata_json = {
+            **(state.metadata_json or {}),
+            "milestones": sorted(seen),
+        }
+    return created
+
+
+async def _create_milestone_memory(
+    session: AsyncSession,
+    state: RelationshipState,
+    milestone: dict,
+    now: datetime,
+    *,
+    source_message_id: uuid.UUID | None = None,
+) -> None:
+    milestone_id = str(milestone["id"])
+    metadata = {
+        "source": "relationship_milestone",
+        "milestone_id": milestone_id,
+        "created_at": now.isoformat(),
+    }
+    if source_message_id is not None:
+        metadata["source_message_id"] = str(source_message_id)
+    memory = MemoryItem(
+        user_id=state.user_id,
+        character_id=state.character_id,
+        source_message_id=None,
+        memory_type="relationship_milestone",
+        content=str(milestone["memory"]),
+        importance=0.75,
+        confidence=0.85,
+        emotional_weight=0.45,
+        pinned=False,
+        embedding=text_embedding(str(milestone["memory"])),
+        decay_score=0.0,
+        contradiction_group=None,
+        metadata_json=metadata,
+    )
+    session.add(memory)
+
+
+def _crossed_milestone(
+    before: tuple[float, float, float, float, float, float],
+    state: RelationshipState,
+    milestone: dict,
+) -> bool:
+    field = milestone.get("field")
+    threshold = float(milestone.get("threshold", 0))
+    before_values = _snapshot_values(before)
+    before_value = before_values.get(str(field), 0.0)
+    after_value = float(getattr(state, str(field), 0.0))
+    return before_value < threshold <= after_value
+
+
+def _snapshot_values(snapshot: tuple[float, float, float, float, float, float]) -> dict[str, float]:
+    labels = ("trust", "intimacy", "warmth", "tension", "familiarity", "attachment")
+    return dict(zip(labels, snapshot, strict=True))
+
+
+def _relationship_effect_metadata(
+    state: RelationshipState,
+    *,
+    before_values: dict[str, float],
+    tags_before: set[str],
+    repair_needed_before: bool,
+    conflict_state_before: str,
+    mood_before: str,
+    applied_at: datetime,
+    source_message_id: uuid.UUID | None,
+    milestone_ids: list[str],
+) -> dict[str, object]:
+    after_values = _snapshot_values(_snapshot(state))
+    deltas = {
+        key: round(after_values[key] - before_values[key], 3) for key in RELATIONSHIP_EFFECT_KEYS
+    }
+    metadata: dict[str, object] = {
+        "version": RELATIONSHIP_EFFECT_VERSION,
+        "applied_at": applied_at.isoformat(),
+        "deltas": deltas,
+        "added_tags": sorted(set(state.tags_json or []) - tags_before),
+        "repair_needed_before": repair_needed_before,
+        "repair_needed_after": state.repair_needed,
+        "conflict_state_before": conflict_state_before,
+        "conflict_state_after": state.conflict_state,
+        "mood_before": mood_before,
+        "mood_after": state.mood,
+        "milestone_ids": milestone_ids,
+    }
+    if source_message_id is not None:
+        metadata["source_message_id"] = str(source_message_id)
+    return metadata
+
+
+def _effect_source_message_id(effect: dict) -> str | None:
+    value = effect.get("source_message_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _remove_relationship_effect_entries(
+    metadata: dict,
+    *,
+    source_message_id: str,
+    milestone_ids: set[str],
+) -> dict:
+    timeline = metadata.get("timeline")
+    if isinstance(timeline, list):
+        metadata = {
+            **metadata,
+            "timeline": [
+                event
+                for event in timeline
+                if not (
+                    isinstance(event, dict) and event.get("source_message_id") == source_message_id
+                )
+            ],
+        }
+    if milestone_ids:
+        milestones = _metadata_list(metadata.get("milestones"))
+        metadata = {
+            **metadata,
+            "milestones": [
+                milestone_id for milestone_id in milestones if milestone_id not in milestone_ids
+            ],
+        }
+    return metadata
+
+
+async def _delete_relationship_milestone_memories(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    source_message_id: str,
+) -> None:
+    await session.execute(
+        delete(MemoryItem).where(
+            MemoryItem.user_id == user_id,
+            MemoryItem.character_id == character_id,
+            MemoryItem.memory_type == "relationship_milestone",
+            MemoryItem.metadata_json["source_message_id"].as_string() == source_message_id,
+        )
+    )
+
+
+def _metadata_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str)]
+
+
 def _append_timeline_event(metadata: dict, event: dict) -> dict:
     timeline = list(metadata.get("timeline", []))
     timeline.append(event)
@@ -248,3 +614,94 @@ def _event_summary(
         if round(after_value - before_value, 3) != 0
     ]
     return ", ".join(changes) if changes else "Relationship state held steady."
+
+
+def _recent_changes(
+    before: tuple[float, float, float, float, float, float],
+    state: RelationshipState,
+    changed_at: datetime,
+) -> list[dict[str, object]]:
+    before_values = _snapshot_values(before)
+    after_values = _snapshot_values(_snapshot(state))
+    changes: list[dict[str, object]] = []
+    for key, label in RELATIONSHIP_CHANGE_LABELS:
+        before_value = before_values[key]
+        after_value = after_values[key]
+        delta = round(after_value - before_value, 3)
+        if delta == 0:
+            continue
+        changes.append(
+            {
+                "at": changed_at.isoformat(),
+                "key": key,
+                "label": label,
+                "direction": "up" if delta > 0 else "down",
+                "magnitude": _change_magnitude(delta),
+                "delta": delta,
+                "summary": _change_summary(key, delta, state),
+            }
+        )
+    if not changes:
+        return [
+            {
+                "at": changed_at.isoformat(),
+                "key": "steady",
+                "label": "Steady",
+                "direction": "flat",
+                "magnitude": "subtle",
+                "delta": 0.0,
+                "summary": "The connection held steady through this exchange.",
+            }
+        ]
+    return changes[:4]
+
+
+def _change_magnitude(delta: float) -> str:
+    absolute = abs(delta)
+    if absolute >= 0.5:
+        return "clear"
+    if absolute >= 0.15:
+        return "small"
+    return "subtle"
+
+
+def _change_summary(key: str, delta: float, state: RelationshipState) -> str:
+    went_up = delta > 0
+    if key == "trust":
+        return "Trust opened a little." if went_up else "Trust pulled back a little."
+    if key == "intimacy":
+        return (
+            "The exchange carried a little more closeness."
+            if went_up
+            else ("Closeness eased back a little.")
+        )
+    if key == "warmth":
+        return "Warmth rose after this turn." if went_up else "Warmth cooled slightly."
+    if key == "tension":
+        if went_up:
+            return "Tension rose; the next reply should move carefully."
+        return "Tension eased a little."
+    if key == "familiarity":
+        return (
+            "The rhythm became a little more familiar."
+            if went_up
+            else ("The rhythm softened a little.")
+        )
+    if key == "attachment":
+        return (
+            "The thread became a little more sticky."
+            if went_up
+            else ("Attachment loosened a little.")
+        )
+    if state.repair_needed:
+        return "Repair is still the most important signal."
+    return "The relationship shifted slightly."
+
+
+def _recent_change_summary(changes: list[dict[str, object]]) -> str:
+    summaries = [
+        str(change.get("summary"))
+        for change in changes[:2]
+        if isinstance(change.get("summary"), str)
+    ]
+    return " ".join(summaries) if summaries else "The relationship held steady."
