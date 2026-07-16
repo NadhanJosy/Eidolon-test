@@ -95,6 +95,7 @@ export function EidolonApp() {
     state.conversationDeleting ||
     state.memoryMutating ||
     state.journalMutating ||
+    state.threadMutating ||
     state.accountMutating ||
     state.conversationMutating;
 
@@ -186,6 +187,7 @@ export function EidolonApp() {
                 character={state.activeCharacter}
                 characterScenario={characterScenarioPreset(state.activeCharacter)}
                 contentMode={state.contentMode}
+                continuityThreads={state.continuityThreads}
                 draft={state.messageDraft}
                 editableTitle={state.conversationTitle}
                 editingMessageId={state.editingMessageId}
@@ -210,12 +212,19 @@ export function EidolonApp() {
                 setScenarioDraft={actions.setConversationScenarioDraft}
                 streamPhase={state.streamPhase}
                 streamingContent={state.streamingContent}
+                threadActionId={state.threadActionId}
+                threadDraft={state.threadDraft}
+                setThreadDraft={actions.setThreadDraft}
+                onAddContinuityThread={actions.addContinuityThread}
                 onCancelEdit={actions.cancelEditMessage}
                 onDelete={actions.deleteMessage}
                 onEdit={actions.startEditMessage}
                 onOpenMemories={() => navigate("memories")}
                 onQueueProactive={actions.queueProactive}
+                onDeleteContinuityThread={actions.deleteContinuityThread}
+                onReopenContinuityThread={actions.reopenContinuityThread}
                 onRemember={actions.rememberMessage}
+                onResolveContinuityThread={actions.resolveContinuityThread}
                 onReroll={actions.rerollMessage}
                 onResetScenario={actions.resetActiveConversationScenario}
                 onSaveScenario={actions.saveActiveConversationScenario}
@@ -261,7 +270,22 @@ export function EidolonApp() {
                   />
                 ) : null}
                 {view === "relationship" ? (
-                  <RelationshipExperience characterName={characterName} draft={state.characterDraft} journals={state.journals} relationship={state.relationship} timeline={state.timeline} />
+                  <RelationshipExperience
+                    actionId={state.threadActionId}
+                    characterName={characterName}
+                    draft={state.characterDraft}
+                    journals={state.journals}
+                    relationship={state.relationship}
+                    threads={state.continuityThreads}
+                    timeline={state.timeline}
+                    onDelete={actions.deleteContinuityThread}
+                    onReopen={actions.reopenContinuityThread}
+                    onResolve={actions.resolveContinuityThread}
+                    onReturn={(thread) => {
+                      actions.setMessageDraft(`Can we come back to this: ${thread.content}`);
+                      navigate("chat");
+                    }}
+                  />
                 ) : null}
                 {view === "moments" ? (
                   <MomentsJournal

@@ -14,9 +14,18 @@ from app.companion.emotion import emotional_posture, project_emotional_state
 from app.companion.perception import infer_turn_perception
 from app.companion.planning import relationship_behavioral_stage
 from app.companion.soul import character_soul, compiled_soul_sections
-from app.models import Character, EpisodicJournal, MemoryItem, Message, RelationshipState, User
+from app.models import (
+    Character,
+    ContinuityThread,
+    EpisodicJournal,
+    MemoryItem,
+    Message,
+    RelationshipState,
+    User,
+)
+from app.services.continuity import continuity_prompt_items
 
-PROMPT_VERSION = "modular_companion_intelligence_v7"
+PROMPT_VERSION = "modular_companion_intelligence_v8"
 PRIVATE_PROMPT_CONTEXT_KEY = "_prompt_context"
 HARD_BOUNDARIES = (
     "Do not generate sexual content involving minors or ambiguous age, coercion, "
@@ -59,9 +68,11 @@ def assemble_prompt(
     scenario_mode: str = "default",
     scenario_text: str | None = None,
     context_budget_tokens: int = 8000,
+    threads: list[ContinuityThread] | None = None,
 ) -> PromptBundle:
     safety_status = safety_status or {}
     selected_journals = journals or []
+    selected_threads = [thread for thread in (threads or []) if thread.status == "open"]
     active_memories = _deduplicated_memories(memories)
     user_facts = [memory for memory in active_memories if memory.memory_type in USER_FACT_TYPES]
     long_term_memories = [
@@ -72,6 +83,7 @@ def assemble_prompt(
         current_message,
         recent_messages=recent_messages,
         journals=selected_journals,
+        threads=selected_threads,
     )
     selected_emotion = emotional_state or (
         project_emotional_state(relationship) if relationship is not None else EmotionalState()
@@ -97,6 +109,7 @@ def assemble_prompt(
         user_facts=[_compact(memory.content, 500) for memory in user_facts[:6]],
         memories=[_memory_prompt_item(memory) for memory in long_term_memories[:8]],
         episodes=_episode_items(selected_journals[:4]),
+        threads=continuity_prompt_items(selected_threads[:4]),
         response_direction=_response_direction_section(
             selected_plan,
             legacy_summary=plan_summary,
@@ -123,6 +136,7 @@ def assemble_prompt(
             relationship=relationship,
             memories=active_memories,
             journals=selected_journals,
+            threads=selected_threads,
             recent_messages=recent_messages,
             current_message=current_message,
             safety_status=safety_status,
@@ -136,6 +150,7 @@ def assemble_prompt(
             selected_fact_count=len(sections.user_facts),
             selected_memory_count=len(sections.memories),
             selected_episode_count=len(sections.episodes),
+            selected_thread_count=len(sections.threads),
             selected_recent_count=len(sections.recent),
             perception=selected_perception,
             response_plan=selected_plan,
@@ -152,7 +167,10 @@ def assemble_prompt(
                 for message in recent_messages[-12:]
                 if message.role in {"user", "assistant"}
             ),
-            selected_memory_contents=tuple(memory.content for memory in active_memories),
+            selected_memory_contents=tuple(
+                [memory.content for memory in active_memories]
+                + [thread.content for thread in selected_threads]
+            ),
             uncertain_memory_contents=tuple(
                 memory.content
                 for memory in active_memories
@@ -175,6 +193,7 @@ class _PromptSections:
     user_facts: list[str]
     memories: list[str]
     episodes: list[str]
+    threads: list[str]
     response_direction: str
     recent: list[str]
     current: str
@@ -191,6 +210,7 @@ class _PromptSections:
                 _list_section("Concise user facts:", self.user_facts),
                 _list_section("Relevant long-term memories:", self.memories),
                 _list_section("Episodic continuity and open threads:", self.episodes),
+                _list_section("Living promises, plans, and follow-ups:", self.threads),
                 self.response_direction,
                 _list_section("Recent conversation:", self.recent),
                 self.current,
@@ -381,10 +401,12 @@ def _render_with_budget(
     for values, minimum in (
         (sections.memories, 1),
         (sections.episodes, 1),
+        (sections.threads, 1),
         (sections.user_facts, 1),
         (sections.recent, 0),
         (sections.memories, 0),
         (sections.episodes, 0),
+        (sections.threads, 0),
         (sections.user_facts, 0),
     ):
         while len(prompt) > max_chars and len(values) > minimum:
@@ -453,6 +475,7 @@ def _context_manifest(
     relationship: RelationshipState | None,
     memories: list[MemoryItem],
     journals: list[EpisodicJournal],
+    threads: list[ContinuityThread],
     recent_messages: list[Message],
     current_message: str,
     safety_status: dict,
@@ -466,6 +489,7 @@ def _context_manifest(
     selected_fact_count: int,
     selected_memory_count: int,
     selected_episode_count: int,
+    selected_thread_count: int,
     selected_recent_count: int,
     perception: TurnPerception,
     response_plan: ResponsePlan,
@@ -501,6 +525,14 @@ def _context_manifest(
             }
             for journal in journals[:8]
         ],
+        "continuity_threads": [
+            {
+                "id": str(thread.id),
+                "thread_kind": thread.thread_kind[:32],
+                "status": thread.status,
+            }
+            for thread in threads[:8]
+        ],
         "recent_messages": [
             {
                 "id": str(message.id),
@@ -523,6 +555,7 @@ def _context_manifest(
             "selected_fact_count": selected_fact_count,
             "selected_memory_count": selected_memory_count,
             "selected_episode_count": selected_episode_count,
+            "selected_thread_count": selected_thread_count,
             "selected_recent_count": selected_recent_count,
         },
         "time_context": (time_context or "not provided")[:80],

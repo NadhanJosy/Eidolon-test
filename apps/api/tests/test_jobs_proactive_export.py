@@ -14,6 +14,7 @@ from app.db.session import AsyncSessionLocal
 from app.llm.base import LLMGeneration, LLMProviderUnavailable
 from app.models import (
     Character,
+    ContinuityThread,
     Conversation,
     MemoryItem,
     Message,
@@ -24,6 +25,7 @@ from app.models import (
 )
 from app.services import scheduler as scheduler_service
 from app.services.auth_session import REFRESH_COOKIE_NAME
+from app.services.continuity import select_proactive_thread
 from app.services.jobs import claim_due_jobs, create_job, mark_job_done
 from app.services.proactive import (
     PROACTIVE_VARIANTS,
@@ -675,7 +677,7 @@ async def test_scheduler_milestone_note_uses_latest_unnoted_relationship_milesto
         assert "steady_rhythm" in relationship.metadata_json["proactive_milestones_noted"]
 
 
-async def test_scheduler_unresolved_thread_nudge_uses_safe_journal_context(
+async def test_scheduler_unresolved_thread_nudge_uses_living_thread_and_cooldown(
     client: AsyncClient,
 ) -> None:
     headers = await auth_headers(client)
@@ -731,9 +733,27 @@ async def test_scheduler_unresolved_thread_nudge_uses_safe_journal_context(
         assert stored_messages[0].metadata_json["proactive_type"] == (
             "proactive_unresolved_thread_nudge"
         )
-        assert stored_messages[0].metadata_json["proactive_context"] == "unresolved_thread"
+        assert stored_messages[0].metadata_json["proactive_context"] == "living_thread"
+        assert stored_messages[0].metadata_json["continuity_thread_id"]
         assert "lantern plan" in stored_messages[0].content
         assert "no pressure" in stored_messages[0].content.lower()
+        thread_id = uuid.UUID(stored_messages[0].metadata_json["continuity_thread_id"])
+        living_thread = await session.get(ContinuityThread, thread_id)
+        assert living_thread is not None
+        assert living_thread.last_proactive_at is not None
+        stored_conversation = await session.get(
+            Conversation,
+            uuid.UUID(conversation["id"]),
+        )
+        assert stored_conversation is not None
+        assert (
+            await select_proactive_thread(
+                session,
+                conversation=stored_conversation,
+                requested_thread_id=thread_id,
+            )
+            is None
+        )
 
 
 async def test_scheduler_sends_delayed_double_text_after_assistant_reply(
@@ -1601,7 +1621,10 @@ async def test_export_preserves_continuity_metadata_without_secrets(
         "/chat/messages",
         json={
             "conversation_id": conversation.json()["id"],
-            "content": "Thanks. Please remember that I like cedar tea.",
+            "content": (
+                "Please remember that I like cedar tea, and can we come back to the lantern "
+                "plan later?"
+            ),
         },
         headers=headers,
     )
@@ -1625,6 +1648,12 @@ async def test_export_preserves_continuity_metadata_without_secrets(
     assert "callback_request" in journal["metadata_json"]["continuity_signals"]
     assert journal["metadata_json"]["redacted_adult"] is False
     assert "updated_at" in journal
+
+    assert payload["continuity_threads"]
+    thread = payload["continuity_threads"][0]
+    assert "lantern plan" in thread["content"]
+    assert thread["status"] == "open"
+    assert thread["metadata_json"]["source"] == "explicit_user_language"
 
     assert payload["relationship_states"]
     relationship = payload["relationship_states"][0]

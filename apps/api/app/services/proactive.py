@@ -13,12 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm.base import LLMProvider, LLMProviderUnavailable
 from app.models import (
     Character,
+    ContinuityThread,
     Conversation,
     EpisodicJournal,
     Message,
     RelationshipState,
     ScheduledJob,
     utc_now,
+)
+from app.services.continuity import (
+    record_proactive_thread_delivery,
+    select_proactive_thread,
 )
 from app.services.conversation_privacy import conversation_is_private, message_is_private
 from app.services.jobs import create_job
@@ -253,6 +258,7 @@ async def create_inactivity_proactive_message(
     force: bool = False,
     proactive_type: str = "proactive_inactivity_check",
     provider: LLMProvider | None = None,
+    continuity_thread_id: uuid.UUID | None = None,
 ) -> Message | None:
     if conversation_is_private(conversation):
         return None
@@ -304,15 +310,18 @@ async def create_inactivity_proactive_message(
     )
     context_metadata: dict[str, str] = {}
     milestone_context: tuple[RelationshipState, dict[str, str]] | None = None
-    if proactive_type == "proactive_unresolved_thread_nudge" and relationship_posture.key not in {
-        "careful",
-        "repair",
-    }:
-        contextual_content, context_metadata = await _unresolved_thread_content(
+    continuity_thread: ContinuityThread | None = None
+    if proactive_type == "proactive_unresolved_thread_nudge":
+        if relationship_posture.key in {"careful", "repair"}:
+            return None
+        contextual_content, context_metadata, continuity_thread = await _unresolved_thread_content(
             session,
             conversation,
             fallback=content,
+            requested_thread_id=continuity_thread_id,
         )
+        if not context_metadata:
+            return None
         content = contextual_content
     elif proactive_type == "proactive_milestone_check":
         milestone_context = await _latest_unnoted_relationship_milestone(session, conversation)
@@ -359,6 +368,8 @@ async def create_inactivity_proactive_message(
             relationship,
             str(milestone["milestone_id"]),
         )
+    if continuity_thread is not None:
+        await record_proactive_thread_delivery(session, continuity_thread, delivered_at=now)
     await session.flush()
     return message
 
@@ -556,11 +567,15 @@ async def ensure_proactive_jobs(
             and await _latest_unnoted_relationship_milestone(session, conversation) is None
         ):
             continue
-        if (
-            job_type == "proactive_unresolved_thread_nudge"
-            and await _latest_journal_with_followup(session, conversation) is None
-        ):
-            continue
+        continuity_thread = None
+        if job_type == "proactive_unresolved_thread_nudge":
+            continuity_thread = await select_proactive_thread(
+                session,
+                conversation=conversation,
+                now=now,
+            )
+            if continuity_thread is None:
+                continue
         if await _pending_job_exists(session, conversation.id, job_type):
             continue
         run_at = proactive_initial_run_at(
@@ -580,6 +595,11 @@ async def ensure_proactive_jobs(
                     "conversation_id": str(conversation.id),
                     "cooldown_hours": cooldown_hours,
                     "proactive_type": job_type,
+                    **(
+                        {"continuity_thread_id": str(continuity_thread.id)}
+                        if continuity_thread is not None
+                        else {}
+                    ),
                     **proactive_schedule_metadata(character, run_at),
                     "source": "chat_completion_hook",
                 },
@@ -903,15 +923,38 @@ async def _unresolved_thread_content(
     conversation: Conversation,
     *,
     fallback: str,
-) -> tuple[str, dict[str, str]]:
+    requested_thread_id: uuid.UUID | None = None,
+) -> tuple[str, dict[str, str], ContinuityThread | None]:
+    continuity_thread = await select_proactive_thread(
+        session,
+        conversation=conversation,
+        requested_thread_id=requested_thread_id,
+    )
+    if continuity_thread is not None:
+        context = _safe_thread_context([continuity_thread.content], "living_thread")
+        if context is not None:
+            kind, excerpt = context
+            return (
+                (
+                    f"I remembered the thread about {excerpt}. "
+                    "We can return to it whenever it feels right; no pressure."
+                ),
+                {
+                    "proactive_context": kind,
+                    "continuity_thread_id": str(continuity_thread.id),
+                },
+                continuity_thread,
+            )
+    if requested_thread_id is not None:
+        return fallback, {}, None
     journal = await _latest_journal_with_followup(session, conversation)
     if journal is None:
-        return fallback, {}
+        return fallback, {}, None
     context = _safe_thread_context(journal.unresolved_threads_json, "unresolved_thread")
     if context is None:
         context = _safe_thread_context(journal.callbacks_json, "callback")
     if context is None:
-        return fallback, {}
+        return fallback, {}, None
     kind, excerpt = context
     return (
         (
@@ -919,6 +962,7 @@ async def _unresolved_thread_content(
             "We can return to it whenever it feels right; no pressure."
         ),
         {"proactive_context": kind},
+        None,
     )
 
 

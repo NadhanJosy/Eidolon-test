@@ -243,6 +243,28 @@ export type Journal = {
   updated_at: string;
 };
 
+export type ContinuityThreadKind = "follow_up" | "plan" | "promise" | "repair" | "ritual";
+export type ContinuityThreadStatus = "open" | "resolved";
+
+export type ContinuityThread = {
+  id: string;
+  user_id: string;
+  character_id: string;
+  conversation_id: string | null;
+  source_message_id: string | null;
+  thread_kind: ContinuityThreadKind;
+  content: string;
+  status: ContinuityThreadStatus;
+  salience: number;
+  confidence: number;
+  last_referenced_at: string | null;
+  last_proactive_at: string | null;
+  resolved_at: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AdultStatus = {
   requested_mode: ContentMode;
   effective_mode: ContentMode;
@@ -341,6 +363,11 @@ export type AssembledContext = {
     };
     memory_items: ContextMemoryItem[];
     journal_items: ContextJournalItem[];
+    continuity_threads?: {
+      id: string;
+      thread_kind: ContinuityThreadKind;
+      status: ContinuityThreadStatus;
+    }[];
     recent_messages: {
       id: string;
       role: Message["role"];

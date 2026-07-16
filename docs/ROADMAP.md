@@ -4,9 +4,9 @@
 
 The MVP is implemented and deployed with authentication, multi-companion and
 multi-thread chat, SSE streaming, persona prompts, semantic/episodic memory,
-relationship continuity, PostgreSQL-backed jobs, proactive notes, privacy and
-adult gates, debug visibility, export/erasure, migrations, CI, and managed
-production builds.
+first-class living plans/promises/follow-ups, relationship continuity,
+PostgreSQL-backed jobs, proactive notes, privacy and adult gates, debug
+visibility, export/erasure, migrations, CI, and managed production builds.
 
 The roadmap now prioritizes reliability and operational confidence over adding
 more surface area.
@@ -37,6 +37,8 @@ more surface area.
    - improve concise failure/retry guidance
    - tune prompt budgets, memory precision, and repetitive-response checks from
      real SFW usage evidence
+   - tune living-thread extraction precision and closure language from real SFW
+     usage evidence without widening automatic capture speculatively
    - review proactive timing and cooldown behaviour under Cloud Run wake-up
      limitations
 

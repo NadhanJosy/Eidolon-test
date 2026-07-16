@@ -45,7 +45,7 @@ The backend owns state. The model generates prose.
 
 Provider conversation storage is not durable product memory. PostgreSQL owns
 accounts, sessions, companions, conversations, messages, memories, episodes,
-relationships, diagnostic events, and scheduled work.
+continuity threads, relationships, diagnostic events, and scheduled work.
 
 ## Frontend boundary
 
@@ -62,6 +62,7 @@ It does not own:
 
 - safety or adult eligibility
 - durable memory selection
+- living-thread extraction, retrieval, and lifecycle
 - relationship calculations
 - prompts or provider calls
 - long-lived session credentials
@@ -74,7 +75,8 @@ authenticated application data for offline use.
 
 FastAPI owns authentication, origin checks, ownership checks, validation,
 database transactions, provider routing, prompt construction, response quality
-checks, memory and relationship updates, jobs, export, and safe diagnostics.
+checks, memory, living-thread, and relationship updates, jobs, export, and safe
+diagnostics.
 
 All user-data queries must prove ownership directly or through an owned
 companion/conversation. A guessed UUID must not reveal whether another user's
@@ -116,14 +118,15 @@ block refresh; same-site custom subdomains are the durable solution.
 2. Validate content mode, privacy mode, message bounds, and hard safety rules.
 3. Persist the accepted user message and its privacy provenance.
 4. Infer bounded intent/tone and retrieve eligible relationship, memory,
-   episode, scenario, and recent-message context.
+   episode, living-thread, scenario, and recent-message context.
 5. Build a private response plan and compile ordered prompt modules.
 6. Call the selected provider.
 7. For SSE, emit `message_start`, screened `token` events, then
    `message_done`; a terminal `error` event closes failed streams.
 8. Validate and persist the completed assistant message exactly once.
 9. Apply deterministic relationship/emotional changes.
-10. Create a durable post-chat job for memory, journal, and proactive work.
+10. Create a durable post-chat job for memory, living-thread extraction,
+    journal, and proactive work.
 
 A failed or cancelled generation keeps the accepted user message retryable and
 stores no partial assistant message. Reroll and latest-turn edit use the same
@@ -147,7 +150,8 @@ Details are in [COMPANION_SYSTEMS.md](COMPANION_SYSTEMS.md).
 Privacy is captured when a turn is accepted. Conversation-private and one-turn
 private messages remain in owned history but are excluded from future normal
 prompt history, memory extraction, recall updates, episodic journals,
-relationship changes, and proactive context.
+living-thread creation/reference updates, relationship changes, and proactive
+context.
 
 Controlled privacy/scenario system events can appear in the transcript. Prompt
 assembly converts recognized events into fixed summaries and never treats stored

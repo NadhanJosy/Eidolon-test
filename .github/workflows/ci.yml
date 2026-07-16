@@ -37,7 +37,11 @@ jobs:
           fi
       - name: Run backend checks
         env:
+          APP_ENV: testing
           DATABASE_URL: postgresql+asyncpg://eidolon:eidolon_dev_password@localhost:5432/eidolon
+          ENABLE_SCHEDULER: "false"
+          JWT_SECRET: ci-only-deterministic-secret-not-for-production
+          LLM_PROVIDER: mock
         run: |
           if [ -f apps/api/pyproject.toml ]; then
             cd apps/api
@@ -62,9 +66,12 @@ jobs:
             npm ci
           fi
       - name: Run frontend checks
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
         run: |
           if [ -f apps/web/package.json ]; then
             cd apps/web
             npm run lint
+            npm run typecheck
             npm run build
           fi

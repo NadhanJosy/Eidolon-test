@@ -230,6 +230,69 @@ class EpisodicJournal(TimestampMixin, Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
 
+class ContinuityThread(TimestampMixin, Base):
+    __tablename__ = "continuity_threads"
+    __table_args__ = (
+        CheckConstraint(
+            "thread_kind IN ('follow_up', 'plan', 'promise', 'repair', 'ritual')",
+            name="ck_continuity_threads_kind",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'resolved')",
+            name="ck_continuity_threads_status",
+        ),
+        CheckConstraint(
+            "salience >= 0 AND salience <= 1",
+            name="ck_continuity_threads_salience",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_continuity_threads_confidence",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
+    )
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    thread_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True, nullable=False)
+    salience: Mapped[float] = mapped_column(Float, default=0.6, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.8, nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    last_referenced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_proactive_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+
 class RelationshipState(TimestampMixin, Base):
     __tablename__ = "relationship_states"
     __table_args__ = (

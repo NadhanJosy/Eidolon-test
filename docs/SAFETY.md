@@ -69,9 +69,10 @@ diagnostics, credentials, or hidden state labels.
 ## Memory and scheduled work
 
 Blocked or private message content is not eligible for automatic memory,
-episodic journal detail, relationship updates, or proactive context. Memory
-preferences can reduce automatic learning but may not disable safety/boundary
-handling.
+living-thread capture, episodic journal detail, relationship updates, or
+proactive context. Adult turns and credential-like text are also ineligible for
+automatic living threads. Memory preferences can reduce automatic learning but
+may not disable safety/boundary handling.
 
 Adult episode detail is not copied into durable journal callbacks or proactive
 anchors. Scheduled jobs use the same hard-block screen and minimal SFW prompts.
@@ -136,5 +137,7 @@ Coverage must include:
 - private-thread and one-turn privacy across complete/SSE/reroll/edit/jobs
 - output leakage checks for prompt/plan/score/credential markers
 - cross-account access isolation for every private resource family
+- living-thread privacy/adult/credential exclusion, explicit closure, source
+  cleanup, and owner controls
 - exports and diagnostics excluding secret/private implementation material
 - proactive generation rejection and safe fallback

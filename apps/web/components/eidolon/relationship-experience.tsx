@@ -1,20 +1,33 @@
 import { journalResonance, relationshipMomentum, relationshipPhase, relationshipRecentChanges, relationshipTemperature, timelineSummary } from "./cognition";
 import { EmptyExperience, PageHeading } from "./experience-primitives";
 import { Icon } from "./icons";
-import type { CharacterDraft, Journal, Relationship, RelationshipEvent } from "./types";
+import { LivingThreadsStory } from "./living-threads";
+import type { CharacterDraft, ContinuityThread, Journal, Relationship, RelationshipEvent } from "./types";
 
 export function RelationshipExperience({
   characterName,
   relationship,
   timeline,
   journals,
-  draft
+  draft,
+  threads,
+  actionId,
+  onDelete,
+  onReopen,
+  onResolve,
+  onReturn
 }: {
   characterName: string;
   relationship: Relationship;
   timeline: RelationshipEvent[];
   journals: Journal[];
   draft: CharacterDraft;
+  threads: ContinuityThread[];
+  actionId: string | null;
+  onDelete: (thread: ContinuityThread) => void;
+  onReopen: (thread: ContinuityThread) => void;
+  onResolve: (thread: ContinuityThread) => void;
+  onReturn: (thread: ContinuityThread) => void;
 }) {
   const phase = relationshipPhase(relationship);
   const changes = relationshipRecentChanges(relationship);
@@ -85,6 +98,16 @@ export function RelationshipExperience({
           </section>
         </aside>
       </div>
+
+      <LivingThreadsStory
+        actionId={actionId}
+        characterName={characterName}
+        threads={threads}
+        onDelete={onDelete}
+        onReopen={onReopen}
+        onResolve={onResolve}
+        onReturn={onReturn}
+      />
 
       {milestones.length > 0 ? (
         <section className="mt-14 border-t border-white/[0.08] pt-10"><p className="text-xs uppercase tracking-[0.18em] text-[#857a70]">Landmarks</p><h2 className="mt-3 font-eidolon-display text-3xl">Moments that changed the texture</h2><div className="mt-6 grid gap-4 sm:grid-cols-2">{milestones.map((journal) => <article className="rounded-2xl border border-[#b98265]/15 bg-[#b98265]/[0.045] p-5" key={journal.id}><p className="text-[0.65rem] uppercase tracking-[0.15em] text-[#a27d68]">{journalResonance(journal)}</p><h3 className="mt-3 font-eidolon-display text-xl">{journal.title}</h3><p className="mt-2 line-clamp-3 text-xs leading-5 text-[#837a72]">{journal.summary}</p></article>)}</div></section>

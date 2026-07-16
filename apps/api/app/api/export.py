@@ -11,6 +11,7 @@ from app.db.session import get_session
 from app.dependencies import get_current_user
 from app.models import (
     Character,
+    ContinuityThread,
     Conversation,
     EpisodicJournal,
     MemoryItem,
@@ -57,6 +58,9 @@ async def export_account(
     journals = (
         await session.execute(select(EpisodicJournal).where(EpisodicJournal.user_id == user.id))
     ).scalars()
+    continuity_threads = (
+        await session.execute(select(ContinuityThread).where(ContinuityThread.user_id == user.id))
+    ).scalars()
     relationships = (
         await session.execute(select(RelationshipState).where(RelationshipState.user_id == user.id))
     ).scalars()
@@ -78,6 +82,7 @@ async def export_account(
         messages=[message_to_dict(message) for message in messages],
         memories=[memory_to_dict(memory) for memory in memories],
         episodic_journals=[journal_to_dict(journal) for journal in journals],
+        continuity_threads=[continuity_thread_to_dict(thread) for thread in continuity_threads],
         relationship_states=[relationship_to_dict(relationship) for relationship in relationships],
         scheduled_jobs=[job_to_dict(job) for job in jobs],
     )
@@ -177,6 +182,27 @@ def journal_to_dict(journal: EpisodicJournal) -> dict:
         "metadata_json": journal.metadata_json,
         "created_at": journal.created_at.isoformat(),
         "updated_at": journal.updated_at.isoformat(),
+    }
+
+
+def continuity_thread_to_dict(thread: ContinuityThread) -> dict:
+    return {
+        "id": str(thread.id),
+        "user_id": str(thread.user_id),
+        "character_id": str(thread.character_id),
+        "conversation_id": str(thread.conversation_id) if thread.conversation_id else None,
+        "source_message_id": (str(thread.source_message_id) if thread.source_message_id else None),
+        "thread_kind": thread.thread_kind,
+        "content": thread.content,
+        "status": thread.status,
+        "salience": thread.salience,
+        "confidence": thread.confidence,
+        "last_referenced_at": isoformat_or_none(thread.last_referenced_at),
+        "last_proactive_at": isoformat_or_none(thread.last_proactive_at),
+        "resolved_at": isoformat_or_none(thread.resolved_at),
+        "metadata_json": thread.metadata_json,
+        "created_at": thread.created_at.isoformat(),
+        "updated_at": thread.updated_at.isoformat(),
     }
 
 

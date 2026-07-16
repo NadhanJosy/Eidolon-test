@@ -15,6 +15,8 @@ state rather than avatars, voice, video, or heavy visual effects.
 - The backend owns facts and decisions; the model supplies the next piece of
   prose.
 - Memory is selective, inspectable, correctable, and removable.
+- Unfinished plans and promises remain visible, grounded in explicit user
+  language, and under user control.
 - Relationship changes are gradual, bounded, and supported by real interaction
   evidence.
 - Privacy controls affect future cognition, not merely the appearance of a
@@ -86,6 +88,25 @@ until restored.
 Manual journal notes remain user-owned. Generated journal summaries can be
 rebuilt when their source conversation changes.
 
+### Living continuity threads
+
+Eidolon carries explicit future intent as first-class living threads rather
+than burying it in journal prose. Threads cover plans, promises, rituals,
+repair, and requests to follow up. Conservative deterministic extraction
+requires explicit language; ordinary conversation is not promoted into an
+obligation.
+
+Open threads can influence a relevant later reply and, when all proactive
+guards pass, a restrained follow-up subject to a per-thread cooldown. Users can
+inspect open and settled threads from chat and the Relationship view, add one
+deliberately, return to it, close or reopen it, and permanently delete it.
+Resolution is never inferred from companion prose. Source-message edits/deletes
+remove stale automatic threads.
+
+Private or adult turns, blocked content, credentials, and preference-disabled
+learning never create automatic living threads. Conversation-private threads
+also reject conversation-linked manual creation.
+
 ### Relationship continuity
 
 Each user-companion pair has one relationship row containing bounded trust,
@@ -134,8 +155,9 @@ traces, or another user's data.
 ## Privacy semantics
 
 A private conversation still persists visible messages for its owner, but new
-turns do not create memory, journal, relationship, or proactive side effects.
-One-turn privacy applies the same rule to one user/assistant exchange.
+turns do not create memory, living threads, journals, relationship, or proactive
+side effects. One-turn privacy applies the same rule to one user/assistant
+exchange.
 
 Private messages remain visible in owned history, literal search, and export.
 They are excluded from later normal prompt history and must not update recall
@@ -166,8 +188,9 @@ See [SAFETY.md](SAFETY.md) for the complete non-negotiable boundary contract.
 
 The deployed MVP is healthy when a user can authenticate, open or create a
 companion and thread, receive a streamed response, reload into the persisted
-conversation, inspect and control memory/relationship data, use privacy modes,
-and export or erase owned data without exposing secrets or another user's state.
+conversation, inspect and control memory/relationship/living-thread data, use
+privacy modes, and export or erase owned data without exposing secrets or
+another user's state.
 
 Engineering acceptance and release checks are defined in
 [OPERATIONS.md](OPERATIONS.md).
