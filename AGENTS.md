@@ -1,182 +1,247 @@
 # Eidolon Agent Instructions
 
-These instructions are mandatory for Codex and any coding agent working in this repository.
+These instructions are mandatory for Codex and every coding agent working in this repository.
 
 ## Project summary
 
-Eidolon is a private, text-only, immersive AI companion application. It is not a multimedia avatar app. Its depth comes from backend state, memory, persona continuity, relationship variables, prompt assembly, and scheduled text behaviours.
+Eidolon is a private, text-only AI companion application. Its depth comes from
+backend-owned memory, persona continuity, relationship state, prompt assembly,
+privacy controls, and scheduled text behaviour. It is not a multimedia avatar
+application.
 
-The target for this repository is an ambitious but buildable MVP that runs on zero recurring-cost infrastructure for personal use and keeps a clean migration path to future scale.
+The MVP is deployed. Work should improve the existing product without replacing
+its architecture, weakening its safety boundaries, or treating production as a
+disposable test environment.
+
+## Sources of truth
+
+Read the smallest relevant set before changing code:
+
+- `README.md` for setup, repository layout, and the documentation map
+- `docs/PRODUCT.md` for product scope and user-facing behaviour
+- `docs/ARCHITECTURE.md` for component boundaries and runtime flows
+- `docs/DATA_MODEL.md` for durable state and migration expectations
+- `docs/API.md` for the route inventory and API conventions
+- `docs/COMPANION_SYSTEMS.md` for prompts, memory, relationships, and jobs
+- `docs/SAFETY.md` for non-negotiable content and privacy boundaries
+- `docs/OPERATIONS.md` for deployment, release, backup, and validation work
+- `docs/ROADMAP.md` for current priorities and deferred work
+- `docs/GOAL_PROGRESS.md` for one concise entry per completed user task
+
+When documentation and executable code disagree, do not silently choose one.
+Confirm the implementation, correct stale documentation in the same change, and
+call out any product decision that cannot be inferred safely.
+
+## Active production topology
+
+- Frontend: Cloudflare Pages static export from `apps/web`
+- Backend: Google Cloud Run container built from `apps/api`
+- Database: Supabase PostgreSQL through the Session pooler
+- Inference: Groq through the backend-only provider adapter
+- Secrets: Google Secret Manager or Cloud Run secret bindings
+- Source and CI: GitHub; CI runs on pull requests and pushes to `main`
+
+The provider and database are behind interfaces so a future migration remains
+possible, but Oracle/Ollama is not the active production target.
+
+The personal deployment should remain within the operator's chosen free-tier
+limits. Free tiers are external policies, not a guarantee the code can make. Do
+not add a paid service, enable a chargeable feature, raise instance floors, or
+materially increase resource usage without explicit user approval.
 
 ## Hard constraints
 
-- Development machine: low-spec Chromebook, using GitHub Codespaces.
-- Production target for personal MVP: Oracle Cloud Always Free ARM VM.
-- Production budget for personal MVP: £0 recurring cost.
-- Paid APIs are forbidden for runtime features.
-- The only paid tooling allowed is the user's coding assistant subscription.
-- No local model execution on the Chromebook.
-- No heavy client-side rendering.
-- No voice, audio, avatar, video, AR, image generation, or Live2D features.
-- No commercial API dependency for core inference.
-- No Supabase/Firebase/Pinecone/Chroma/Redis/Celery/Kubernetes/LangChain for MVP.
-- Do not add dependencies just because they are popular. This is software engineering, not dependency taxidermy.
+- Development happens on a low-spec Chromebook through GitHub Codespaces.
+- Do not run a local model on the Chromebook.
+- Keep the client lightweight and text-first.
+- No voice, audio, avatar, video, AR, image generation, Live2D, or heavy 3D work.
+- No browser-side inference and no provider key in frontend code.
+- Do not add Redis, Celery, Kubernetes, LangChain, Pinecone, Chroma, or another
+  datastore/queue merely for convenience.
+- Do not replace established dependencies without a concrete need.
+- Never commit `.env`, secrets, tokens, credentials, private URLs, private IPs,
+  database dumps, or production user data.
 
 ## Required stack
 
 Frontend:
+
 - Next.js App Router
 - TypeScript
+- React
 - Tailwind CSS
-- Lightweight text-first PWA-style interface
-- Server-Sent Events for streaming before WebSockets
+- static production export
+- native fetch with Server-Sent Events for streaming
 
 Backend:
-- FastAPI
+
 - Python 3.12+
-- Pydantic v2
-- pydantic-settings
-- SQLAlchemy 2.x async
+- FastAPI and Uvicorn
+- Pydantic v2 and pydantic-settings
+- SQLAlchemy 2.x async with asyncpg
 - Alembic
-- APScheduler only with PostgreSQL-backed job state
+- APScheduler as a wake-up mechanism only
 
 Database:
+
 - PostgreSQL 16
 - pgvector
 - pg_trgm where useful
-- PostgreSQL is the source of truth for users, characters, messages, memories, relationship state, and jobs.
+- PostgreSQL as the source of truth for accounts, sessions, characters,
+  conversations, messages, memories, relationships, diagnostics, and jobs
 
-LLM:
-- Development starts with a mock provider.
-- Production uses Ollama on Oracle ARM.
-- Target model class: Llama 3.1 8B / similar 8B quantized model.
-- Use a smaller model or mock for background jobs if useful.
-- No fine-tuning in MVP.
+LLM providers:
+
+- deterministic mock for development and automated tests
+- Groq for the active production deployment
+- Ollama adapter retained as an optional development/self-hosting path
+- no fine-tuning in the MVP
 
 Infrastructure:
+
 - GitHub Codespaces for development
-- Docker Compose for local dev services only
-- Oracle Cloud Always Free ARM for production backend/database/Ollama
-- Caddy reverse proxy
-- systemd process management
-- GitHub Actions SSH deployment later
+- Docker Compose for local PostgreSQL only
+- Cloudflare Pages for the production frontend
+- Google Cloud Run for the production API
+- Supabase Session pooler for production PostgreSQL access
+- Google Secret Manager/Cloud Run bindings for secrets
+
+## Production and Git rules
+
+- Editing local files does not change production.
+- Treat `main` as the production branch.
+- Use a feature branch and pull request for normal work.
+- The user has given standing permission to commit and push completed task work.
+  After validation, stage every task-owned change (including new and deleted
+  files), inspect the staged diff, commit it, and push the current feature branch.
+- Never include unrelated user work merely because `git add -A` is convenient.
+- Never push completed development work directly to `main`. When starting from
+  `main`, create an `agent/<short-description>` branch first.
+- Open or update a pull request after pushing when repository access permits.
+- Do not merge the pull request, deploy manually, or change cloud configuration
+  without an explicit user request for that production action.
+- GitHub Actions CI and hosting deployment triggers are separate. A passing CI
+  workflow does not prove a host deployed, and a host may deploy without waiting
+  for CI unless its external trigger is configured to do so.
+- A Cloudflare branch preview is only a frontend preview. If it points at the
+  production API, it can read or mutate production data and may be rejected by
+  exact-origin CORS. Do not describe it as a staging environment.
+- Preserve Cloud Run environment variables, secret bindings, service identity,
+  instance limits, timeout, and CORS settings when deploying a new image.
 
 ## Product boundaries
 
-The app may support legal adult fictional text roleplay between adults, but it must enforce hard structural boundaries:
+The app may support legal adult fictional text roleplay between adults, but it
+must enforce structural boundaries:
 
-- No minors or ambiguous-age characters in sexual contexts.
-- No sexual coercion, exploitation, or abuse.
-- No illegal sexual content.
-- No real-world instructions for harm, stalking, exploitation, or abuse.
-- Adult mode must require user age-gate confirmation and explicit adult character age.
-- Never interpret "uncensored" as "no rules."
+- no minors or ambiguous-age characters in sexual contexts
+- no sexual coercion, exploitation, or abuse
+- no illegal sexual content
+- no real-world instructions for harm, stalking, exploitation, or abuse
+- adult mode requires user age-gate confirmation and an explicit adult
+  character age
+- relationship repair/tension gates and hard boundaries remain authoritative
+- “uncensored” never means “no rules”
 
-Do not put explicit sexual sample content in code, tests, fixtures, seed data, or docs.
+Do not put explicit sexual samples in code, tests, fixtures, seed data, or docs.
 
 ## Core architecture principle
 
-The backend owns state. The LLM generates text.
+The backend owns state. The LLM generates prose.
 
-The backend owns:
-- user account
-- character profile
-- conversation history
-- memory storage and retrieval
-- relationship state
-- mood state
-- prompt assembly
-- safety boundaries
-- scheduled jobs
-- proactive message logic
-- debug/admin visibility
+The backend owns identity, character configuration, conversation history,
+memory, relationship and emotional state, prompt construction, safety gates,
+privacy rules, scheduled jobs, proactive-message decisions, and debug
+visibility. Durable facts belong in PostgreSQL and must not depend on provider
+conversation history.
 
-The model must not be expected to magically remember durable facts. Durable facts belong in PostgreSQL.
+## Engineering rules
 
-## Build philosophy
+- Build thin vertical slices and preserve existing flows.
+- Keep files small, explicit, typed, and boring.
+- Use Pydantic schemas at API boundaries.
+- Scope every user-owned database operation to the authenticated owner.
+- Use SQLAlchemy models and Alembic migrations for schema changes.
+- Never change a model without adding and testing the matching migration.
+- Cloud Run starts with `alembic upgrade head`; prefer backward-compatible,
+  additive migrations and stage destructive changes.
+- Preserve the PostgreSQL migration advisory lock.
+- Add deterministic tests for backend services and endpoints.
+- Mock Groq/Ollama HTTP in automated tests; live provider tests stay opt-in.
+- Avoid global mutable state except explicit application lifecycle objects.
+- Keep generated fixtures SFW and failures readable.
+- Keep raw prompts, message prose, secrets, provider response bodies, and stack
+  traces out of diagnostics.
+- Reuse existing abstractions before adding dependencies.
 
-Build in thin vertical slices.
+## Documentation rules
 
-Preferred order:
-1. FastAPI health endpoint
-2. PostgreSQL + models + migrations
-3. Mock chat endpoint
-4. Next.js chat shell
-5. SSE streaming
-6. Ollama provider
-7. Persona prompt assembly
-8. Memory v1
-9. Relationship state v1
-10. Background jobs v1
-11. Proactive messages v1
-12. Auth v1
-13. Adult mode gates
-14. Debug/admin panel
-15. Deployment templates
-16. Production hardening
-17. Backup/export
-18. MVP polish
-
-If using `/goal`, implement as much of this order as possible, but stop before unsafe, untested, or overcomplicated changes.
-
-## Coding rules
-
-- Keep files small and explicit.
-- Prefer boring code over clever abstractions.
-- Use type hints in Python.
-- Use Pydantic schemas for API boundaries.
-- Use SQLAlchemy models and Alembic migrations for DB changes.
-- Add tests for backend services and endpoints.
-- Use deterministic tests.
-- Do not require Ollama to be installed for tests.
-- Mock external/local LLM HTTP calls in tests.
-- Avoid global mutable state except explicit app lifecycle objects.
-- Keep generated text fixtures SFW.
-- Make failures readable.
-- Never commit `.env`, secrets, keys, tokens, private IPs, or credentials.
+- Update the relevant retained document when behaviour, architecture, routes,
+  schema, deployment, or safety rules change.
+- After each completed user task, add one concise entry to
+  `docs/GOAL_PROGRESS.md` covering outcome and validation.
+- `docs/GOAL_PROGRESS.md` is the only progress log. Do not add micro-checkpoint
+  diaries, copied goal prompts, or dated audit dumps.
+- Do not create a new document when an existing retained document has the right
+  scope.
+- Keep `README.md` focused on orientation and quick start.
+- FastAPI's generated `/docs`, Pydantic schemas, SQLAlchemy models, migrations,
+  and tests remain the executable detail; Markdown should explain stable
+  contracts and decisions instead of copying every implementation line.
 
 ## Done means
 
-A feature is not done until:
-- tests pass
-- linters pass
-- migrations run if database changed
+A change is complete only when:
+
+- relevant tests pass
+- linters, type checks, and builds pass
+- migrations upgrade successfully when the database changed
 - existing flows still work
-- no forbidden dependencies were added
-- the implementation matches docs
-- Codex has updated a short progress log if the task is long-running
+- no forbidden or unapproved dependency/service was added
+- no secret or private data was introduced
+- affected documentation matches the implementation
+- `docs/GOAL_PROGRESS.md` contains a concise task entry
+- all task-owned changes are staged, reviewed, committed, and pushed to the
+  feature branch unless an external authentication/service failure blocks it
 
 ## Validation commands
 
-Backend:
-```bash
-cd apps/api
-pip install -e ".[dev]"
-alembic upgrade head || true
-pytest
-ruff check .
-ruff format .
-```
+Start local PostgreSQL before backend validation:
 
-Frontend:
-```bash
-cd apps/web
-npm install
-npm run lint
-npm run build
-```
-
-Local services:
 ```bash
 docker compose up -d postgres
 ```
 
+Backend:
+
+```bash
+cd apps/api
+pip install -e ".[dev]"
+alembic upgrade head
+pytest -m "not live"
+ruff check .
+ruff format --check .
+```
+
+Frontend:
+
+```bash
+cd apps/web
+npm ci
+npm run lint
+npm run typecheck
+npm run build
+```
+
+From the repository root, `make verify` runs the normal combined checks after
+dependencies and PostgreSQL are available.
+
 ## If blocked
 
-If Codex is blocked, it should:
-1. stop changing files,
-2. explain exactly what is blocked,
-3. state the smallest user decision needed,
-4. preserve all completed working changes.
+If work is blocked:
 
-Do not hallucinate infrastructure, credentials, cloud resources, or API keys.
+1. stop changing files,
+2. explain the exact blocker and preserved state,
+3. state the smallest user decision or external change needed,
+4. do not invent credentials, infrastructure, provider access, or deployment
+   success.
