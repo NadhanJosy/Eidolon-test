@@ -22,7 +22,12 @@ same high-level path:
 7. screen streamed and completed output for hard-boundary or hidden-context
    leakage,
 8. persist the completed reply exactly once,
-9. update deterministic relationship state and queue post-chat work.
+9. update the immediate deterministic relationship effect and queue durable
+   post-chat work,
+10. selectively analyze the completed turn with a strict structured schema,
+    ground every proposed fact/moment against exact source evidence, and commit
+    only backend-approved continuity,
+11. settle a visible receipt with only changes that actually occurred.
 
 The private response plan is concise generation direction, not a chain-of-thought
 transcript. It must never be narrated in chat.
@@ -86,15 +91,42 @@ Debug endpoint validates it before display.
 A bounded window of eligible messages provides immediate conversational
 coherence. Private rows are excluded when a later turn is normal.
 
+### Witnessed continuity
+
+Production post-chat cognition is selective by default. Short, unsafe,
+credential-like, private, preference-disabled, or otherwise low-signal turns do
+not spend a provider call. Eligible turns send bounded recent context, the
+completed exchange, and selected memory IDs through `generate_structured`.
+
+The provider may propose at most three memory candidates, one episode,
+allowlisted relationship evidence, and selected memory IDs visibly used in the
+reply. It cannot write state. Every proposed memory needs an exact contiguous
+quote from the current user line; episode evidence must be exact current-turn
+text. Backend grounding rejects invented named/numeric anchors, insufficient
+lexical support, polarity reversals, unknown types/signals, weak confidence, and
+transient claims. Prefer no memory over an unsupported one.
+
+Claim keys let repeated evidence reinforce a memory, explicit correction
+language supersede it, and ambiguous disagreement remain an inspectable
+conflict. Retrieval facets enrich the deterministic embedding text without
+appearing as extra facts. A selected memory's recall/decay state changes only
+when the grounded report says the completed reply actually used its ID.
+
+The chat receipt is independent of reply streaming. It begins pending and then
+quietly reports remembered/reinforced/corrected memory, a shared moment, or an
+actual relationship shift. A malformed/unavailable cognition response degrades
+to deterministic extraction and never retracts the completed reply.
+
 ### Semantic memory
 
 `memory_items` stores selective facts, preferences, people, events, promises,
 themes, shared lore/moments, boundaries, inside jokes, and milestones.
 
-Automatic extraction is deterministic and conservative. It accepts useful
-stable statements and emits bounded decision labels. It skips short/no-trigger,
-unsafe, blocked, private, or preference-disabled candidates without copying
-rejected prose into job/debug metadata.
+Automatic extraction is evidence-grounded and conservative in production, with
+the deterministic extractor retained for mock development, disabled cognition,
+and structured-provider degradation. Both paths skip unsafe, blocked, private,
+or preference-disabled candidates without copying rejected prose into job/debug
+metadata.
 
 Users can manually add a memory or remember an eligible user/assistant message.
 Message capture preserves source linkage, is idempotent where appropriate, and
@@ -102,13 +134,21 @@ does not bypass privacy or adult-memory settings.
 
 ### Episodic memory
 
-`episodic_journals` records generated episode summaries and user-authored notes.
-Generated episodes can carry bounded signals for repair, anniversaries, inside
-jokes, milestones, shared moments/references, callbacks, or intentional open
-threads. Adult detail is redacted from durable episode prose.
+`episodic_journals` records source-linked generated moments and user-authored
+notes. A grounded episode requires specific lasting shared-history value,
+confidence, exact evidence, and exact source message IDs. Deterministic episodes
+can carry bounded signals for repair, anniversaries, inside jokes, milestones,
+shared moments/references, callbacks, or intentional open threads.
 
 Manual notes have separate ownership metadata and are not overwritten by
 automatic conversation refresh.
+
+Semantic and episodic rows are scoped `general` or `adult`. Adult continuity is
+off by default, requires every structural gate plus explicit storage opt-in, and
+is considered only in an effective adult turn. Normal chat, relationship
+progression, living threads, normal archives, and proactive notes read general
+scope only. The user can erase all adult continuity without deleting transcript
+messages.
 
 ### Living threads
 
@@ -156,9 +196,12 @@ One relationship row per user-companion pair contains bounded metrics, mood,
 conflict/repair state, emotional posture, evidence counts, timeline entries, and
 one-time milestones.
 
-Updates are deterministic. Familiarity usually grows with interaction; warmth,
-trust, tension, and repair respond gradually to supported signals. Elapsed time
-decays volatile state toward safe baselines.
+Immediate updates are deterministic. A grounded post-turn report may add small
+bounded deltas from allowlisted interaction evidence such as gratitude,
+vulnerability, repair, play, support, or a shared ritual; the model never sets a
+score. Familiarity usually grows with interaction; warmth, trust, tension, and
+repair respond gradually. Elapsed time decays volatile state toward safe
+baselines.
 
 Prompt assembly sees behavioural qualitative wording, never raw meters. A single
 apology can begin repair but cannot erase accumulated tension in one turn.
@@ -203,6 +246,7 @@ Before queueing and delivery, proactive work checks:
 - configured IANA timezone, target local time, and quiet hours
 - current relationship posture
 - whether the referenced milestone/open thread is still valid
+- whether a thinking-of-you note has a non-manual, general-scope shared moment
 - a per-thread follow-up cooldown for living threads
 
 Careful/repair posture suppresses pressure-prone milestone and delayed follow-up
@@ -220,6 +264,10 @@ queued. Delivery records its cooldown timestamp so repeated jobs cannot keep
 nudging the same promise. Legacy journal callbacks remain a compatibility
 fallback only for jobs without a bound living-thread ID.
 
+Thinking-of-you notes likewise require an exact generated shared-moment anchor;
+generic availability is not sufficient. Contextual fallback copy preserves that
+anchor while still becoming more spacious under careful/repair posture.
+
 ## Testing invariants
 
 Automated coverage should preserve:
@@ -229,9 +277,12 @@ Automated coverage should preserve:
 - prompt order, budgets, privacy exclusion, and hidden-state non-disclosure
 - natural mock text without provider/prompt/score narration
 - selective memory, vector fallback, contradiction uncertainty, and forgetting
+- exact-evidence grounding, polarity rejection, claim correction, provider
+  degradation, and truthful continuity receipts
+- general/adult scope isolation, gated manual adult writes, and scoped erasure
 - explicit living-thread extraction, owner isolation, lifecycle, source cleanup,
   prompt selection, privacy exclusion, and proactive cooldown
 - gradual relationship progression and reversible source effects
 - job locking, retry caps, local-time deferral, cooldown, privacy, and anti-spam
-- safe proactive fallback and relationship-sensitive suppression
+- earned proactive anchors, safe fallback, and relationship-sensitive suppression
 - owner-scoped, bounded Debug context without raw prompt/state prose

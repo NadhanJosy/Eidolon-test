@@ -44,3 +44,29 @@ Validation:
 - Backend: 230 tests passed and the opt-in live-provider test was skipped.
 - Ruff lint and format checks passed.
 - Frontend ESLint, TypeScript, and static production build passed.
+
+## 2026-07-16 — Witnessed continuity
+
+Outcome:
+
+- Added selective, strict-schema post-turn cognition with exact-evidence,
+  lexical, entity/number, and polarity grounding; claim reinforcement,
+  correction, conflict handling, retrieval facets, and source-linked shared
+  moments remain backend-authoritative.
+- Connected truthful continuity receipts to chat, bounded grounded relationship
+  evidence to reversible state, and thinking-of-you notes to earned
+  general-scope moments while preserving cooldown, quiet-hour, and repair gates.
+- Isolated optional adult memories/moments from normal recall, archives,
+  relationship progression, living threads, and proactive work, with structural
+  write gates, visible counts, and scoped erasure.
+- Added strict structured-provider/fallback contracts, durable degradation,
+  manual-memory safety screening, export provenance, configuration controls,
+  migration coverage, and matching product/architecture/operations docs.
+
+Validation:
+
+- Alembic downgraded to `0010_living_threads` and upgraded through
+  `0011_witnessed_continuity` successfully.
+- Backend: 237 tests passed and the opt-in live-provider test was skipped.
+- Ruff lint and format checks passed.
+- Frontend ESLint, TypeScript, and static production build passed.

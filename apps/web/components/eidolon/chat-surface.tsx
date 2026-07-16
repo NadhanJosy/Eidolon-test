@@ -9,6 +9,7 @@ import { Icon } from "./icons";
 import { LivingThreadsPopover } from "./living-threads";
 import type {
   Character,
+  ContinuityReceipt,
   ContinuityThread,
   ContentMode,
   ConversationPrivacyMode,
@@ -42,7 +43,6 @@ export function ChatSurface({
   streamingContent,
   streamPhase,
   failedTurn,
-  providerName,
   draft,
   setDraft,
   privateTurn,
@@ -93,7 +93,6 @@ export function ChatSurface({
   streamingContent: string;
   streamPhase: StreamPhase | null;
   failedTurn: StreamFailure | null;
-  providerName: string | null;
   draft: string;
   setDraft: (value: string) => void;
   privateTurn: boolean;
@@ -310,8 +309,8 @@ export function ChatSurface({
               <Icon className="h-3.5 w-3.5" name="lock" />
               <span>
                 {privacyMode === "private"
-                  ? "This conversation stays outside shared memory"
-                  : "This reply won’t shape memory or your bond"}
+                  ? "No memory, moments, relationship changes, or notes later"
+                  : "This turn won’t shape memory, moments, your bond, or notes later"}
               </span>
             </div>
           ) : null}
@@ -393,7 +392,7 @@ export function ChatSurface({
             </div>
           </form>
           <p className="mt-2 text-center text-[0.62rem] text-[#5f5a54]">
-            Messages use {providerDisclosure(providerName)} · Enter to send · Shift + Enter for a new line
+            Enter to send · Shift + Enter for a new line
           </p>
         </div>
       </div>
@@ -497,7 +496,7 @@ function MessageTurn({
         <p className={`whitespace-pre-wrap text-[0.96rem] leading-7 ${fromUser ? "" : "font-eidolon-display text-[1.12rem] leading-8 sm:text-[1.18rem]"}`}>{message.content}</p>
       </div>
       <div className={`mt-2 flex min-h-7 items-center gap-1 text-[#716a63] transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 ${fromUser ? "justify-end" : "justify-start"}`}>
-        <span className="mr-1 text-[0.62rem]">{formatTime(message.created_at)}{fromUser && isLatestUser ? " · Seen" : ""}</span>
+        <span className="mr-1 text-[0.62rem]">{formatTime(message.created_at)}</span>
         {fromUser && isLatestUser ? (
           <MiniAction icon="edit" label={editing ? "Cancel revision" : "Revise message"} onClick={() => editing ? onCancelEdit() : onEdit(message)} />
         ) : null}
@@ -515,6 +514,9 @@ function MessageTurn({
       </div>
       {remembered ? (
         <p className={`mt-1 flex items-center gap-1.5 text-[0.65rem] text-[#9e7c69] ${fromUser ? "justify-end" : ""}`}><Icon className="h-3 w-3" name="bookmark" /> Held close</p>
+      ) : null}
+      {!fromUser ? (
+        <ContinuityMark receipt={message.metadata_json.continuity_receipt} />
       ) : null}
     </article>
   );
@@ -590,17 +592,35 @@ function TypingMark() {
   );
 }
 
-function providerDisclosure(providerName: string | null): string {
-  if (providerName === "groq") {
-    return "GroqCloud for model inference";
+function ContinuityMark({ receipt }: { receipt: ContinuityReceipt | undefined }) {
+  if (!receipt) {
+    return null;
   }
-  if (providerName === "ollama") {
-    return "your local Ollama model";
+  if (receipt.state === "pending") {
+    return (
+      <p className="continuity-listening mt-1.5 flex items-center gap-2 text-[0.65rem] text-[#806f63]">
+        <span aria-hidden="true" className="h-1 w-1 rounded-full bg-[#b98265]" />
+        Listening for what lasts
+      </p>
+    );
   }
-  if (providerName === "mock") {
-    return "the development mock provider";
+  if (receipt.state !== "ready" || receipt.change_labels.length === 0) {
+    return null;
   }
-  return "the configured text provider";
+  const phrases = [
+    receipt.change_labels.includes("corrected") ? "Understanding updated" : null,
+    receipt.change_labels.some((label) => label === "remembered" || label === "reinforced")
+      ? "Something carried forward"
+      : null,
+    receipt.change_labels.includes("moment") ? "A shared moment took shape" : null,
+    receipt.change_labels.includes("relationship") ? "The rhythm between you shifted" : null
+  ].filter((value): value is string => value !== null);
+  return (
+    <p className="mt-1.5 flex items-center gap-1.5 text-[0.65rem] text-[#947767]">
+      <Icon className="h-3 w-3" name="sparkles" />
+      {phrases.slice(0, 2).join(" · ")}
+    </p>
+  );
 }
 
 function MiniAction({ icon, label, active = false, disabled = false, onClick }: { icon: "bookmark" | "edit" | "sparkles" | "trash"; label: string; active?: boolean; disabled?: boolean; onClick: () => void }) {

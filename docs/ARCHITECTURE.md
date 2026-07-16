@@ -124,9 +124,14 @@ block refresh; same-site custom subdomains are the durable solution.
 7. For SSE, emit `message_start`, screened `token` events, then
    `message_done`; a terminal `error` event closes failed streams.
 8. Validate and persist the completed assistant message exactly once.
-9. Apply deterministic relationship/emotional changes.
-10. Create a durable post-chat job for memory, living-thread extraction,
-    journal, and proactive work.
+9. Apply the immediate deterministic relationship/emotional effect.
+10. Create a durable post-chat job and expose a pending continuity receipt on
+    the completed assistant message.
+11. For an eligible turn, request a bounded structured cognition report, reject
+    claims without exact source evidence, and let backend rules commit scoped
+    memory, a source-linked moment, and bounded relationship evidence.
+12. Finish living-thread and proactive work, then settle the receipt with only
+    changes that actually committed.
 
 A failed or cancelled generation keeps the accepted user message retryable and
 stores no partial assistant message. Reroll and latest-turn edit use the same
@@ -143,6 +148,13 @@ prompt version/size, and generation metadata on the source turn. It never stores
 raw prompt text or copied state prose and is exposed only through a validated,
 owner-scoped Debug response.
 
+Structured cognition is a proposal boundary, not model-owned state. The provider
+must return the strict schema with exact evidence quotes. Backend checks verify
+source substrings, named/numeric anchors, lexical support, and polarity before
+claim identity, confidence, correction, conflict, scope, or lifecycle can
+change. Invalid/unavailable structured output degrades to the existing
+deterministic extraction path without failing the already-persisted reply.
+
 Details are in [COMPANION_SYSTEMS.md](COMPANION_SYSTEMS.md).
 
 ## Privacy flow
@@ -152,6 +164,10 @@ private messages remain in owned history but are excluded from future normal
 prompt history, memory extraction, recall updates, episodic journals,
 living-thread creation/reference updates, relationship changes, and proactive
 context.
+
+Eligible adult continuity, when explicitly enabled, uses separate semantic and
+episodic scopes. Normal prompts, archives, relationship progression, living
+threads, and proactive work cannot read that scope.
 
 Controlled privacy/scenario system events can appear in the transcript. Prompt
 assembly converts recognized events into fixed summaries and never treats stored
@@ -169,8 +185,9 @@ not guarantee precise wall-clock delivery.
 
 ## Provider abstraction
 
-The typed provider interface supports completed generations and streamed events
-without a vendor SDK leaking into chat services.
+The typed provider interface supports completed generations, streamed events,
+and bounded strict-schema generations without a vendor SDK leaking into chat
+services.
 
 - `mock`: deterministic, external-call-free development and test provider
 - `groq`: active production provider using backend-only OpenAI-compatible HTTP

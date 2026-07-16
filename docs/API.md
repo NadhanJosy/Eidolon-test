@@ -56,7 +56,8 @@ only for legacy browser migration.
 | GET | `/characters/{character_id}` | Get owned companion |
 | PATCH | `/characters/{character_id}` | Update and recanonicalize companion |
 | GET | `/characters/{character_id}/relationship` | Get current decayed relationship |
-| GET | `/characters/{character_id}/adult-status` | Get character-bound gate result |
+| GET | `/characters/{character_id}/adult-status` | Get character-bound gate result and separate adult-continuity counts |
+| DELETE | `/characters/{character_id}/adult-continuity` | Erase adult-scoped memories and moments only |
 
 Profile writes validate text/JSON bounds, proactive clock settings, adult
 eligibility, and hard safety constraints. Changes to proactive preferences
@@ -93,6 +94,7 @@ memory, journal, relationship, and queued-job state as applicable.
 | POST | `/chat/messages` | Completed non-streamed user + assistant turn |
 | POST | `/chat/stream` | Fetch-based SSE turn or retry |
 | POST | `/chat/reroll` | Generate alternate reply to an owned turn |
+| GET | `/chat/turns/{assistant_message_id}/continuity` | Read a bounded post-turn continuity receipt |
 
 The normal frontend uses `/chat/stream`. Chat requests include a conversation
 ID, content, requested content mode, and optional one-turn privacy/retry state.
@@ -107,6 +109,10 @@ A terminal `error` event may replace completion. Disconnect/cancellation or
 generation failure stores no partial assistant line; an accepted source user
 message remains retryable.
 
+An eligible completed reply starts with a `pending` receipt. Post-chat work
+settles it to `ready`, `degraded`, or `skipped`; IDs and labels are returned only
+after their matching state changes commit.
+
 ## Memory
 
 All memory routes are scoped below
@@ -114,9 +120,9 @@ All memory routes are scoped below
 
 | Method | Suffix | Purpose |
 | --- | --- | --- |
-| GET | `/` | List `active`, `forgotten`, or `all` via `state` |
-| POST | `/` | Create manual memory |
-| GET | `/search?q=...` | Retrieve up to ten active relevant memories |
+| GET | `/` | List `active`, `forgotten`, or `all` via `state`, separated by `scope` |
+| POST | `/` | Create manual general/adult memory; adult writes require all gates and storage opt-in |
+| GET | `/search?q=...` | Retrieve up to ten active relevant memories in one scope |
 | POST | `/forget` | Automatically forget eligible low-value memories |
 | DELETE | `/` | Permanently clear all companion memories |
 | PATCH | `/{memory_id}` | Edit content/scoring/pin fields |
@@ -125,7 +131,9 @@ All memory routes are scoped below
 | POST | `/{memory_id}/resolve` | Keep selected side of active conflict |
 | DELETE | `/{memory_id}` | Permanently delete one memory |
 
-Raw embedding vectors are never returned.
+Raw embedding vectors are never returned. Scope defaults to `general`.
+Manual create and edit paths reject empty, credential-like, or hard-blocked
+durable text.
 
 ## Journals
 
@@ -133,12 +141,13 @@ All routes are scoped below `/characters/{character_id}/journals`.
 
 | Method | Suffix | Purpose |
 | --- | --- | --- |
-| GET | `/` | List owned manual and generated episodes |
+| GET | `/` | List owned manual and generated episodes in one scope |
 | POST | `/` | Create manual note |
 | PATCH | `/{journal_id}` | Edit manual note |
 | DELETE | `/{journal_id}` | Delete manual note |
 
-Generated summaries cannot be mutated through manual-note endpoints.
+Generated summaries cannot be mutated through manual-note endpoints. Scope
+defaults to `general`; manual journal creation is general-scope only.
 
 ## Living continuity threads
 
@@ -178,4 +187,5 @@ Debug remains authenticated and owner-scoped. Production defaults to disabled.
 The export contains the user profile, companions, conversations, messages,
 memories, journals, continuity threads, relationships, and scheduled jobs. It
 excludes password and refresh-token hashes, auth throttles, raw embeddings,
-provider keys, and JWT secrets.
+provider keys, and JWT secrets. Journal export includes scope and exact source
+message IDs; memory export includes scope and claim identity.

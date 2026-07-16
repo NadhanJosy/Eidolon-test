@@ -491,7 +491,7 @@ async def complete_assistant_message(
         "generation_failure_type": None,
     }
     if turn_allows_state_learning(user_message):
-        if update_relationship_state:
+        if update_relationship_state and prompt.content_mode != "adult":
             _relationship, relationship_effect = await update_relationship_from_message_with_effect(
                 session,
                 user.id,
@@ -521,6 +521,12 @@ async def complete_assistant_message(
         assistant_message.metadata_json = {
             **(assistant_message.metadata_json or {}),
             "post_chat_job_id": str(post_chat_job.id),
+            "continuity_receipt": {
+                "state": "pending",
+                "memory_ids": [],
+                "moment_id": None,
+                "change_labels": [],
+            },
         }
     await session.flush()
     return assistant_message

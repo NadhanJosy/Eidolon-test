@@ -164,6 +164,12 @@ class Message(Base):
 
 class MemoryItem(TimestampMixin, Base):
     __tablename__ = "memory_items"
+    __table_args__ = (
+        CheckConstraint(
+            "scope IN ('general', 'adult')",
+            name="ck_memory_items_scope",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -180,6 +186,8 @@ class MemoryItem(TimestampMixin, Base):
         ForeignKey("messages.id", ondelete="SET NULL"),
         nullable=True,
     )
+    scope: Mapped[str] = mapped_column(String(16), default="general", index=True, nullable=False)
+    claim_key: Mapped[str | None] = mapped_column(String(160), index=True, nullable=True)
     memory_type: Mapped[str] = mapped_column(String(80), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     importance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
@@ -203,6 +211,12 @@ class MemoryItem(TimestampMixin, Base):
 
 class EpisodicJournal(TimestampMixin, Base):
     __tablename__ = "episodic_journals"
+    __table_args__ = (
+        CheckConstraint(
+            "scope IN ('general', 'adult')",
+            name="ck_episodic_journals_scope",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -220,6 +234,7 @@ class EpisodicJournal(TimestampMixin, Base):
         index=True,
         nullable=True,
     )
+    scope: Mapped[str] = mapped_column(String(16), default="general", index=True, nullable=False)
     journal_type: Mapped[str] = mapped_column(String(80), default="summary", nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
@@ -228,6 +243,20 @@ class EpisodicJournal(TimestampMixin, Base):
     callbacks_json: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     importance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+
+class EpisodicJournalSource(Base):
+    __tablename__ = "episodic_journal_sources"
+
+    journal_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("episodic_journals.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
 
 
 class ContinuityThread(TimestampMixin, Base):

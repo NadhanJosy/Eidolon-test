@@ -89,15 +89,43 @@ async def build_reasoning_context(
         relationship = await get_or_create_relationship(session, user.id, character.id)
     else:
         relationship = await get_current_relationship(session, user.id, character.id)
+    safety_status = adult_gate_status(
+        user,
+        character,
+        requested_mode,
+        relationship=relationship,
+    )
+    scopes = (
+        ("general", "adult")
+        if safety_status["effective_mode"] == "adult" and not is_private_turn
+        else ("general",)
+    )
     memories = await retrieve_memories(
         session,
         user_id=user.id,
         character_id=character.id,
         query=current_message,
         limit=7,
-        mark_recalled=not is_private_turn,
+        mark_recalled=False,
+        scopes=scopes,
     )
-    journal_candidates = await list_journals(session, user.id, character.id, limit=50)
+    journal_candidates = await list_journals(
+        session,
+        user.id,
+        character.id,
+        limit=50,
+        scope="general",
+    )
+    if "adult" in scopes:
+        journal_candidates.extend(
+            await list_journals(
+                session,
+                user.id,
+                character.id,
+                limit=50,
+                scope="adult",
+            )
+        )
     journals = rank_relevant_journals(journal_candidates, query=current_message, limit=4)
     threads = await retrieve_continuity_threads(
         session,
@@ -122,12 +150,6 @@ async def build_reasoning_context(
     )
     now = utc_now()
     # Stage 3: resolve structural boundaries and the companion's decayed mood.
-    safety_status = adult_gate_status(
-        user,
-        character,
-        requested_mode,
-        relationship=relationship,
-    )
     time_context = now.strftime("%A, %Y-%m-%d %H:%M UTC")
     scenario = effective_conversation_scenario(conversation, character)
     emotional_state = project_emotional_state(relationship, now=now)

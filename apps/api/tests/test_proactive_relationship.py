@@ -12,6 +12,7 @@ from app.db.session import AsyncSessionLocal
 from app.llm.base import LLMGeneration, LLMProviderUnavailable
 from app.models import Conversation, Message, RelationshipState, ScheduledJob, utc_now
 from app.services.jobs import create_job
+from app.services.journal import create_journal
 from app.services.proactive import (
     DELAYED_DOUBLE_TEXT_TYPE,
     create_inactivity_proactive_message,
@@ -93,6 +94,17 @@ async def test_proactive_prompt_uses_qualitative_relationship_posture_only(
     async with AsyncSessionLocal() as session:
         conversation = await session.get(Conversation, uuid.UUID(conversation_data["id"]))
         assert conversation is not None
+        await create_journal(
+            session,
+            conversation.user_id,
+            conversation.character_id,
+            conversation_id=conversation.id,
+            title="A calm first exchange",
+            summary="The user and companion shared a quiet hello.",
+            journal_type="grounded_episode",
+            importance=0.8,
+            metadata_json={"source": "grounded_cognition_v1", "grounded": True},
+        )
         relationship = (
             await session.execute(
                 select(RelationshipState).where(
@@ -144,6 +156,17 @@ async def test_repair_posture_suppresses_pressure_and_uses_spacious_fallback(
     async with AsyncSessionLocal() as session:
         conversation = await session.get(Conversation, uuid.UUID(conversation_data["id"]))
         assert conversation is not None
+        await create_journal(
+            session,
+            conversation.user_id,
+            conversation.character_id,
+            conversation_id=conversation.id,
+            title="A request for room",
+            summary="The user asked for room and the companion respected that boundary.",
+            journal_type="grounded_episode",
+            importance=0.8,
+            metadata_json={"source": "grounded_cognition_v1", "grounded": True},
+        )
         relationship = (
             await session.execute(
                 select(RelationshipState).where(

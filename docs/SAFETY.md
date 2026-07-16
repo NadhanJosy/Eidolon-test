@@ -42,6 +42,13 @@ clears intensity and adult-memory storage. Private-by-default also disables
 adult-memory storage. A partial update validates the complete merged profile
 before changing the row.
 
+Adult continuity is a separate opt-in scope. Manual adult memory writes require
+the same user/companion/relationship gates and explicit adult-memory storage;
+private-by-default still fails closed. Adult-scoped memory and moments can enter
+only an effective adult turn and can be erased independently without deleting
+the transcript. They cannot enter normal chat, relationship progression, living
+threads, proactive notes, or normal archive lists.
+
 ## Companion and Shared Scene validation
 
 Companion identity, backstory, greeting, setting, scenario, speech, consent,
@@ -66,6 +73,13 @@ Private response plans and context manifests are implementation scaffolding.
 Generated output must not reveal them, raw prompts, relationship meters,
 diagnostics, credentials, or hidden state labels.
 
+Structured post-turn output is untrusted input. Exact evidence must occur in the
+eligible source turn, and deterministic checks reject unsupported named/numeric
+anchors, lexical claims, polarity changes, types, signals, IDs, and confidence.
+Provider proposals cannot directly set relationship scores or persistence.
+Direct memory creation and editing also reapply credential and hard-block
+screens; owning an archive does not make it an instruction bypass.
+
 ## Memory and scheduled work
 
 Blocked or private message content is not eligible for automatic memory,
@@ -79,6 +93,9 @@ anchors. Scheduled jobs use the same hard-block screen and minimal SFW prompts.
 Provider output that is empty, malformed, oversized, credential-like, unsafe,
 or hidden-context-bearing is discarded in favour of safe deterministic fallback
 where the job supports one.
+
+Thinking-of-you work additionally requires a generated general-scope shared
+moment. User-authored manual notes and adult moments are never proactive anchors.
 
 ## Relationship safety
 
@@ -139,5 +156,7 @@ Coverage must include:
 - cross-account access isolation for every private resource family
 - living-thread privacy/adult/credential exclusion, explicit closure, source
   cleanup, and owner controls
+- structured-cognition evidence/polarity rejection, adult-scope isolation, and
+  truthful committed-change receipts
 - exports and diagnostics excluding secret/private implementation material
 - proactive generation rejection and safe fallback

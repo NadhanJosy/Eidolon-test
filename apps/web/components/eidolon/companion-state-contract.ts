@@ -39,6 +39,8 @@ export function isCompleteMemoryItem(
     validUuid(value.user_id) &&
     value.character_id === characterId &&
     (value.source_message_id === null || validUuid(value.source_message_id)) &&
+    (value.scope === "general" || value.scope === "adult") &&
+    (value.claim_key === null || boundedText(value.claim_key, 160)) &&
     boundedText(value.memory_type, 80) &&
     boundedText(value.content, 1_000) &&
     finiteRange(value.importance, 0, 1) &&
@@ -75,6 +77,7 @@ export function isCompleteJournal(value: unknown, characterId: string): value is
     validUuid(value.user_id) &&
     value.character_id === characterId &&
     (value.conversation_id === null || validUuid(value.conversation_id)) &&
+    (value.scope === "general" || value.scope === "adult") &&
     boundedText(value.journal_type, 80) &&
     boundedText(value.title, 200) &&
     boundedText(value.summary, 2_000) &&
@@ -188,7 +191,9 @@ export function completeAdultStatus(value: unknown): AdultStatus | null {
     (value.effective_mode !== "sfw" && value.effective_mode !== "adult") ||
     typeof value.allowed !== "boolean" ||
     !boundedStringList(value.reasons, 16, 240) ||
-    !integerRange(value.intensity, 0, 3)
+    !integerRange(value.intensity, 0, 3) ||
+    !integerRange(value.stored_memory_count, 0, 10_000_000) ||
+    !integerRange(value.stored_moment_count, 0, 10_000_000)
   ) {
     return null;
   }

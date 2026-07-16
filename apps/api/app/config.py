@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     llm_retry_base_seconds: float = 0.5
     llm_fallback_provider: str | None = None
     llm_fallback_model: str | None = None
+    cognition_mode: str = "selective"
+    cognition_max_output_tokens: int = 700
 
     groq_api_key: SecretStr | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
@@ -131,6 +133,11 @@ class Settings(BaseSettings):
             raise ValueError("GROQ_MODEL cannot be empty.")
         if not self.ollama_model.strip():
             raise ValueError("OLLAMA_MODEL cannot be empty.")
+        self.cognition_mode = self.cognition_mode.strip().lower()
+        if self.cognition_mode not in {"off", "selective", "all"}:
+            raise ValueError("COGNITION_MODE must be off, selective, or all.")
+        if not 128 <= self.cognition_max_output_tokens <= 2000:
+            raise ValueError("COGNITION_MAX_OUTPUT_TOKENS must be between 128 and 2000.")
         if self.app_env not in {"development", "testing"}:
             normalized_secret = jwt_secret.casefold()
             if jwt_secret == DEFAULT_JWT_SECRET or any(

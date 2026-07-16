@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.companion.quality import enforce_stream_chunk
@@ -21,8 +22,14 @@ from app.llm.base import (
     public_provider_failure_detail,
 )
 from app.llm.factory import get_llm_provider
-from app.models import User
-from app.schemas import ChatRequest, ChatRerollRequest, ChatResponse, MessageOut
+from app.models import Conversation, Message, ScheduledJob, User
+from app.schemas import (
+    ChatRequest,
+    ChatRerollRequest,
+    ChatResponse,
+    ContinuityReceiptOut,
+    MessageOut,
+)
 from app.services.chat import (
     ChatTurnCancelled,
     complete_assistant_message,
@@ -144,12 +151,50 @@ async def chat_reroll(
     return MessageOut.model_validate(message)
 
 
+@router.get(
+    "/turns/{assistant_message_id}/continuity",
+    response_model=ContinuityReceiptOut,
+)
+async def turn_continuity_receipt(
+    assistant_message_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ContinuityReceiptOut:
+    result = await session.execute(
+        select(Message)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Message.id == assistant_message_id,
+            Message.role == "assistant",
+            Conversation.user_id == user.id,
+        )
+    )
+    message = result.scalar_one_or_none()
+    if message is None:
+        raise HTTPException(status_code=404, detail="Turn continuity was not found.")
+    metadata = message.metadata_json if isinstance(message.metadata_json, dict) else {}
+    receipt = metadata.get("continuity_receipt")
+    if not isinstance(receipt, dict):
+        return ContinuityReceiptOut(state="skipped")
+    if receipt.get("state") == "pending":
+        job_id = post_chat_job_id(message)
+        job = await session.get(ScheduledJob, job_id) if job_id is not None else None
+        if job is not None and job.user_id == user.id:
+            payload_receipt = (job.payload_json or {}).get("continuity_receipt")
+            if isinstance(payload_receipt, dict):
+                receipt = payload_receipt
+            elif job.status == "failed":
+                receipt = {"state": "degraded"}
+    return _validated_continuity_receipt(receipt)
+
+
 @router.post("/stream")
 async def chat_stream(
     payload: ChatRequest,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> StreamingResponse:
+    background_tasks = BackgroundTasks()
     conversation = await require_conversation(payload.conversation_id, user, session)
     provider = get_llm_provider()
     user_id = user.id
@@ -238,10 +283,10 @@ async def chat_stream(
             )
             await session.commit()
             await session.refresh(assistant_message)
-            yield sse("message_done", {"assistant_message": dump_message(assistant_message)})
             job_id = post_chat_job_id(assistant_message)
             if job_id is not None:
-                await run_post_chat_job(job_id)
+                background_tasks.add_task(run_post_chat_job, job_id)
+            yield sse("message_done", {"assistant_message": dump_message(assistant_message)})
         except asyncio.CancelledError:
             await session.rollback()
             await mark_user_message_generation_failed(
@@ -323,6 +368,7 @@ async def chat_stream(
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
+        background=background_tasks,
         headers={
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
@@ -384,3 +430,36 @@ def post_chat_job_id(message) -> uuid.UUID | None:
         return uuid.UUID(value)
     except ValueError:
         return None
+
+
+def _validated_continuity_receipt(value: dict) -> ContinuityReceiptOut:
+    state = value.get("state")
+    if state not in {"pending", "ready", "degraded", "skipped"}:
+        state = "degraded"
+    memory_ids: list[uuid.UUID] = []
+    raw_memory_ids = value.get("memory_ids")
+    if isinstance(raw_memory_ids, list):
+        for item in raw_memory_ids[:3]:
+            try:
+                memory_ids.append(uuid.UUID(str(item)))
+            except ValueError:
+                continue
+    moment_id = None
+    if value.get("moment_id") is not None:
+        try:
+            moment_id = uuid.UUID(str(value.get("moment_id")))
+        except ValueError:
+            pass
+    allowed_labels = {"remembered", "reinforced", "corrected", "moment", "relationship"}
+    raw_labels = value.get("change_labels")
+    labels = (
+        [item for item in raw_labels[:5] if isinstance(item, str) and item in allowed_labels]
+        if isinstance(raw_labels, list)
+        else []
+    )
+    return ContinuityReceiptOut(
+        state=state,
+        memory_ids=memory_ids,
+        moment_id=moment_id,
+        change_labels=labels,
+    )

@@ -200,6 +200,8 @@ Required production settings:
 | `JWT_SECRET` | Secret binding; random 32-4096 UTF-8 bytes |
 | `LLM_PROVIDER` | `groq` in the current production profile |
 | `GROQ_MODEL` | An enabled configured production model |
+| `COGNITION_MODE` | `selective` by default; `off` or `all` only intentionally |
+| `COGNITION_MAX_OUTPUT_TOKENS` | Bounded structured-output allowance, `128..2000` |
 | `WEB_ORIGIN` | Exact HTTPS Cloudflare production origin |
 | `CORS_ORIGINS` | Additional exact HTTPS origins only when required |
 | `REFRESH_COOKIE_SECURE` | `true` |
@@ -214,6 +216,12 @@ potential application connections are approximately:
 ```
 
 Keep that below the available database connection allowance.
+
+`selective` cognition makes one additional bounded Groq request only after an
+eligible reply has safely persisted. Provider failure cannot fail that reply and
+falls back to deterministic post-processing. `all` materially increases calls;
+do not enable it without checking quota/cost behavior. `off` retains the
+deterministic path.
 
 Use Secret Manager/Cloud Run secret bindings for database, provider, and JWT
 values. When deploying a new image, preserve the service account, secret
@@ -263,6 +271,11 @@ Job state and locks are durable, but APScheduler runs inside an active API
 instance. Request-based Cloud Run CPU and scale-to-zero can delay ticks. Jobs
 catch up when an instance is active.
 
+Eligible chat responses also request best-effort immediate processing through a
+durable `chat_postprocess` row. If immediate work is interrupted, the normal
+scheduler retries it; the chat receipt remains pending and then becomes ready or
+degraded without affecting the persisted reply.
+
 Do not enable minimum instances or always-allocated CPU merely to improve
 scheduling without explicit approval, because that can change cost. Disable the
 scheduler with `ENABLE_SCHEDULER=false` when proactive work is not desired.
@@ -291,6 +304,7 @@ Then verify from the production frontend:
 
 - authentication and session refresh
 - one streamed chat turn and persistence after reload
+- its continuity receipt settling without exposing raw cognition/prompt content
 - exact production CORS origin
 - memory/relationship state for the test account
 - no unexpected browser console/network failures

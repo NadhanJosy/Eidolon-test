@@ -31,13 +31,16 @@ refresh tokens never belong in frontend code.
   PostgreSQL-backed throttling
 - multiple authored companions and conversations
 - exact Server-Sent Events token streaming with stop/retry/reroll/edit support
-- selective semantic memory, episodic journals, conflicts, reversible
-  forgetting, and user-selected message memory
+- evidence-grounded post-turn cognition with selective semantic memory,
+  claim correction, source-linked shared moments, and quiet continuity receipts
 - visible living threads for explicit plans, promises, rituals, repairs, and
   follow-ups, with user-controlled closure and deletion
-- deterministic relationship and emotional continuity with gradual repair
-- normal/private threads, one-turn privacy, and thread-specific Shared Scenes
-- PostgreSQL-backed scheduled cognition and optional proactive text notes
+- deterministic relationship and emotional continuity refined by bounded,
+  source-grounded interaction evidence
+- normal/private threads, one-turn privacy, thread-specific Shared Scenes, and
+  separately scoped optional adult continuity
+- PostgreSQL-backed scheduled cognition and earned proactive notes anchored to
+  real shared moments, open threads, or milestones
 - structural adult-mode gates and non-negotiable hard safety boundaries
 - owner-scoped Debug visibility without raw prompts or secrets
 - private data export, scoped cleanup, and account erasure

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -75,6 +76,37 @@ class MockLLMProvider:
         context = _parse_prompt(prompt)
         return LLMGeneration(
             content=_compose_response(context),
+            provider=self.name,
+            model=self.model,
+            finish_reason="stop",
+        )
+
+    async def generate_structured(
+        self,
+        prompt: str,
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        max_output_tokens: int,
+    ) -> LLMGeneration:
+        del prompt, schema_name, schema, max_output_tokens
+        return LLMGeneration(
+            content=json.dumps(
+                {
+                    "memory_candidates": [],
+                    "episode": {
+                        "worthy": False,
+                        "title": None,
+                        "summary": None,
+                        "emotional_tags": [],
+                        "evidence_quotes": [],
+                        "source_message_ids": [],
+                        "salience": 0.0,
+                    },
+                    "relationship": {"signals": [], "confidence": 0.0},
+                    "referenced_memory_ids": [],
+                }
+            ),
             provider=self.name,
             model=self.model,
             finish_reason="stop",

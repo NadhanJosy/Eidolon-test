@@ -28,6 +28,31 @@ class FallbackLLMProvider:
                 raise
             return await self.fallback.generate(prompt)
 
+    async def generate_structured(
+        self,
+        prompt: str,
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        max_output_tokens: int,
+    ) -> LLMGeneration:
+        try:
+            return await self.primary.generate_structured(
+                prompt,
+                schema_name=schema_name,
+                schema=schema,
+                max_output_tokens=max_output_tokens,
+            )
+        except LLMProviderUnavailable as exc:
+            if exc.failure_type not in FALLBACK_FAILURE_TYPES:
+                raise
+            return await self.fallback.generate_structured(
+                prompt,
+                schema_name=schema_name,
+                schema=schema,
+                max_output_tokens=max_output_tokens,
+            )
+
     async def stream(self, prompt: str) -> AsyncIterator[LLMStreamEvent]:
         emitted_content = False
         try:

@@ -166,8 +166,16 @@ export function EidolonApp() {
     return { ok: true };
   }
 
+  const companionTheme =
+    typeof state.activeCharacter?.boundaries_json.visual_theme === "string"
+      ? state.activeCharacter.boundaries_json.visual_theme
+      : "ember";
+
   return (
-    <main className="eidolon-room relative h-[100dvh] overflow-hidden text-[#f3eee5]">
+    <main
+      className="eidolon-room relative h-[100dvh] overflow-hidden text-[#f3eee5]"
+      data-companion-theme={companionTheme}
+    >
       <div className="relative z-10 flex h-full min-h-0">
         <DesktopNavigation active={view} onNavigate={navigate} />
 
@@ -198,7 +206,6 @@ export function EidolonApp() {
                 notice={state.notice}
                 pendingOutgoingContent={state.pendingOutgoingContent}
                 privateTurn={state.privateTurn}
-                providerName={state.runtimeStatus.llmProvider}
                 privacyMode={state.activeConversationPrivacyMode}
                 rememberedMessageIds={rememberedMessageIds}
                 rememberingMessageId={state.rememberingMessageId}
@@ -330,6 +337,7 @@ export function EidolonApp() {
                     user={currentUser}
                     onChangeContentMode={(mode) => { actions.changeContentMode(mode); }}
                     onClearMemories={actions.clearMemories}
+                    onClearAdultContinuity={actions.clearAdultContinuity}
                     onClearMessages={actions.clearConversationMessages}
                     onDeleteAccount={actions.deleteAccount}
                     onDeleteConversation={actions.deleteActiveConversation}

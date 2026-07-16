@@ -88,6 +88,13 @@ until restored.
 Manual journal notes remain user-owned. Generated journal summaries can be
 rebuilt when their source conversation changes.
 
+Eligible completed turns receive a selective, bounded continuity pass after the
+reply is safely persisted. Provider-proposed facts and moments are accepted only
+when their evidence is present in the source turn; the backend owns claim
+identity, confidence thresholds, correction, conflict, scope, and lifecycle.
+Chat shows a quiet per-turn continuity receipt while that work settles and only
+names changes that were actually committed.
+
 ### Living continuity threads
 
 Eidolon carries explicit future intent as first-class living threads rather
@@ -113,9 +120,10 @@ Each user-companion pair has one relationship row containing bounded trust,
 intimacy, warmth, tension, familiarity, attachment, mood, conflict state, repair
 state, and qualitative emotional continuity.
 
-The relationship engine is deterministic. It can influence tone and pacing but
-must not create manipulative dependency, jealousy, punishment, or pressure to
-return.
+Relationship changes are deterministic and bounded. A grounded post-turn pass
+may label supported interaction evidence, but it cannot set scores directly.
+Relationship state can influence tone and pacing but must not create
+manipulative dependency, jealousy, punishment, or pressure to return.
 
 ### Scheduled presence
 
@@ -129,6 +137,10 @@ Quiet hours, local time, cooldown, privacy, staleness, preferences, and
 relationship-repair posture are checked before delivery. These messages are
 best-effort on a scale-to-zero Cloud Run deployment; they are not guaranteed at
 an exact wall-clock instant.
+
+Thinking-of-you notes require an eligible general-scope shared moment; open-thread
+and milestone notes require their exact durable anchor. Generic availability is
+not enough reason to contact the user.
 
 ### Debug and data control
 
@@ -146,6 +158,7 @@ traces, or another user's data.
 - readable at narrow phone and desktop widths without document-level overflow
 - text-first, calm, and non-corporate
 - visible but restrained composing and streaming states
+- human continuity receipts that settle independently of reply streaming
 - understandable empty, loading, retry, and failure states
 - human relationship/privacy language in primary UI
 - provider, database, prompt, and scheduler details confined to Debug
@@ -170,6 +183,13 @@ Adult mode is eligible only when the user has confirmed the age gate, the
 companion has an explicit age of at least 18, the companion permits adult mode,
 the relationship is not in a blocking repair posture, and all hard content
 boundaries pass. A missing, stale, or failed readiness check resolves to SFW.
+
+Adult continuity is off by default. When explicitly enabled, eligible adult
+memories and moments use a separate scope that normal chat, normal archives,
+relationship progression, living threads, and proactive notes cannot read.
+Settings reports the separate item counts and can erase that adult-only
+continuity without deleting visible conversation messages. Private turns never
+enter either scope.
 
 See [SAFETY.md](SAFETY.md) for the complete non-negotiable boundary contract.
 

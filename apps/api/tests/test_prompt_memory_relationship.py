@@ -1114,7 +1114,10 @@ async def test_adult_mode_memory_storage_requires_profile_permission(
         headers=headers,
     )
     assert blocked_memory_chat.status_code == 200
-    memories = await client.get(f"/characters/{character_id}/memories", headers=headers)
+    memories = await client.get(
+        f"/characters/{character_id}/memories?scope=adult",
+        headers=headers,
+    )
     assert memories.status_code == 200
     assert memories.json() == []
 
@@ -1141,9 +1144,108 @@ async def test_adult_mode_memory_storage_requires_profile_permission(
     )
     assert stored_memory_chat.status_code == 200
 
-    memories = await client.get(f"/characters/{character_id}/memories", headers=headers)
+    memories = await client.get(
+        f"/characters/{character_id}/memories?scope=adult",
+        headers=headers,
+    )
     assert len(memories.json()) == 1
     assert "mint tea" in memories.json()[0]["content"]
+
+    status = await client.get(f"/characters/{character_id}/adult-status", headers=headers)
+    assert status.status_code == 200
+    assert status.json()["stored_memory_count"] == 1
+    assert status.json()["stored_moment_count"] >= 1
+
+    cleared = await client.delete(
+        f"/characters/{character_id}/adult-continuity",
+        headers=headers,
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["deleted"] >= 2
+    memories = await client.get(
+        f"/characters/{character_id}/memories?scope=adult",
+        headers=headers,
+    )
+    assert memories.json() == []
+
+
+async def test_manual_adult_memory_requires_all_structural_gates(
+    client: AsyncClient,
+) -> None:
+    headers = await auth_headers(client)
+    character = (await client.get("/characters", headers=headers)).json()[0]
+    character_id = character["id"]
+    payload = {
+        "scope": "adult",
+        "memory_type": "preference",
+        "content": "The user prefers a quiet pace.",
+    }
+
+    blocked = await client.post(
+        f"/characters/{character_id}/memories",
+        json=payload,
+        headers=headers,
+    )
+    assert blocked.status_code == 409
+
+    await client.patch("/auth/me", json={"age_gate_confirmed": True}, headers=headers)
+    await client.patch(
+        f"/characters/{character_id}",
+        json={
+            "explicit_age": 28,
+            "adult_mode_allowed": True,
+            "boundaries_json": {
+                **character["boundaries_json"],
+                "memory_preferences": {
+                    **character["boundaries_json"]["memory_preferences"],
+                    "adult_memory_storage": True,
+                },
+            },
+        },
+        headers=headers,
+    )
+    created = await client.post(
+        f"/characters/{character_id}/memories",
+        json=payload,
+        headers=headers,
+    )
+    assert created.status_code == 201
+    assert created.json()["scope"] == "adult"
+
+
+async def test_manual_memory_rejects_credential_like_content(
+    client: AsyncClient,
+) -> None:
+    headers = await auth_headers(client)
+    character = (await client.get("/characters", headers=headers)).json()[0]
+    safe = await client.post(
+        f"/characters/{character['id']}/memories",
+        json={
+            "memory_type": "user_fact",
+            "content": "The blue notebook is meaningful.",
+        },
+        headers=headers,
+    )
+    assert safe.status_code == 201
+
+    blocked_update = await client.patch(
+        f"/characters/{character['id']}/memories/{safe.json()['id']}",
+        json={"content": "The password clue belongs in the blue notebook."},
+        headers=headers,
+    )
+
+    blocked = await client.post(
+        f"/characters/{character['id']}/memories",
+        json={
+            "memory_type": "user_fact",
+            "content": "The password clue belongs in the blue notebook.",
+        },
+        headers=headers,
+    )
+
+    assert blocked_update.status_code == 422
+    assert blocked.status_code == 422
+    assert "credential" in blocked.json()["detail"].lower()
 
 
 async def test_adult_mode_journal_omits_durable_callback_details(
@@ -1155,7 +1257,17 @@ async def test_adult_mode_journal_omits_durable_callback_details(
     character_id = character["id"]
     await client.patch(
         f"/characters/{character_id}",
-        json={"explicit_age": 28, "adult_mode_allowed": True},
+        json={
+            "explicit_age": 28,
+            "adult_mode_allowed": True,
+            "boundaries_json": {
+                **character["boundaries_json"],
+                "memory_preferences": {
+                    **character["boundaries_json"]["memory_preferences"],
+                    "adult_memory_storage": True,
+                },
+            },
+        },
         headers=headers,
     )
     conversation = await client.post(
@@ -1175,7 +1287,10 @@ async def test_adult_mode_journal_omits_durable_callback_details(
     )
     assert chat.status_code == 200
 
-    journals = await client.get(f"/characters/{character_id}/journals", headers=headers)
+    journals = await client.get(
+        f"/characters/{character_id}/journals?scope=adult",
+        headers=headers,
+    )
     assert journals.status_code == 200
     payload = journals.json()
     assert len(payload) == 1

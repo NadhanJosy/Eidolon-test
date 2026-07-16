@@ -323,6 +323,14 @@ async def create_inactivity_proactive_message(
         if not context_metadata:
             return None
         content = contextual_content
+    elif proactive_type == "proactive_thinking_of_you":
+        contextual_content, context_metadata = await _thinking_of_you_content(
+            session,
+            conversation,
+        )
+        if not context_metadata:
+            return None
+        content = contextual_content
     elif proactive_type == "proactive_milestone_check":
         milestone_context = await _latest_unnoted_relationship_milestone(session, conversation)
         if milestone_context is None:
@@ -333,6 +341,12 @@ async def create_inactivity_proactive_message(
             "proactive_context": "relationship_milestone",
             "milestone_id": str(milestone["milestone_id"]),
         }
+    if context_metadata:
+        content = _relationship_aware_contextual_fallback(
+            proactive_type,
+            content,
+            relationship_posture,
+        )
     generation = await _generate_proactive_content(
         provider,
         character=character,
@@ -537,6 +551,19 @@ def _relationship_aware_fallback(
     return f"{opening} {closing}"
 
 
+def _relationship_aware_contextual_fallback(
+    proactive_type: str,
+    fallback: str,
+    posture: ProactiveRelationshipPosture,
+) -> str:
+    if posture.key == "new" or proactive_type == "proactive_milestone_check":
+        return fallback
+    closing = PROACTIVE_RELATIONSHIP_CLOSINGS.get(posture.key)
+    if closing is None:
+        return fallback
+    return f"{fallback.rstrip()} {closing}"
+
+
 async def ensure_proactive_jobs(
     session: AsyncSession,
     *,
@@ -565,6 +592,11 @@ async def ensure_proactive_jobs(
         if (
             job_type == "proactive_milestone_check"
             and await _latest_unnoted_relationship_milestone(session, conversation) is None
+        ):
+            continue
+        if (
+            job_type == "proactive_thinking_of_you"
+            and await _latest_grounded_journal(session, conversation) is None
         ):
             continue
         continuity_thread = None
@@ -966,6 +998,28 @@ async def _unresolved_thread_content(
     )
 
 
+async def _thinking_of_you_content(
+    session: AsyncSession,
+    conversation: Conversation,
+) -> tuple[str, dict[str, str]]:
+    journal = await _latest_grounded_journal(session, conversation)
+    if journal is None:
+        return "", {}
+    anchor = _safe_proactive_prompt_fragment(journal.summary, limit=180)
+    if not anchor:
+        return "", {}
+    return (
+        (
+            f"I found myself thinking about {anchor.rstrip('.')}. "
+            "I wanted to leave a quiet hello; no pressure to reply."
+        ),
+        {
+            "proactive_context": "shared_moment",
+            "episodic_journal_id": str(journal.id),
+        },
+    )
+
+
 async def _latest_unnoted_relationship_milestone(
     session: AsyncSession,
     conversation: Conversation,
@@ -1033,6 +1087,7 @@ async def _latest_journal_with_followup(
         .where(
             EpisodicJournal.conversation_id == conversation.id,
             EpisodicJournal.character_id == conversation.character_id,
+            EpisodicJournal.scope == "general",
         )
         .order_by(desc(EpisodicJournal.updated_at))
         .limit(6)
@@ -1041,6 +1096,25 @@ async def _latest_journal_with_followup(
         if journal.unresolved_threads_json or _has_followup_callback(journal.callbacks_json):
             return journal
     return None
+
+
+async def _latest_grounded_journal(
+    session: AsyncSession,
+    conversation: Conversation,
+) -> EpisodicJournal | None:
+    result = await session.execute(
+        select(EpisodicJournal)
+        .where(
+            EpisodicJournal.conversation_id == conversation.id,
+            EpisodicJournal.character_id == conversation.character_id,
+            EpisodicJournal.scope == "general",
+            EpisodicJournal.importance >= 0.55,
+            EpisodicJournal.metadata_json["source"].as_string() != "manual",
+        )
+        .order_by(desc(EpisodicJournal.updated_at))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 def _has_followup_callback(callbacks: list[str]) -> bool:

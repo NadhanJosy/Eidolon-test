@@ -251,6 +251,11 @@ async def remember_message(
             message_id=message.id,
             content=message.content,
             source_role=message.role,
+            scope=(
+                "adult"
+                if (message.metadata_json or {}).get("content_mode") == "adult"
+                else "general"
+            ),
         )
     except MemoryCaptureError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

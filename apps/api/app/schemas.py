@@ -419,6 +419,15 @@ class ChatResponse(BaseModel):
     assistant_message: MessageOut
 
 
+class ContinuityReceiptOut(BaseModel):
+    state: Literal["pending", "ready", "degraded", "skipped"]
+    memory_ids: list[uuid.UUID] = Field(default_factory=list)
+    moment_id: uuid.UUID | None = None
+    change_labels: list[
+        Literal["remembered", "reinforced", "corrected", "moment", "relationship"]
+    ] = Field(default_factory=list)
+
+
 class ChatRerollRequest(BaseModel):
     conversation_id: uuid.UUID
     assistant_message_id: uuid.UUID | None = None
@@ -434,6 +443,8 @@ class MemoryOut(BaseModel):
     user_id: uuid.UUID
     character_id: uuid.UUID
     source_message_id: uuid.UUID | None
+    scope: Literal["general", "adult"]
+    claim_key: str | None
     memory_type: str
     content: str
     importance: float
@@ -452,6 +463,7 @@ class MemoryOut(BaseModel):
 
 
 class MemoryCreate(BaseModel):
+    scope: Literal["general", "adult"] = "general"
     memory_type: str = Field(default="preference", min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=1000)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -586,6 +598,7 @@ class EpisodicJournalOut(BaseModel):
     user_id: uuid.UUID
     character_id: uuid.UUID
     conversation_id: uuid.UUID | None
+    scope: Literal["general", "adult"]
     journal_type: str
     title: str
     summary: str
@@ -649,6 +662,8 @@ class AdultGateStatus(BaseModel):
     allowed: bool
     reasons: list[str]
     intensity: int
+    stored_memory_count: int = Field(ge=0)
+    stored_moment_count: int = Field(ge=0)
 
 
 class DeleteResponse(BaseModel):

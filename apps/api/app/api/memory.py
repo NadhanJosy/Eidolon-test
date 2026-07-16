@@ -19,17 +19,21 @@ from app.schemas import (
     MemoryUpdate,
 )
 from app.services.memory import (
+    MemoryCaptureError,
     MemoryConflictResolutionError,
     clear_memories,
     create_memory,
     delete_memory,
     forget_low_value_memories,
     forget_memory,
+    memory_preferences_from_boundaries,
     resolve_memory_conflict,
     restore_memory,
     retrieve_memories,
     update_memory,
 )
+from app.services.relationship import get_current_relationship
+from app.services.safety import adult_gate_status
 
 router = APIRouter(prefix="/characters/{character_id}/memories", tags=["memory"])
 
@@ -40,9 +44,14 @@ async def list_memories(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     state: Literal["active", "forgotten", "all"] = Query(default="active"),
+    scope: Literal["general", "adult"] = Query(default="general"),
 ) -> list[MemoryItem]:
     character = await require_character(character_id, user, session)
-    conditions = [MemoryItem.user_id == user.id, MemoryItem.character_id == character.id]
+    conditions = [
+        MemoryItem.user_id == user.id,
+        MemoryItem.character_id == character.id,
+        MemoryItem.scope == scope,
+    ]
     if state == "active":
         conditions.append(MemoryItem.forgotten_at.is_(None))
     elif state == "forgotten":
@@ -61,17 +70,41 @@ async def add_memory(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MemoryItem:
     character = await require_character(character_id, user, session)
-    memory = await create_memory(
-        session,
-        user_id=user.id,
-        character_id=character.id,
-        content=payload.content,
-        memory_type=payload.memory_type,
-        importance=payload.importance,
-        confidence=payload.confidence,
-        emotional_weight=payload.emotional_weight,
-        pinned=payload.pinned,
-    )
+    if payload.scope == "adult":
+        relationship = await get_current_relationship(session, user.id, character.id)
+        gate = adult_gate_status(user, character, "adult", relationship=relationship)
+        preferences = memory_preferences_from_boundaries(character.boundaries_json)
+        if gate["allowed"] is not True:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Adult continuity is unavailable until every age, consent, "
+                    "and relationship gate passes."
+                ),
+            )
+        if (
+            preferences.get("adult_memory_storage") is not True
+            or preferences.get("private_mode_default") is True
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Adult memory storage is off for this character.",
+            )
+    try:
+        memory = await create_memory(
+            session,
+            user_id=user.id,
+            character_id=character.id,
+            content=payload.content,
+            scope=payload.scope,
+            memory_type=payload.memory_type,
+            importance=payload.importance,
+            confidence=payload.confidence,
+            emotional_weight=payload.emotional_weight,
+            pinned=payload.pinned,
+        )
+    except MemoryCaptureError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     await session.refresh(memory)
     return memory
@@ -83,6 +116,7 @@ async def search_memories(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     q: str = Query(default="", max_length=120),
+    scope: Literal["general", "adult"] = Query(default="general"),
 ) -> list[MemoryItem]:
     character = await require_character(character_id, user, session)
     memories = await retrieve_memories(
@@ -91,6 +125,7 @@ async def search_memories(
         character_id=character.id,
         query=q,
         limit=10,
+        scopes=(scope,),
     )
     await session.commit()
     return memories
@@ -130,7 +165,14 @@ async def patch_memory(
 ) -> MemoryItem:
     character = await require_character(character_id, user, session)
     memory = await _require_memory(session, user.id, character.id, memory_id)
-    await update_memory(memory=memory, session=session, **payload.model_dump(exclude_unset=True))
+    try:
+        await update_memory(
+            memory=memory,
+            session=session,
+            **payload.model_dump(exclude_unset=True),
+        )
+    except MemoryCaptureError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     await session.refresh(memory)
     return memory

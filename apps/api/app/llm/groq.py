@@ -71,6 +71,35 @@ class GroqProvider:
 
     async def generate(self, prompt: str) -> LLMGeneration:
         payload = self._payload(prompt, stream=False)
+        return await self._generate_payload(payload)
+
+    async def generate_structured(
+        self,
+        prompt: str,
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        max_output_tokens: int,
+    ) -> LLMGeneration:
+        payload = self._payload(prompt, stream=False)
+        payload.update(
+            {
+                "temperature": 0.1,
+                "max_completion_tokens": max_output_tokens,
+                "reasoning_effort": "low",
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema_name,
+                        "strict": True,
+                        "schema": schema,
+                    },
+                },
+            }
+        )
+        return await self._generate_payload(payload)
+
+    async def _generate_payload(self, payload: dict[str, object]) -> LLMGeneration:
         for attempt in range(self.max_retries + 1):
             try:
                 async with self._managed_client() as client:

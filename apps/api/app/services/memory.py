@@ -147,8 +147,15 @@ async def create_memory(
     memory_source: str | None = None,
     capture_metadata: dict[str, object] | None = None,
     merge_similar: bool = True,
+    scope: str = "general",
+    claim_key: str | None = None,
+    retrieval_facets: list[str] | None = None,
 ) -> MemoryItem:
-    memory_content = _format_memory(content)
+    if scope not in {"general", "adult"}:
+        raise MemoryCaptureError("Memory scope must be general or adult.")
+    memory_content = _validated_memory_content(content)
+    facets = _bounded_facets(retrieval_facets or [])
+    embedding_text = _embedding_text(memory_content, facets)
     contradiction_group, polarity = _contradiction_key(memory_content)
     metadata = {"source": memory_source or ("manual" if source_message_id is None else "extracted")}
     if extraction_metadata is not None:
@@ -160,6 +167,8 @@ async def create_memory(
         metadata["source_message_ids"] = source_message_ids
     if polarity:
         metadata["polarity"] = polarity
+    if facets:
+        metadata["retrieval_facets"] = facets
 
     existing = None
     if merge_similar:
@@ -171,6 +180,8 @@ async def create_memory(
             memory_type=memory_type,
             contradiction_group=contradiction_group,
             polarity=polarity,
+            scope=scope,
+            claim_key=claim_key,
         )
     if existing is not None:
         if existing.forgotten_at is not None:
@@ -184,8 +195,15 @@ async def create_memory(
         else:
             merged_metadata.pop("polarity", None)
         existing.memory_type = memory_type
+        existing.scope = scope
+        existing.claim_key = existing.claim_key or claim_key
         existing.content = merged_content
-        existing.embedding = text_embedding(merged_content)
+        merged_facets = _bounded_facets(
+            [*_metadata_string_list(merged_metadata.get("retrieval_facets")), *facets]
+        )
+        if merged_facets:
+            merged_metadata["retrieval_facets"] = merged_facets
+        existing.embedding = text_embedding(_embedding_text(merged_content, merged_facets))
         existing.importance = clamp(max(existing.importance, importance), 0.0, 1.0)
         existing.confidence = clamp(max(existing.confidence, confidence) + 0.03, 0.0, 1.0)
         existing.emotional_weight = clamp(
@@ -235,13 +253,15 @@ async def create_memory(
         user_id=user_id,
         character_id=character_id,
         source_message_id=source_message_id,
+        scope=scope,
+        claim_key=claim_key,
         memory_type=memory_type,
         content=memory_content,
         importance=importance,
         confidence=confidence,
         emotional_weight=emotional_weight,
         pinned=pinned,
-        embedding=text_embedding(memory_content),
+        embedding=text_embedding(embedding_text),
         decay_score=0.0,
         contradiction_group=contradiction_group,
         metadata_json=metadata,
@@ -265,6 +285,7 @@ async def remember_message_as_memory(
     message_id: uuid.UUID,
     content: str,
     source_role: str,
+    scope: str = "general",
 ) -> MemoryItem:
     decision = analyze_user_saved_memory(content, source_role=source_role)
     existing = await _find_memory_by_source_message(
@@ -318,6 +339,7 @@ async def remember_message_as_memory(
             "captured_at": utc_now().isoformat(),
         },
         merge_similar=False,
+        scope=scope,
     )
 
 
@@ -370,7 +392,11 @@ async def retrieve_memories(
     query: str = "",
     limit: int = 5,
     mark_recalled: bool = True,
+    scopes: tuple[str, ...] = ("general",),
 ) -> list[MemoryItem]:
+    allowed_scopes = tuple(scope for scope in scopes if scope in {"general", "adult"})
+    if not allowed_scopes:
+        return []
     now = utc_now()
     query_embedding = text_embedding(query) if query.strip() else None
     if query_embedding is not None and not any(query_embedding):
@@ -381,6 +407,7 @@ async def retrieve_memories(
             MemoryItem.user_id == user_id,
             MemoryItem.character_id == character_id,
             MemoryItem.forgotten_at.is_(None),
+            MemoryItem.scope.in_(allowed_scopes),
         )
         .order_by(desc(MemoryItem.pinned), desc(MemoryItem.updated_at), MemoryItem.id.asc())
         .limit(100)
@@ -400,6 +427,7 @@ async def retrieve_memories(
                 MemoryItem.user_id == user_id,
                 MemoryItem.character_id == character_id,
                 MemoryItem.forgotten_at.is_(None),
+                MemoryItem.scope.in_(allowed_scopes),
                 MemoryItem.embedding.is_not(None),
             )
             .order_by(vector_distance.asc(), desc(MemoryItem.updated_at), MemoryItem.id.asc())
@@ -456,7 +484,7 @@ async def update_memory(
         memory.memory_type = memory_type
     if content is not None:
         old_group = memory.contradiction_group
-        memory.content = _format_memory(content)
+        memory.content = _validated_memory_content(content)
         memory.embedding = text_embedding(memory.content)
         contradiction_group, polarity = _contradiction_key(memory.content)
         memory.contradiction_group = contradiction_group
@@ -697,6 +725,7 @@ async def maybe_extract_memory(
     message_id: uuid.UUID,
     content: str,
     memory_preferences: dict[str, object] | None = None,
+    scope: str = "general",
 ) -> MemoryItem | None:
     decision = analyze_memory_candidate(content, memory_preferences=memory_preferences)
     if not decision.accepted:
@@ -712,6 +741,7 @@ async def maybe_extract_memory(
         emotional_weight=decision.emotional_weight,
         source_message_id=message_id,
         extraction_metadata=decision.to_metadata(),
+        scope=scope,
     )
 
 
@@ -1055,20 +1085,23 @@ async def _find_merge_candidate(
     memory_type: str,
     contradiction_group: str | None,
     polarity: str | None,
+    scope: str,
+    claim_key: str | None,
 ) -> MemoryItem | None:
+    statement = select(MemoryItem).where(
+        MemoryItem.user_id == user_id,
+        MemoryItem.character_id == character_id,
+        MemoryItem.scope == scope,
+        MemoryItem.memory_type == memory_type,
+    )
+    if claim_key is not None:
+        statement = statement.where(MemoryItem.claim_key == claim_key)
     result = await session.execute(
-        select(MemoryItem)
-        .where(
-            MemoryItem.user_id == user_id,
-            MemoryItem.character_id == character_id,
-            MemoryItem.memory_type == memory_type,
-        )
-        .order_by(
+        statement.order_by(
             MemoryItem.forgotten_at.asc().nullsfirst(),
             MemoryItem.updated_at.desc(),
             MemoryItem.id.asc(),
-        )
-        .limit(50)
+        ).limit(50)
     )
     normalized = _normalized_content(content)
     new_terms = _query_terms(content)
@@ -1256,6 +1289,33 @@ def _apply_decay(memory: MemoryItem, now: datetime) -> None:
     decay_delta = age_days * 0.015
     protection = (memory.importance * 0.006) + (memory.confidence * 0.004)
     memory.decay_score = clamp(memory.decay_score + decay_delta - protection, 0.0, 1.0)
+
+
+def _bounded_facets(values: list[str]) -> list[str]:
+    facets: list[str] = []
+    for value in values:
+        normalized = " ".join(str(value).strip().split())[:80]
+        if normalized and normalized.casefold() not in {item.casefold() for item in facets}:
+            facets.append(normalized)
+        if len(facets) >= 8:
+            break
+    return facets
+
+
+def _validated_memory_content(content: str) -> str:
+    memory_content = _format_memory(content)
+    if not memory_content:
+        raise MemoryCaptureError("An empty memory cannot be saved.")
+    normalized_content = memory_content.casefold()
+    if any(term in normalized_content for term in UNSAFE_MEMORY_TERMS):
+        raise MemoryCaptureError("That memory may contain private credential data.")
+    if is_blocked_content(memory_content):
+        raise MemoryCaptureError("That memory crosses durable-memory safety boundaries.")
+    return memory_content
+
+
+def _embedding_text(content: str, facets: list[str]) -> str:
+    return " ".join((content, *facets)).strip()
 
 
 def _format_memory(content: str) -> str:

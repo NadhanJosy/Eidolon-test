@@ -35,6 +35,7 @@ type MemoryActionKind =
   | "resolve"
   | "remember"
   | "clear"
+  | "clear-adult"
   | "forget-stale";
 
 type MemoryAction = {
@@ -1023,6 +1024,58 @@ export function useKnowledgeController({
     }
   }
 
+  async function clearAdultContinuity(): Promise<boolean> {
+    if (
+      !token ||
+      !activeCharacterId ||
+      !activeConversation ||
+      memoryActionInFlight.current ||
+      !window.confirm(
+        "Delete every adult-mode memory and private moment for this companion? Conversation messages will remain."
+      )
+    ) {
+      return false;
+    }
+    const action: MemoryAction = {
+      kind: "clear-adult",
+      key: "clear-adult",
+      characterId: activeCharacterId,
+      conversationId: activeConversation.id,
+      targetId: null
+    };
+    if (!beginMemoryAction(action)) {
+      return false;
+    }
+    setError(null);
+    setNotice(null);
+    try {
+      const value = await apiJson<unknown>(
+        `/characters/${action.characterId}/adult-continuity`,
+        { method: "DELETE", token }
+      );
+      if (memoryActionConversationStillApplies(action)) {
+        await refreshSideState(token, action.characterId, action.conversationId!, () =>
+          memoryActionConversationStillApplies(action)
+        );
+      }
+      if (memoryActionStillApplies(action)) {
+        setNotice(
+          isDeleteCountResponse(value)
+            ? `${value.deleted} intimate ${value.deleted === 1 ? "memory or moment" : "memories and moments"} removed.`
+            : "Intimate memories and moments removed."
+        );
+      }
+      return true;
+    } catch (caught) {
+      if (memoryActionStillApplies(action)) {
+        setError(readError(caught));
+      }
+      return false;
+    } finally {
+      finishMemoryAction(action);
+    }
+  }
+
   async function forgetMemories() {
     if (
       !token ||
@@ -1620,6 +1673,7 @@ export function useKnowledgeController({
       resolveMemoryConflict,
       rememberMessage,
       clearMemories,
+      clearAdultContinuity,
       forgetMemories,
       addJournal,
       startJournalEdit,

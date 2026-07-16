@@ -99,8 +99,15 @@ async def test_database_is_at_head_with_level2_columns() -> None:
             )
         ).scalar_one()
 
-    assert revision == "0010_living_threads"
-    assert {"importance", "pinned", "contradiction_group", "forgotten_at"}.issubset(memory_columns)
+    assert revision == "0011_witnessed_continuity"
+    assert {
+        "importance",
+        "pinned",
+        "contradiction_group",
+        "forgotten_at",
+        "scope",
+        "claim_key",
+    }.issubset(memory_columns)
     assert {
         "mood",
         "conflict_state",

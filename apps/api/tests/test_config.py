@@ -73,6 +73,8 @@ def test_llm_generation_bounds_are_validated() -> None:
         ({"llm_timeout_seconds": 0}, "LLM_TIMEOUT_SECONDS"),
         ({"llm_context_budget_tokens": 100}, "LLM_CONTEXT_BUDGET_TOKENS"),
         ({"llm_max_retries": 6}, "LLM_MAX_RETRIES"),
+        ({"cognition_mode": "always"}, "COGNITION_MODE"),
+        ({"cognition_max_output_tokens": 127}, "COGNITION_MAX_OUTPUT_TOKENS"),
     )
     for overrides, expected_label in invalid_settings:
         try:
@@ -81,6 +83,8 @@ def test_llm_generation_bounds_are_validated() -> None:
             assert expected_label in str(exc)
         else:
             raise AssertionError(f"Expected {expected_label} validation to fail.")
+
+    assert Settings(cognition_mode=" ALL ").cognition_mode == "all"
 
 
 def test_production_placeholder_jwt_secret_is_rejected() -> None:

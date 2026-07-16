@@ -5,7 +5,11 @@ import { FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ApiError, apiErrorFromResponse, apiFetch, apiJson, getApiBaseUrl } from "@/lib/api";
 
 import { readError } from "./controller-utils";
-import { completeMessage, completeMessageList } from "./message-contract";
+import {
+  completeContinuityReceipt,
+  completeMessage,
+  completeMessageList
+} from "./message-contract";
 import type {
   ChatResponse,
   ContentMode,
@@ -41,6 +45,7 @@ type ActiveStream = {
   retryUserMessageId: string | null;
   knownMessageIds: Set<string>;
   userMessageId: string | null;
+  assistantMessageId: string | null;
   receivedCharacters: number;
   controller: AbortController;
   completed: boolean;
@@ -217,6 +222,7 @@ export function useChatController({
       retryUserMessageId,
       knownMessageIds: new Set(messages.map((message) => message.id)),
       userMessageId: retryUserMessageId,
+      assistantMessageId: null,
       receivedCharacters: 0,
       controller: new AbortController(),
       completed: false,
@@ -259,6 +265,9 @@ export function useChatController({
       await readEventStream(response.body, stream);
       if (isCurrentStream(stream)) {
         await refreshSideState(authToken, characterId, conversationId);
+        if (stream.assistantMessageId) {
+          void settleContinuityReceipt(stream, characterId);
+        }
       }
     } catch (caught) {
       if (!stream.controller.signal.aborted && isCurrentStream(stream)) {
@@ -531,6 +540,7 @@ export function useChatController({
         assistantMessage.id !== stream.userMessageId
       ) {
         stream.completed = true;
+        stream.assistantMessageId = assistantMessage.id;
         appendMessage(assistantMessage);
         setFailedTurn(null);
         setStreamingContent("");
@@ -590,6 +600,66 @@ export function useChatController({
       activeConversationIdRef.current === stream.conversationId &&
       !stream.controller.signal.aborted
     );
+  }
+
+  function streamContextStillApplies(stream: ActiveStream): boolean {
+    return (
+      sessionGeneration.current === stream.sessionGeneration &&
+      sessionOwnerIdRef.current === stream.ownerUserId &&
+      activeConversationIdRef.current === stream.conversationId
+    );
+  }
+
+  async function settleContinuityReceipt(stream: ActiveStream, characterId: string) {
+    const assistantMessageId = stream.assistantMessageId;
+    if (!assistantMessageId) {
+      return;
+    }
+    const delays = [350, 650, 1100, 1800, 2600];
+    for (const delay of delays) {
+      if (!streamContextStillApplies(stream)) {
+        return;
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delay));
+      try {
+        const value = await apiJson<unknown>(
+          `/chat/turns/${assistantMessageId}/continuity`,
+          { token: stream.token }
+        );
+        const receipt = completeContinuityReceipt(value);
+        if (!receipt) {
+          return;
+        }
+        if (receipt.state === "pending") {
+          continue;
+        }
+        if (!streamContextStillApplies(stream)) {
+          return;
+        }
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  metadata_json: {
+                    ...message.metadata_json,
+                    continuity_receipt: receipt
+                  }
+                }
+              : message
+          )
+        );
+        await refreshSideState(
+          stream.token,
+          characterId,
+          stream.conversationId,
+          () => streamContextStillApplies(stream)
+        );
+        return;
+      } catch {
+        // The reply remains usable even when its optional continuity receipt is delayed.
+      }
+    }
   }
 
   function appendMessage(message: Message) {

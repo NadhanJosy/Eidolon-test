@@ -1063,6 +1063,7 @@ export function useEidolonController() {
       deleteAccount: account.actions.deleteAccount,
       clearConversationMessages: privacy.clearConversationMessages,
       clearMemories: knowledge.actions.clearMemories,
+      clearAdultContinuity: knowledge.actions.clearAdultContinuity,
       deleteActiveConversation: navigation.actions.deleteActiveConversation,
       clearAuth: () => clearAuth({ notice: "Logged out." })
     }

@@ -27,8 +27,8 @@ from app.services import scheduler as scheduler_service
 from app.services.auth_session import REFRESH_COOKIE_NAME
 from app.services.continuity import select_proactive_thread
 from app.services.jobs import claim_due_jobs, create_job, mark_job_done
+from app.services.journal import create_journal
 from app.services.proactive import (
-    PROACTIVE_VARIANTS,
     proactive_deferred_until,
     proactive_initial_run_at,
 )
@@ -195,6 +195,17 @@ async def test_scheduler_processes_due_proactive_job(client: AsyncClient) -> Non
     assert chat.status_code == 200
 
     async with AsyncSessionLocal() as session:
+        await create_journal(
+            session,
+            uuid.UUID(conversation["user_id"]),
+            uuid.UUID(conversation["character_id"]),
+            conversation_id=uuid.UUID(conversation["id"]),
+            title="A quiet shared beginning",
+            summary="The user and companion shared a calm first hello.",
+            journal_type="grounded_episode",
+            importance=0.82,
+            metadata_json={"source": "grounded_cognition_v1", "grounded": True},
+        )
         job = await create_job(
             session,
             job_type="proactive_thinking_of_you",
@@ -303,6 +314,17 @@ async def test_scheduler_uses_safe_fallback_when_proactive_generation_fails(
     assert chat.status_code == 200
 
     async with AsyncSessionLocal() as session:
+        await create_journal(
+            session,
+            uuid.UUID(conversation["user_id"]),
+            uuid.UUID(conversation["character_id"]),
+            conversation_id=uuid.UUID(conversation["id"]),
+            title="A quiet shared beginning",
+            summary="The user and companion shared a calm first hello.",
+            journal_type="grounded_episode",
+            importance=0.82,
+            metadata_json={"source": "grounded_cognition_v1", "grounded": True},
+        )
         job = await create_job(
             session,
             job_type="proactive_thinking_of_you",
@@ -345,9 +367,8 @@ async def test_scheduler_uses_safe_fallback_when_proactive_generation_fails(
                 )
             )
         ).scalar_one()
-        assert proactive_message.content == str(
-            PROACTIVE_VARIANTS["proactive_thinking_of_you"]["content"]
-        )
+        assert "calm first hello" in proactive_message.content.lower()
+        assert "no pressure" in proactive_message.content.lower()
         assert proactive_message.metadata_json["provider"] == "system"
         assert proactive_message.metadata_json["generation_source"] == "fallback"
         assert proactive_message.metadata_json["generation_reason"] == expected_reason

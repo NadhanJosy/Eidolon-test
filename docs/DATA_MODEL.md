@@ -29,7 +29,7 @@ users
   |     `-- scheduled_jobs
   `-- conversations
         |-- messages
-        |-- episodic_journals
+        |-- episodic_journals -- episodic_journal_sources -- messages
         |-- continuity_threads
         `-- scheduled_jobs (conversation ID in bounded payload metadata)
 
@@ -115,7 +115,9 @@ Ordered thread content:
 
 Metadata can carry privacy/content provenance, completion/provider telemetry,
 proactive labels, reroll/source links, controlled system-event labels, and a
-private prompt-context manifest. Normal API serialization strips private
+private prompt-context manifest. Assistant metadata can also carry a bounded
+`pending|ready|degraded|skipped` continuity receipt containing committed IDs and
+categorical change labels. Normal API serialization strips private
 underscore-prefixed metadata.
 
 Private provenance is immutable cognition input: later changing the thread mode
@@ -125,17 +127,21 @@ does not make a private message eligible for memory or normal prompt history.
 
 Durable semantic memory owned by a user and companion:
 
-- optional source message
+- optional source message, `general|adult` scope, and normalized claim key
 - memory type and text
 - importance, confidence, emotional weight, pin state, and decay score
 - nullable `vector(384)` embedding
 - contradiction group and metadata links
 - last recall and optional forgotten time
-- bounded lifecycle/provenance metadata
+- bounded lifecycle/provenance metadata, including retrieval facets where useful
 
 Embeddings are backend-owned and never serialized. Forgotten rows remain
 owner-visible but are excluded from active retrieval, prompt assembly, recall
 timestamps, and contradiction resolution until restored.
+
+Claim keys let an explicit grounded correction supersede the prior active claim;
+an unsupported difference remains an inspectable conflict instead. Adult rows
+are retrievable only for an effective adult turn and never enter normal recall.
 
 Current memory types include user facts, preferences, interests, people, places,
 dates, events, promises, themes, shared lore/moments, inside jokes, boundaries,
@@ -145,13 +151,17 @@ and relationship milestones.
 
 Durable episode summaries and manual notes:
 
-- owner, companion, and optional source conversation
+- owner, companion, optional source conversation, and `general|adult` scope
 - type, title, summary, emotional tags
 - unresolved threads, callbacks, importance, and metadata
 
 Generated rows record deterministic ownership/provenance and may be rebuilt from
 their conversation. Manual rows remain user-owned and are not overwritten by
 automatic journal refresh.
+
+`episodic_journal_sources` is a many-to-many provenance table linking generated
+moments to exact user/assistant messages. Adult moments remain outside normal
+journal retrieval and proactive anchoring.
 
 ## `continuity_threads`
 
@@ -181,7 +191,8 @@ Exactly one row per user-companion pair:
 
 Source turns may store reversible relationship effects in message metadata so a
 latest-turn edit/delete can undo and recompute its contribution without guessing
-at older legacy turns.
+at older legacy turns. A structured cognition pass may add small bounded deltas
+only from allowlisted grounded evidence labels; it cannot set metric values.
 
 ## `scheduled_jobs`
 
@@ -195,6 +206,10 @@ Durable asynchronous work:
 Current work includes maintenance, `memory_extract`, `chat_postprocess`,
 `relationship_decay`, and `proactive_*` jobs. Internal exception text and
 rejected generated prose do not belong in job metadata.
+
+Post-chat payloads may retain safe cognition source/failure labels, bounded token
+counts, and the continuity receipt. They never retain the structured prompt,
+evidence prose, provider body, or private reasoning.
 
 ## `diagnostic_events`
 
