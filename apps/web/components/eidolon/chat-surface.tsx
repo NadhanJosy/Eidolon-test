@@ -6,8 +6,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { characterOpeningGreeting } from "./controller-utils";
 import { CompanionPortrait, Feedback, IconButton, PrimaryButton, QuietButton, fieldClass } from "./experience-primitives";
 import { Icon } from "./icons";
+import { LivingThreadsPopover } from "./living-threads";
 import type {
   Character,
+  ContinuityReceipt,
+  ContinuityThread,
   ContentMode,
   ConversationPrivacyMode,
   ConversationScenarioMode,
@@ -40,7 +43,6 @@ export function ChatSurface({
   streamingContent,
   streamPhase,
   failedTurn,
-  providerName,
   draft,
   setDraft,
   privateTurn,
@@ -63,7 +65,15 @@ export function ChatSurface({
   onReroll,
   onRemember,
   onDelete,
-  onOpenMemories
+  onOpenMemories,
+  continuityThreads,
+  threadDraft,
+  threadActionId,
+  setThreadDraft,
+  onAddContinuityThread,
+  onResolveContinuityThread,
+  onReopenContinuityThread,
+  onDeleteContinuityThread
 }: {
   character: Character | null;
   editableTitle: string;
@@ -83,7 +93,6 @@ export function ChatSurface({
   streamingContent: string;
   streamPhase: StreamPhase | null;
   failedTurn: StreamFailure | null;
-  providerName: string | null;
   draft: string;
   setDraft: (value: string) => void;
   privateTurn: boolean;
@@ -107,9 +116,18 @@ export function ChatSurface({
   onRemember: (message: Message) => void;
   onDelete: (message: Message) => void;
   onOpenMemories: () => void;
+  continuityThreads: ContinuityThread[];
+  threadDraft: string;
+  threadActionId: string | null;
+  setThreadDraft: (value: string) => void;
+  onAddContinuityThread: (event: FormEvent<HTMLFormElement>) => void;
+  onResolveContinuityThread: (thread: ContinuityThread) => void;
+  onReopenContinuityThread: (thread: ContinuityThread) => void;
+  onDeleteContinuityThread: (thread: ContinuityThread) => void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const [threadsOpen, setThreadsOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const rememberedIds = useMemo(() => new Set(rememberedMessageIds), [rememberedMessageIds]);
@@ -123,6 +141,7 @@ export function ChatSurface({
   );
   const name = character?.name ?? "Eidolon";
   const greeting = characterOpeningGreeting(character);
+  const openThreadCount = continuityThreads.filter((thread) => thread.status === "open").length;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -156,10 +175,13 @@ export function ChatSurface({
     <section className="relative flex h-full min-h-0 flex-col" aria-label={`Conversation with ${name}`}>
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-[#0b0a09] via-[#0b0a09]/70 to-transparent" />
 
-      <div className="relative z-20 flex justify-center px-4 pt-3">
+      <div className="relative z-20 flex justify-center gap-2 px-4 pt-3">
         <button
           className="group flex max-w-[min(92vw,32rem)] items-center gap-2 rounded-full border border-white/[0.07] bg-[#13110f]/75 px-3 py-1.5 text-xs text-[#8d847a] shadow-lg shadow-black/10 backdrop-blur-xl transition hover:border-white/[0.13] hover:text-[#bdb2a7]"
-          onClick={() => setContextOpen((current) => !current)}
+          onClick={() => {
+            setThreadsOpen(false);
+            setContextOpen((current) => !current);
+          }}
           type="button"
         >
           <Icon className="h-3.5 w-3.5 text-[#b98265]" name={privacyMode === "private" ? "lock" : "sparkles"} />
@@ -171,6 +193,22 @@ export function ChatSurface({
                 : characterScenario || "Your shared space"}
           </span>
           <Icon className={`h-3 w-3 transition ${contextOpen ? "rotate-180" : ""}`} name="chevron-down" />
+        </button>
+        <button
+          aria-expanded={threadsOpen}
+          className={`group flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg shadow-black/10 backdrop-blur-xl transition ${
+            threadsOpen
+              ? "border-[#b98265]/28 bg-[#b98265]/[0.09] text-[#c9a08a]"
+              : "border-white/[0.07] bg-[#13110f]/75 text-[#8d847a] hover:border-white/[0.13] hover:text-[#bdb2a7]"
+          }`}
+          onClick={() => {
+            setContextOpen(false);
+            setThreadsOpen((current) => !current);
+          }}
+          type="button"
+        >
+          <Icon className="h-3.5 w-3.5 text-[#b98265]" name="moon" />
+          <span>{openThreadCount > 0 ? `${openThreadCount} unfolding` : "Clear horizon"}</span>
         </button>
       </div>
 
@@ -189,6 +227,26 @@ export function ChatSurface({
           scenarioMode={scenarioMode}
           setEditableTitle={setEditableTitle}
           setScenarioDraft={setScenarioDraft}
+        />
+      ) : null}
+
+      {threadsOpen ? (
+        <LivingThreadsPopover
+          actionId={threadActionId}
+          draft={threadDraft}
+          privacyMode={privacyMode}
+          setDraft={setThreadDraft}
+          threads={continuityThreads}
+          onAdd={onAddContinuityThread}
+          onClose={() => setThreadsOpen(false)}
+          onDelete={onDeleteContinuityThread}
+          onReopen={onReopenContinuityThread}
+          onResolve={onResolveContinuityThread}
+          onReturn={(thread) => {
+            setDraft(`Can we come back to this: ${thread.content}`);
+            setThreadsOpen(false);
+            window.requestAnimationFrame(() => composerRef.current?.focus());
+          }}
         />
       ) : null}
 
@@ -251,8 +309,8 @@ export function ChatSurface({
               <Icon className="h-3.5 w-3.5" name="lock" />
               <span>
                 {privacyMode === "private"
-                  ? "This conversation stays outside shared memory"
-                  : "This reply won’t shape memory or your bond"}
+                  ? "No memory, moments, relationship changes, or notes later"
+                  : "This turn won’t shape memory, moments, your bond, or notes later"}
               </span>
             </div>
           ) : null}
@@ -279,18 +337,6 @@ export function ChatSurface({
                   icon="plus"
                   label="Conversation actions"
                   onClick={() => setToolsOpen((current) => !current)}
-                />
-                <IconButton
-                  className="h-9 w-9 border-transparent bg-transparent"
-                  disabled
-                  icon="attachment"
-                  label="Attachments are not available in this private text-only version"
-                />
-                <IconButton
-                  className="h-9 w-9 border-transparent bg-transparent"
-                  disabled
-                  icon="microphone"
-                  label="Voice is not recorded in this text-only version"
                 />
                 {contentMode === "adult" ? (
                   <span className="ml-1 rounded-full border border-[#b98265]/20 bg-[#b98265]/[0.06] px-2 py-1 text-[0.65rem] text-[#b9937f]">consent mode</span>
@@ -346,7 +392,7 @@ export function ChatSurface({
             </div>
           </form>
           <p className="mt-2 text-center text-[0.62rem] text-[#5f5a54]">
-            Messages use {providerDisclosure(providerName)} · Enter to send · Shift + Enter for a new line
+            Enter to send · Shift + Enter for a new line
           </p>
         </div>
       </div>
@@ -450,7 +496,7 @@ function MessageTurn({
         <p className={`whitespace-pre-wrap text-[0.96rem] leading-7 ${fromUser ? "" : "font-eidolon-display text-[1.12rem] leading-8 sm:text-[1.18rem]"}`}>{message.content}</p>
       </div>
       <div className={`mt-2 flex min-h-7 items-center gap-1 text-[#716a63] transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 ${fromUser ? "justify-end" : "justify-start"}`}>
-        <span className="mr-1 text-[0.62rem]">{formatTime(message.created_at)}{fromUser && isLatestUser ? " · Seen" : ""}</span>
+        <span className="mr-1 text-[0.62rem]">{formatTime(message.created_at)}</span>
         {fromUser && isLatestUser ? (
           <MiniAction icon="edit" label={editing ? "Cancel revision" : "Revise message"} onClick={() => editing ? onCancelEdit() : onEdit(message)} />
         ) : null}
@@ -468,6 +514,9 @@ function MessageTurn({
       </div>
       {remembered ? (
         <p className={`mt-1 flex items-center gap-1.5 text-[0.65rem] text-[#9e7c69] ${fromUser ? "justify-end" : ""}`}><Icon className="h-3 w-3" name="bookmark" /> Held close</p>
+      ) : null}
+      {!fromUser ? (
+        <ContinuityMark receipt={message.metadata_json.continuity_receipt} />
       ) : null}
     </article>
   );
@@ -543,17 +592,35 @@ function TypingMark() {
   );
 }
 
-function providerDisclosure(providerName: string | null): string {
-  if (providerName === "groq") {
-    return "GroqCloud for model inference";
+function ContinuityMark({ receipt }: { receipt: ContinuityReceipt | undefined }) {
+  if (!receipt) {
+    return null;
   }
-  if (providerName === "ollama") {
-    return "your local Ollama model";
+  if (receipt.state === "pending") {
+    return (
+      <p className="continuity-listening mt-1.5 flex items-center gap-2 text-[0.65rem] text-[#806f63]">
+        <span aria-hidden="true" className="h-1 w-1 rounded-full bg-[#b98265]" />
+        Listening for what lasts
+      </p>
+    );
   }
-  if (providerName === "mock") {
-    return "the development mock provider";
+  if (receipt.state !== "ready" || receipt.change_labels.length === 0) {
+    return null;
   }
-  return "the configured text provider";
+  const phrases = [
+    receipt.change_labels.includes("corrected") ? "Understanding updated" : null,
+    receipt.change_labels.some((label) => label === "remembered" || label === "reinforced")
+      ? "Something carried forward"
+      : null,
+    receipt.change_labels.includes("moment") ? "A shared moment took shape" : null,
+    receipt.change_labels.includes("relationship") ? "The rhythm between you shifted" : null
+  ].filter((value): value is string => value !== null);
+  return (
+    <p className="mt-1.5 flex items-center gap-1.5 text-[0.65rem] text-[#947767]">
+      <Icon className="h-3 w-3" name="sparkles" />
+      {phrases.slice(0, 2).join(" · ")}
+    </p>
+  );
 }
 
 function MiniAction({ icon, label, active = false, disabled = false, onClick }: { icon: "bookmark" | "edit" | "sparkles" | "trash"; label: string; active?: boolean; disabled?: boolean; onClick: () => void }) {

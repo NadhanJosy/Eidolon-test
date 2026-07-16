@@ -5,7 +5,15 @@ import uuid
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Character, Conversation, EpisodicJournal, Message, User, utc_now
+from app.models import (
+    Character,
+    Conversation,
+    EpisodicJournal,
+    EpisodicJournalSource,
+    Message,
+    User,
+    utc_now,
+)
 from app.services.conversation_privacy import message_is_private
 from app.services.relationship import clamp
 
@@ -115,10 +123,15 @@ async def list_journals(
     character_id: uuid.UUID,
     *,
     limit: int = 20,
+    scope: str = "general",
 ) -> list[EpisodicJournal]:
     result = await session.execute(
         select(EpisodicJournal)
-        .where(EpisodicJournal.user_id == user_id, EpisodicJournal.character_id == character_id)
+        .where(
+            EpisodicJournal.user_id == user_id,
+            EpisodicJournal.character_id == character_id,
+            EpisodicJournal.scope == scope,
+        )
         .order_by(desc(EpisodicJournal.created_at))
         .limit(limit)
     )
@@ -139,11 +152,16 @@ async def create_journal(
     callbacks_json: list[str] | None = None,
     importance: float = 0.5,
     metadata_json: dict | None = None,
+    scope: str = "general",
+    source_message_ids: list[uuid.UUID] | None = None,
 ) -> EpisodicJournal:
+    if scope not in {"general", "adult"}:
+        raise JournalMutationError("Journal scope must be general or adult.")
     journal = EpisodicJournal(
         user_id=user_id,
         character_id=character_id,
         conversation_id=conversation_id,
+        scope=scope,
         journal_type=journal_type,
         title=_compact(title, 200) or "Conversation note",
         summary=_compact(summary, 2000),
@@ -154,6 +172,9 @@ async def create_journal(
         metadata_json=metadata_json or {},
     )
     session.add(journal)
+    await session.flush()
+    for message_id in dict.fromkeys(source_message_ids or []):
+        session.add(EpisodicJournalSource(journal_id=journal.id, message_id=message_id))
     await session.flush()
     return journal
 
@@ -250,6 +271,7 @@ async def maybe_create_journal_from_conversation(
 
     if existing is not None:
         existing.summary = summary
+        existing.scope = "adult" if redacted_adult else "general"
         existing.journal_type = journal_type
         existing.emotional_tags_json = tags
         existing.unresolved_threads_json = unresolved
@@ -271,6 +293,8 @@ async def maybe_create_journal_from_conversation(
         user.id,
         character.id,
         conversation_id=conversation.id,
+        scope="adult" if redacted_adult else "general",
+        source_message_ids=[message.id for message in messages],
         title=title,
         summary=summary,
         journal_type=journal_type,

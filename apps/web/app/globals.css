@@ -17,6 +17,9 @@
   --accent-soft: #deb59d;
   --accent-deep: #754a39;
   --danger: #d79786;
+  --room-glow: 143 85 60;
+  --room-low: 105 94 72;
+  --aura-rgb: 190 128 94;
   background: var(--ink);
 }
 
@@ -119,9 +122,33 @@ pre {
 
 .eidolon-room {
   background:
-    radial-gradient(circle at 73% 9%, rgba(143, 85, 60, 0.13), transparent 25rem),
-    radial-gradient(circle at 34% 105%, rgba(105, 94, 72, 0.09), transparent 33rem),
+    radial-gradient(circle at 73% 9%, rgb(var(--room-glow) / 0.13), transparent 25rem),
+    radial-gradient(circle at 34% 105%, rgb(var(--room-low) / 0.09), transparent 33rem),
     linear-gradient(145deg, #090908 0%, #0c0b0a 55%, #090908 100%);
+}
+
+.eidolon-room[data-companion-theme="cedar"] {
+  --accent: #a8a379;
+  --accent-soft: #d3cea0;
+  --room-glow: 111 116 72;
+  --room-low: 90 80 54;
+  --aura-rgb: 169 166 105;
+}
+
+.eidolon-room[data-companion-theme="rain"] {
+  --accent: #78a7aa;
+  --accent-soft: #afd2d2;
+  --room-glow: 62 109 119;
+  --room-low: 69 83 112;
+  --aura-rgb: 110 169 176;
+}
+
+.eidolon-room[data-companion-theme="plum"] {
+  --accent: #aa7f9b;
+  --accent-soft: #d6abc6;
+  --room-glow: 121 69 104;
+  --room-low: 91 67 104;
+  --aura-rgb: 171 111 151;
 }
 
 .eidolon-room::before {
@@ -176,7 +203,7 @@ pre {
 }
 
 .companion-aura::before {
-  background: radial-gradient(circle, rgba(190, 128, 94, 0.2), transparent 68%);
+  background: radial-gradient(circle, rgb(var(--aura-rgb) / 0.2), transparent 68%);
   animation: aura-breathe 6s ease-in-out infinite;
 }
 
@@ -219,6 +246,10 @@ pre {
   animation-delay: 320ms;
 }
 
+.continuity-listening > span {
+  animation: continuity-listening 1.8s ease-in-out infinite;
+}
+
 @keyframes aura-breathe {
   0%, 100% { opacity: 0.65; transform: scale(0.92); }
   50% { opacity: 1; transform: scale(1.08); }
@@ -251,6 +282,11 @@ pre {
 @keyframes ambient-drift {
   from { transform: translate3d(-2%, -1%, 0) scale(0.96); }
   to { transform: translate3d(3%, 2%, 0) scale(1.05); }
+}
+
+@keyframes continuity-listening {
+  0%, 100% { opacity: 0.28; box-shadow: 0 0 0 0 rgb(var(--aura-rgb) / 0); }
+  50% { opacity: 1; box-shadow: 0 0 0 4px rgb(var(--aura-rgb) / 0.08); }
 }
 
 @media (min-width: 1024px) {

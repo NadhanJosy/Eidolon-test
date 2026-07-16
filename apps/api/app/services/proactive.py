@@ -13,12 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm.base import LLMProvider, LLMProviderUnavailable
 from app.models import (
     Character,
+    ContinuityThread,
     Conversation,
     EpisodicJournal,
     Message,
     RelationshipState,
     ScheduledJob,
     utc_now,
+)
+from app.services.continuity import (
+    record_proactive_thread_delivery,
+    select_proactive_thread,
 )
 from app.services.conversation_privacy import conversation_is_private, message_is_private
 from app.services.jobs import create_job
@@ -253,6 +258,7 @@ async def create_inactivity_proactive_message(
     force: bool = False,
     proactive_type: str = "proactive_inactivity_check",
     provider: LLMProvider | None = None,
+    continuity_thread_id: uuid.UUID | None = None,
 ) -> Message | None:
     if conversation_is_private(conversation):
         return None
@@ -304,15 +310,26 @@ async def create_inactivity_proactive_message(
     )
     context_metadata: dict[str, str] = {}
     milestone_context: tuple[RelationshipState, dict[str, str]] | None = None
-    if proactive_type == "proactive_unresolved_thread_nudge" and relationship_posture.key not in {
-        "careful",
-        "repair",
-    }:
-        contextual_content, context_metadata = await _unresolved_thread_content(
+    continuity_thread: ContinuityThread | None = None
+    if proactive_type == "proactive_unresolved_thread_nudge":
+        if relationship_posture.key in {"careful", "repair"}:
+            return None
+        contextual_content, context_metadata, continuity_thread = await _unresolved_thread_content(
             session,
             conversation,
             fallback=content,
+            requested_thread_id=continuity_thread_id,
         )
+        if not context_metadata:
+            return None
+        content = contextual_content
+    elif proactive_type == "proactive_thinking_of_you":
+        contextual_content, context_metadata = await _thinking_of_you_content(
+            session,
+            conversation,
+        )
+        if not context_metadata:
+            return None
         content = contextual_content
     elif proactive_type == "proactive_milestone_check":
         milestone_context = await _latest_unnoted_relationship_milestone(session, conversation)
@@ -324,6 +341,12 @@ async def create_inactivity_proactive_message(
             "proactive_context": "relationship_milestone",
             "milestone_id": str(milestone["milestone_id"]),
         }
+    if context_metadata:
+        content = _relationship_aware_contextual_fallback(
+            proactive_type,
+            content,
+            relationship_posture,
+        )
     generation = await _generate_proactive_content(
         provider,
         character=character,
@@ -359,6 +382,8 @@ async def create_inactivity_proactive_message(
             relationship,
             str(milestone["milestone_id"]),
         )
+    if continuity_thread is not None:
+        await record_proactive_thread_delivery(session, continuity_thread, delivered_at=now)
     await session.flush()
     return message
 
@@ -526,6 +551,19 @@ def _relationship_aware_fallback(
     return f"{opening} {closing}"
 
 
+def _relationship_aware_contextual_fallback(
+    proactive_type: str,
+    fallback: str,
+    posture: ProactiveRelationshipPosture,
+) -> str:
+    if posture.key == "new" or proactive_type == "proactive_milestone_check":
+        return fallback
+    closing = PROACTIVE_RELATIONSHIP_CLOSINGS.get(posture.key)
+    if closing is None:
+        return fallback
+    return f"{fallback.rstrip()} {closing}"
+
+
 async def ensure_proactive_jobs(
     session: AsyncSession,
     *,
@@ -557,10 +595,19 @@ async def ensure_proactive_jobs(
         ):
             continue
         if (
-            job_type == "proactive_unresolved_thread_nudge"
-            and await _latest_journal_with_followup(session, conversation) is None
+            job_type == "proactive_thinking_of_you"
+            and await _latest_grounded_journal(session, conversation) is None
         ):
             continue
+        continuity_thread = None
+        if job_type == "proactive_unresolved_thread_nudge":
+            continuity_thread = await select_proactive_thread(
+                session,
+                conversation=conversation,
+                now=now,
+            )
+            if continuity_thread is None:
+                continue
         if await _pending_job_exists(session, conversation.id, job_type):
             continue
         run_at = proactive_initial_run_at(
@@ -580,6 +627,11 @@ async def ensure_proactive_jobs(
                     "conversation_id": str(conversation.id),
                     "cooldown_hours": cooldown_hours,
                     "proactive_type": job_type,
+                    **(
+                        {"continuity_thread_id": str(continuity_thread.id)}
+                        if continuity_thread is not None
+                        else {}
+                    ),
                     **proactive_schedule_metadata(character, run_at),
                     "source": "chat_completion_hook",
                 },
@@ -903,15 +955,38 @@ async def _unresolved_thread_content(
     conversation: Conversation,
     *,
     fallback: str,
-) -> tuple[str, dict[str, str]]:
+    requested_thread_id: uuid.UUID | None = None,
+) -> tuple[str, dict[str, str], ContinuityThread | None]:
+    continuity_thread = await select_proactive_thread(
+        session,
+        conversation=conversation,
+        requested_thread_id=requested_thread_id,
+    )
+    if continuity_thread is not None:
+        context = _safe_thread_context([continuity_thread.content], "living_thread")
+        if context is not None:
+            kind, excerpt = context
+            return (
+                (
+                    f"I remembered the thread about {excerpt}. "
+                    "We can return to it whenever it feels right; no pressure."
+                ),
+                {
+                    "proactive_context": kind,
+                    "continuity_thread_id": str(continuity_thread.id),
+                },
+                continuity_thread,
+            )
+    if requested_thread_id is not None:
+        return fallback, {}, None
     journal = await _latest_journal_with_followup(session, conversation)
     if journal is None:
-        return fallback, {}
+        return fallback, {}, None
     context = _safe_thread_context(journal.unresolved_threads_json, "unresolved_thread")
     if context is None:
         context = _safe_thread_context(journal.callbacks_json, "callback")
     if context is None:
-        return fallback, {}
+        return fallback, {}, None
     kind, excerpt = context
     return (
         (
@@ -919,6 +994,29 @@ async def _unresolved_thread_content(
             "We can return to it whenever it feels right; no pressure."
         ),
         {"proactive_context": kind},
+        None,
+    )
+
+
+async def _thinking_of_you_content(
+    session: AsyncSession,
+    conversation: Conversation,
+) -> tuple[str, dict[str, str]]:
+    journal = await _latest_grounded_journal(session, conversation)
+    if journal is None:
+        return "", {}
+    anchor = _safe_proactive_prompt_fragment(journal.summary, limit=180)
+    if not anchor:
+        return "", {}
+    return (
+        (
+            f"I found myself thinking about {anchor.rstrip('.')}. "
+            "I wanted to leave a quiet hello; no pressure to reply."
+        ),
+        {
+            "proactive_context": "shared_moment",
+            "episodic_journal_id": str(journal.id),
+        },
     )
 
 
@@ -989,6 +1087,7 @@ async def _latest_journal_with_followup(
         .where(
             EpisodicJournal.conversation_id == conversation.id,
             EpisodicJournal.character_id == conversation.character_id,
+            EpisodicJournal.scope == "general",
         )
         .order_by(desc(EpisodicJournal.updated_at))
         .limit(6)
@@ -997,6 +1096,25 @@ async def _latest_journal_with_followup(
         if journal.unresolved_threads_json or _has_followup_callback(journal.callbacks_json):
             return journal
     return None
+
+
+async def _latest_grounded_journal(
+    session: AsyncSession,
+    conversation: Conversation,
+) -> EpisodicJournal | None:
+    result = await session.execute(
+        select(EpisodicJournal)
+        .where(
+            EpisodicJournal.conversation_id == conversation.id,
+            EpisodicJournal.character_id == conversation.character_id,
+            EpisodicJournal.scope == "general",
+            EpisodicJournal.importance >= 0.55,
+            EpisodicJournal.metadata_json["source"].as_string() != "manual",
+        )
+        .order_by(desc(EpisodicJournal.updated_at))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 def _has_followup_callback(callbacks: list[str]) -> bool:

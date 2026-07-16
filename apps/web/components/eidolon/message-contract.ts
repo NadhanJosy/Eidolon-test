@@ -1,4 +1,4 @@
-import type { Message } from "./types";
+import type { ContinuityReceipt, Message } from "./types";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -85,6 +85,12 @@ function completeMetadata(value: unknown): Message["metadata_json"] | null {
   ) {
     return null;
   }
+  if (
+    value.continuity_receipt !== undefined &&
+    completeContinuityReceipt(value.continuity_receipt) === null
+  ) {
+    return null;
+  }
   try {
     if (new TextEncoder().encode(JSON.stringify(value)).length > MAX_METADATA_BYTES) {
       return null;
@@ -93,6 +99,39 @@ function completeMetadata(value: unknown): Message["metadata_json"] | null {
     return null;
   }
   return value as Message["metadata_json"];
+}
+
+export function completeContinuityReceipt(value: unknown): ContinuityReceipt | null {
+  if (!plainObject(value)) {
+    return null;
+  }
+  if (
+    value.state !== "pending" &&
+    value.state !== "ready" &&
+    value.state !== "degraded" &&
+    value.state !== "skipped"
+  ) {
+    return null;
+  }
+  if (
+    !Array.isArray(value.memory_ids) ||
+    value.memory_ids.length > 3 ||
+    !value.memory_ids.every(validUuid) ||
+    (value.moment_id !== null && !validUuid(value.moment_id)) ||
+    !Array.isArray(value.change_labels) ||
+    value.change_labels.length > 5 ||
+    !value.change_labels.every(
+      (label) =>
+        label === "remembered" ||
+        label === "reinforced" ||
+        label === "corrected" ||
+        label === "moment" ||
+        label === "relationship"
+    )
+  ) {
+    return null;
+  }
+  return value as ContinuityReceipt;
 }
 
 function validJsonNode(value: unknown, depth: number): boolean {

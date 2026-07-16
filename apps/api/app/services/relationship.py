@@ -14,7 +14,7 @@ from app.companion.emotion import (
     read_emotional_state,
 )
 from app.companion.perception import infer_turn_perception
-from app.models import MemoryItem, RelationshipState, ScheduledJob, utc_now
+from app.models import MemoryItem, Message, RelationshipState, ScheduledJob, utc_now
 from app.services.embedding import text_embedding
 from app.services.jobs import create_job
 
@@ -239,6 +239,105 @@ async def update_relationship_from_message_with_effect(
     await ensure_relationship_decay_job(session, user_id, character_id)
     await session.flush()
     return state, effect
+
+
+async def refine_relationship_from_evidence(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    source_message: Message,
+    signals: tuple[str, ...],
+    confidence: float,
+) -> bool:
+    metadata = dict(source_message.metadata_json or {})
+    if metadata.get("relationship_cognition_version") == "relationship_cognition_v1":
+        return False
+    effect = metadata.get("relationship_effect")
+    if not isinstance(effect, dict) or effect.get("version") != RELATIONSHIP_EFFECT_VERSION:
+        return False
+    if confidence < 0.62 or not signals:
+        source_message.metadata_json = {
+            **metadata,
+            "relationship_cognition_version": "relationship_cognition_v1",
+        }
+        return False
+
+    state = await get_or_create_relationship(session, user_id, character_id)
+    before = _snapshot(state)
+    scale = clamp((confidence - 0.5) * 1.6, 0.2, 1.0)
+    signal_deltas: dict[str, dict[str, float]] = {
+        "boundary_assertion": {"trust": 0.02},
+        "conflict": {"tension": 0.25, "warmth": -0.08},
+        "gratitude": {"warmth": 0.10, "trust": 0.04},
+        "play": {"familiarity": 0.08, "warmth": 0.05},
+        "reliability": {"trust": 0.12},
+        "repair_attempt": {"tension": -0.25, "trust": 0.05},
+        "shared_ritual": {"familiarity": 0.12, "attachment": 0.03},
+        "support": {"warmth": 0.06},
+        "vulnerability": {"trust": 0.06, "intimacy": 0.12},
+    }
+    for signal in dict.fromkeys(signals):
+        for key, delta in signal_deltas.get(signal, {}).items():
+            minimum, maximum = RELATIONSHIP_METRIC_BOUNDS[key]
+            setattr(
+                state,
+                key,
+                clamp(float(getattr(state, key)) + (delta * scale), minimum, maximum),
+            )
+    if "conflict" in signals:
+        state.repair_needed = True
+    elif "repair_attempt" in signals and state.tension < 1.0:
+        state.repair_needed = False
+    state.conflict_state = _conflict_state(state)
+    state.tags_json = sorted(set(state.tags_json or {}) | set(signals))[-8:]
+    state.last_interaction_at = utc_now()
+    changes = _recent_changes(before, state, state.last_interaction_at)
+    cognition_counts = _cognition_evidence_counts(
+        (state.metadata_json or {}).get("cognition_evidence_counts")
+    )
+    for signal in dict.fromkeys(signals):
+        cognition_counts[signal] = min(cognition_counts.get(signal, 0) + 1, 1_000_000)
+    state.metadata_json = _append_timeline_event(
+        state.metadata_json or {},
+        {
+            "at": state.last_interaction_at.isoformat(),
+            "kind": "grounded_relationship_evidence",
+            "summary": "The exchange added grounded relationship evidence.",
+            "signals": list(dict.fromkeys(signals))[:6],
+            "source_message_id": str(source_message.id),
+        },
+    )
+    state.metadata_json = {
+        **(state.metadata_json or {}),
+        "cognition_evidence_counts": cognition_counts,
+        "recent_changes": changes,
+        "recent_change_summary": _recent_change_summary(changes),
+    }
+
+    existing_deltas = effect.get("deltas") if isinstance(effect.get("deltas"), dict) else {}
+    after_values = _snapshot_values(_snapshot(state))
+    before_values = _snapshot_values(before)
+    merged_deltas: dict[str, float] = {}
+    for key in RELATIONSHIP_EFFECT_KEYS:
+        prior = existing_deltas.get(key)
+        prior_value = float(prior) if isinstance(prior, int | float) else 0.0
+        merged_deltas[key] = round(prior_value + after_values[key] - before_values[key], 3)
+    added_tags = set(_metadata_list(effect.get("added_tags"))) | set(signals)
+    source_message.metadata_json = {
+        **metadata,
+        "relationship_effect": {
+            **effect,
+            "deltas": merged_deltas,
+            "added_tags": sorted(added_tags),
+            "repair_needed_after": state.repair_needed,
+            "conflict_state_after": state.conflict_state,
+            "mood_after": state.mood,
+        },
+        "relationship_cognition_version": "relationship_cognition_v1",
+    }
+    await session.flush()
+    return any(change.get("key") != "steady" for change in changes)
 
 
 async def reverse_relationship_message_effect(
@@ -781,3 +880,13 @@ def _bounded_evidence_count(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
     return max(0, min(value, 1_000_000))
+
+
+def _cognition_evidence_counts(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key)[:40]: _bounded_evidence_count(count)
+        for key, count in value.items()
+        if isinstance(key, str)
+    }

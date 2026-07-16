@@ -20,6 +20,7 @@ from app.models import (
     User,
     utc_now,
 )
+from app.services.continuity import remove_message_source_threads
 from app.services.conversation_privacy import (
     ConversationPrivacyMode,
     message_is_private,
@@ -400,6 +401,7 @@ async def _assemble_prompt_for_user_turn(
         relationship=context.relationship,
         memories=context.memories,
         journals=context.journals,
+        threads=context.threads,
         recent_messages=context.recent_messages,
         current_message=user_message.content,
         content_mode=context.safety_status["effective_mode"],
@@ -489,7 +491,7 @@ async def complete_assistant_message(
         "generation_failure_type": None,
     }
     if turn_allows_state_learning(user_message):
-        if update_relationship_state:
+        if update_relationship_state and prompt.content_mode != "adult":
             _relationship, relationship_effect = await update_relationship_from_message_with_effect(
                 session,
                 user.id,
@@ -519,6 +521,12 @@ async def complete_assistant_message(
         assistant_message.metadata_json = {
             **(assistant_message.metadata_json or {}),
             "post_chat_job_id": str(post_chat_job.id),
+            "continuity_receipt": {
+                "state": "pending",
+                "memory_ids": [],
+                "moment_id": None,
+                "change_labels": [],
+            },
         }
     await session.flush()
     return assistant_message
@@ -639,6 +647,12 @@ async def edit_latest_user_turn(
         character_id=character.id,
         message_id=user_message.id,
     )
+    removed_threads = await remove_message_source_threads(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        message_id=user_message.id,
+    )
 
     requested_mode = _message_content_mode(user_message)
     privacy_mode = resolve_turn_privacy_mode(
@@ -664,6 +678,7 @@ async def edit_latest_user_turn(
         "edit_count": edit_count,
         "edit_note": "User edited this message after sending.",
         "removed_source_memories": removed_memories,
+        "removed_source_threads": removed_threads,
         "relationship_reversal_applied": relationship_reversal_applied,
     }
     if turn_allows_state_learning(user_message):
@@ -856,6 +871,7 @@ async def reroll_assistant_message(
         relationship=context.relationship,
         memories=context.memories,
         journals=context.journals,
+        threads=context.threads,
         recent_messages=context.recent_messages,
         current_message=user_message.content,
         content_mode=context.safety_status["effective_mode"],

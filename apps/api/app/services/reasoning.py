@@ -13,6 +13,7 @@ from app.companion.perception import infer_turn_perception
 from app.companion.soul import character_soul
 from app.models import (
     Character,
+    ContinuityThread,
     Conversation,
     EpisodicJournal,
     MemoryItem,
@@ -21,6 +22,7 @@ from app.models import (
     User,
     utc_now,
 )
+from app.services.continuity import retrieve_continuity_threads
 from app.services.conversation_privacy import ConversationPrivacyMode
 from app.services.conversation_scenario import (
     ConversationScenarioMode,
@@ -42,6 +44,7 @@ class ReasoningContext:
     relationship: RelationshipState
     memories: list[MemoryItem]
     journals: list[EpisodicJournal]
+    threads: list[ContinuityThread]
     recent_messages: list[Message]
     safety_status: dict
     time_context: str
@@ -86,16 +89,59 @@ async def build_reasoning_context(
         relationship = await get_or_create_relationship(session, user.id, character.id)
     else:
         relationship = await get_current_relationship(session, user.id, character.id)
+    safety_status = adult_gate_status(
+        user,
+        character,
+        requested_mode,
+        relationship=relationship,
+    )
+    scopes = (
+        ("general", "adult")
+        if safety_status["effective_mode"] == "adult" and not is_private_turn
+        else ("general",)
+    )
     memories = await retrieve_memories(
         session,
         user_id=user.id,
         character_id=character.id,
         query=current_message,
         limit=7,
-        mark_recalled=not is_private_turn,
+        mark_recalled=False,
+        scopes=scopes,
     )
-    journal_candidates = await list_journals(session, user.id, character.id, limit=50)
+    journal_candidates = await list_journals(
+        session,
+        user.id,
+        character.id,
+        limit=50,
+        scope="general",
+    )
+    if "adult" in scopes:
+        journal_candidates.extend(
+            await list_journals(
+                session,
+                user.id,
+                character.id,
+                limit=50,
+                scope="adult",
+            )
+        )
     journals = rank_relevant_journals(journal_candidates, query=current_message, limit=4)
+    threads = await retrieve_continuity_threads(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        query=current_message,
+        conversation_id=conversation.id,
+        limit=4,
+        mark_referenced=not is_private_turn,
+    )
+    perception = infer_turn_perception(
+        current_message,
+        recent_messages=recent_messages,
+        journals=journals,
+        threads=threads,
+    )
     pending_proactive_events = await list_pending_proactive_events(
         session,
         user_id=user.id,
@@ -104,12 +150,6 @@ async def build_reasoning_context(
     )
     now = utc_now()
     # Stage 3: resolve structural boundaries and the companion's decayed mood.
-    safety_status = adult_gate_status(
-        user,
-        character,
-        requested_mode,
-        relationship=relationship,
-    )
     time_context = now.strftime("%A, %Y-%m-%d %H:%M UTC")
     scenario = effective_conversation_scenario(conversation, character)
     emotional_state = project_emotional_state(relationship, now=now)
@@ -120,6 +160,7 @@ async def build_reasoning_context(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         current_message=current_message,
         content_mode=safety_status["effective_mode"],
@@ -133,6 +174,7 @@ async def build_reasoning_context(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         current_message=current_message,
         content_mode=safety_status["effective_mode"],
@@ -146,6 +188,7 @@ async def build_reasoning_context(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         safety_status=safety_status,
         time_context=time_context,

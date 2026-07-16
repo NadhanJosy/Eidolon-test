@@ -117,6 +117,7 @@ export function useEidolonController() {
   const companion = useCompanionStateController({
     setMemories: knowledge.actions.setMemories,
     setJournals: knowledge.actions.setJournals,
+    setContinuityThreads: knowledge.actions.setContinuityThreads,
     onAdultStatusChange: (_characterId, status) => {
       if (status?.allowed !== true) {
         setRequestedContentMode("sfw");
@@ -164,7 +165,8 @@ export function useEidolonController() {
       navigation.state.conversationProvisioning ||
       navigation.state.conversationDeleting ||
       knowledge.state.memoryMutating ||
-      knowledge.state.journalMutating,
+      knowledge.state.journalMutating ||
+      knowledge.state.threadMutating,
     appendMessage: chat.actions.appendMessage,
     cancelActiveStream: chat.actions.cancelActiveStream,
     resetChat: chat.actions.resetChat,
@@ -187,6 +189,7 @@ export function useEidolonController() {
       navigation.state.conversationDeleting ||
       knowledge.state.memoryMutating ||
       knowledge.state.journalMutating ||
+      knowledge.state.threadMutating ||
       privacy.conversationMutating,
     setUser,
     setDisplayName,
@@ -210,6 +213,7 @@ export function useEidolonController() {
       navigation.state.conversationDeleting ||
       knowledge.state.memoryMutating ||
       knowledge.state.journalMutating ||
+      knowledge.state.threadMutating ||
       account.state.accountMutating ||
       privacy.conversationMutating
     ) {
@@ -951,6 +955,10 @@ export function useEidolonController() {
       searchStatus: navigation.state.searchStatus,
       searchError: navigation.state.searchError,
       memories: knowledge.state.memories,
+      continuityThreads: knowledge.state.continuityThreads,
+      threadDraft: knowledge.state.threadDraft,
+      threadActionId: knowledge.state.threadActionId,
+      threadMutating: knowledge.state.threadMutating,
       forgottenMemories: knowledge.state.forgottenMemories,
       memoryView: knowledge.state.memoryView,
       memoryActionId: knowledge.state.memoryActionId,
@@ -1009,6 +1017,7 @@ export function useEidolonController() {
       setJournalSummary: knowledge.actions.setJournalSummary,
       setJournalEditTitle: knowledge.actions.setJournalEditTitle,
       setJournalEditSummary: knowledge.actions.setJournalEditSummary,
+      setThreadDraft: knowledge.actions.setThreadDraft,
       setPanel: companion.actions.setPanel,
       refreshRuntimeStatus,
       handleAuth,
@@ -1046,10 +1055,15 @@ export function useEidolonController() {
       cancelJournalEdit: knowledge.actions.cancelJournalEdit,
       saveJournalEdit: knowledge.actions.saveJournalEdit,
       deleteJournal: knowledge.actions.deleteJournal,
+      addContinuityThread: knowledge.actions.addContinuityThread,
+      resolveContinuityThread: knowledge.actions.resolveContinuityThread,
+      reopenContinuityThread: knowledge.actions.reopenContinuityThread,
+      deleteContinuityThread: knowledge.actions.deleteContinuityThread,
       exportAccount: account.actions.exportAccount,
       deleteAccount: account.actions.deleteAccount,
       clearConversationMessages: privacy.clearConversationMessages,
       clearMemories: knowledge.actions.clearMemories,
+      clearAdultContinuity: knowledge.actions.clearAdultContinuity,
       deleteActiveConversation: navigation.actions.deleteActiveConversation,
       clearAuth: () => clearAuth({ notice: "Logged out." })
     }

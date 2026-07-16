@@ -81,6 +81,17 @@ async def test_database_is_at_head_with_level2_columns() -> None:
                 )
             )
         }
+        continuity_thread_columns = {
+            row[0]
+            for row in (
+                await connection.execute(
+                    text(
+                        "select column_name from information_schema.columns "
+                        "where table_name = 'continuity_threads'"
+                    )
+                )
+            )
+        }
 
         legacy_login_throttle_exists = (
             await connection.execute(
@@ -88,8 +99,15 @@ async def test_database_is_at_head_with_level2_columns() -> None:
             )
         ).scalar_one()
 
-    assert revision == "0009_companion_intelligence"
-    assert {"importance", "pinned", "contradiction_group", "forgotten_at"}.issubset(memory_columns)
+    assert revision == "0011_witnessed_continuity"
+    assert {
+        "importance",
+        "pinned",
+        "contradiction_group",
+        "forgotten_at",
+        "scope",
+        "claim_key",
+    }.issubset(memory_columns)
     assert {
         "mood",
         "conflict_state",
@@ -119,4 +137,23 @@ async def test_database_is_at_head_with_level2_columns() -> None:
         "safe_message",
         "created_at",
     }
+    assert {
+        "id",
+        "user_id",
+        "character_id",
+        "conversation_id",
+        "source_message_id",
+        "thread_kind",
+        "content",
+        "status",
+        "salience",
+        "confidence",
+        "dedupe_key",
+        "last_referenced_at",
+        "last_proactive_at",
+        "resolved_at",
+        "metadata_json",
+        "created_at",
+        "updated_at",
+    } == continuity_thread_columns
     assert legacy_login_throttle_exists is False

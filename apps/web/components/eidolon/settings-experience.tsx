@@ -37,6 +37,7 @@ export function SettingsExperience({
   onExport,
   onClearMessages,
   onClearMemories,
+  onClearAdultContinuity,
   onDeleteConversation,
   onDeleteAccount,
   onLogout
@@ -67,6 +68,7 @@ export function SettingsExperience({
   onExport: () => Promise<boolean>;
   onClearMessages: () => Promise<boolean>;
   onClearMemories: () => Promise<boolean>;
+  onClearAdultContinuity: () => Promise<boolean>;
   onDeleteConversation: () => Promise<boolean>;
   onDeleteAccount: (password: string, confirmation: string) => Promise<boolean>;
   onLogout: () => void;
@@ -93,7 +95,7 @@ export function SettingsExperience({
         <div className="min-w-0">
           {section === "companion" ? <CompanionSettings draft={draft} saving={characterSaving} update={update} onSave={onSaveCharacter} /> : null}
           {section === "presence" ? <PresenceSettings draft={draft} saving={characterSaving} update={update} onSave={onSaveCharacter} /> : null}
-          {section === "privacy" ? <PrivacySettings adultModeAvailable={adultModeAvailable} adultReadinessState={adultReadinessState} adultStatus={adultStatus} characterName={characterName} contentMode={contentMode} draft={draft} privacyMode={privacyMode} replaceDraft={setDraft} saving={characterSaving} update={update} user={user} onChangeContentMode={onChangeContentMode} onSave={onSaveCharacter} onSetPrivacyMode={onSetPrivacyMode} onToggleAgeGate={onToggleAgeGate} /> : null}
+          {section === "privacy" ? <PrivacySettings adultModeAvailable={adultModeAvailable} adultReadinessState={adultReadinessState} adultStatus={adultStatus} characterName={characterName} contentMode={contentMode} draft={draft} privacyMode={privacyMode} replaceDraft={setDraft} saving={characterSaving} update={update} user={user} onChangeContentMode={onChangeContentMode} onClearAdultContinuity={onClearAdultContinuity} onSave={onSaveCharacter} onSetPrivacyMode={onSetPrivacyMode} onToggleAgeGate={onToggleAgeGate} /> : null}
           {section === "account" ? <AccountSettings accountActionId={accountActionId} conversationCount={conversationCount} deletingConversationId={deletingConversationId} displayName={displayName} memoryCount={memoryCount} messageCount={messageCount} setDisplayName={setDisplayName} streaming={streaming} user={user} onClearMemories={onClearMemories} onClearMessages={onClearMessages} onDeleteAccount={onDeleteAccount} onDeleteConversation={onDeleteConversation} onExport={onExport} onLogout={onLogout} onSaveName={onSaveName} /> : null}
         </div>
       </div>
@@ -139,10 +141,12 @@ function PresenceSettings({ draft, saving, update, onSave }: SettingsFormProps) 
   );
 }
 
-function PrivacySettings({ user, characterName, draft, saving, contentMode, privacyMode, adultStatus, adultReadinessState, adultModeAvailable, update, replaceDraft, onToggleAgeGate, onChangeContentMode, onSetPrivacyMode, onSave }: SettingsFormProps & { user: User; characterName: string; contentMode: ContentMode; privacyMode: ConversationPrivacyMode; adultStatus: AdultStatus | null; adultReadinessState: AdultReadinessState; adultModeAvailable: boolean; replaceDraft: (draft: CharacterDraft) => void; onToggleAgeGate: () => void; onChangeContentMode: (mode: ContentMode) => void; onSetPrivacyMode: (mode: ConversationPrivacyMode) => void }) {
+function PrivacySettings({ user, characterName, draft, saving, contentMode, privacyMode, adultStatus, adultReadinessState, adultModeAvailable, update, replaceDraft, onToggleAgeGate, onChangeContentMode, onSetPrivacyMode, onClearAdultContinuity, onSave }: SettingsFormProps & { user: User; characterName: string; contentMode: ContentMode; privacyMode: ConversationPrivacyMode; adultStatus: AdultStatus | null; adultReadinessState: AdultReadinessState; adultModeAvailable: boolean; replaceDraft: (draft: CharacterDraft) => void; onToggleAgeGate: () => void; onChangeContentMode: (mode: ContentMode) => void; onSetPrivacyMode: (mode: ConversationPrivacyMode) => void; onClearAdultContinuity: () => Promise<boolean> }) {
   const adultAge = Number.parseInt(draft.explicit_age, 10);
   const adultAgeReady = Number.isInteger(adultAge) && adultAge >= 18;
   const reasons = adultStatus?.reasons.filter((reason) => reason.trim()) ?? [];
+  const adultContinuityCount =
+    (adultStatus?.stored_memory_count ?? 0) + (adultStatus?.stored_moment_count ?? 0);
   return (
     <SettingsPanel eyebrow="Privacy & consent" title="Clear boundaries, kept privately" description="Control what becomes part of continuity and, if you choose, unlock a separate adult space with explicit age and consent gates.">
       <SettingGroup>
@@ -162,6 +166,7 @@ function PrivacySettings({ user, characterName, draft, saving, contentMode, priv
           <Field label="How to return to calm"><textarea className={`${fieldClass} min-h-20 resize-none`} maxLength={4000} onChange={(event) => update("aftercare_style", event.target.value)} value={draft.aftercare_style} /></Field>
           <div className="py-4"><Field label="Preferred intensity"><select className={fieldClass} disabled={!draft.adult_mode_allowed} onChange={(event) => update("content_intensity", event.target.value)} value={draft.content_intensity}><option value="0">Off</option><option value="1">Tender</option><option value="2">Open</option><option value="3">Expressive</option></select></Field></div>
           <Toggle checked={draft.adult_memory_storage} disabled={!draft.adult_mode_allowed || draft.private_mode_default} detail={draft.private_mode_default ? "Private-by-default conversations never enter durable memory." : "Off by default. Intimate details can remain conversation-only."} label="Allow intimate memory" onChange={(checked) => update("adult_memory_storage", checked)} />
+          <div className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm text-[#c8bdb2]">Separate intimate continuity</p><p className="mt-1 text-xs leading-5 text-[#766f68]">{adultContinuityCount === 0 ? "Nothing is stored in the adult-only archive." : `${adultStatus?.stored_memory_count ?? 0} adult-only memories and ${adultStatus?.stored_moment_count ?? 0} private moments. They never enter everyday recall or notes later.`}</p></div><DangerButton disabled={adultContinuityCount === 0} onClick={() => void onClearAdultContinuity()}>Remove intimate continuity</DangerButton></div>
         </div>
         {adultReadinessState === "error" ? <p className="mt-4 rounded-xl bg-[#7e3f34]/10 p-3 text-xs leading-5 text-[#c58e82]">Readiness could not be checked, so the safe setting remains active.</p> : null}
         {reasons.length > 0 && !adultModeAvailable ? <ul className="mt-4 space-y-1 text-xs leading-5 text-[#887c73]">{reasons.map((reason) => <li className="flex gap-2" key={reason}><span aria-hidden="true">·</span><span>{humanAdultReason(reason)}</span></li>)}</ul> : null}

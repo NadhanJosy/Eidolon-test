@@ -79,6 +79,15 @@ class LLMProvider(Protocol):
 
     async def generate(self, prompt: str) -> LLMGeneration: ...
 
+    async def generate_structured(
+        self,
+        prompt: str,
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        max_output_tokens: int,
+    ) -> LLMGeneration: ...
+
     async def stream(self, prompt: str) -> AsyncIterator[LLMStreamEvent]: ...
 
     async def health(self) -> dict[str, str]: ...

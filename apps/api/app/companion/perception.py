@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 
 from app.companion.domain import TurnPerception
-from app.models import EpisodicJournal, Message, utc_now
+from app.models import ContinuityThread, EpisodicJournal, Message, utc_now
 
 WORD_PATTERN = re.compile(r"[a-z0-9']+")
 ADVICE_MARKERS = (
@@ -67,6 +67,7 @@ def infer_turn_perception(
     *,
     recent_messages: list[Message],
     journals: list[EpisodicJournal],
+    threads: list[ContinuityThread] | None = None,
     now: datetime | None = None,
 ) -> TurnPerception:
     normalized = " ".join(current_message.casefold().split())
@@ -91,7 +92,7 @@ def infer_turn_perception(
         celebration_signal=celebration_signal,
         conflict_signal=conflict_signal,
     )
-    unresolved_context = _unresolved_context(journals, recent_messages)
+    unresolved_context = _unresolved_context(journals, recent_messages, threads or [])
     return TurnPerception(
         intent=intent,
         tone=tone,
@@ -194,8 +195,17 @@ def _subtext(
 def _unresolved_context(
     journals: list[EpisodicJournal],
     recent_messages: list[Message],
+    threads: list[ContinuityThread],
 ) -> tuple[str, ...]:
     selected: list[str] = []
+    for thread in threads:
+        if thread.status != "open":
+            continue
+        compact = " ".join(thread.content.split())[:180]
+        if compact and compact.casefold() not in {item.casefold() for item in selected}:
+            selected.append(compact)
+        if len(selected) >= 3:
+            return tuple(selected)
     for journal in journals:
         for thread in journal.unresolved_threads_json:
             compact = " ".join(thread.split())[:180]

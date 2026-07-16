@@ -95,6 +95,7 @@ export function EidolonApp() {
     state.conversationDeleting ||
     state.memoryMutating ||
     state.journalMutating ||
+    state.threadMutating ||
     state.accountMutating ||
     state.conversationMutating;
 
@@ -165,8 +166,16 @@ export function EidolonApp() {
     return { ok: true };
   }
 
+  const companionTheme =
+    typeof state.activeCharacter?.boundaries_json.visual_theme === "string"
+      ? state.activeCharacter.boundaries_json.visual_theme
+      : "ember";
+
   return (
-    <main className="eidolon-room relative h-[100dvh] overflow-hidden text-[#f3eee5]">
+    <main
+      className="eidolon-room relative h-[100dvh] overflow-hidden text-[#f3eee5]"
+      data-companion-theme={companionTheme}
+    >
       <div className="relative z-10 flex h-full min-h-0">
         <DesktopNavigation active={view} onNavigate={navigate} />
 
@@ -186,6 +195,7 @@ export function EidolonApp() {
                 character={state.activeCharacter}
                 characterScenario={characterScenarioPreset(state.activeCharacter)}
                 contentMode={state.contentMode}
+                continuityThreads={state.continuityThreads}
                 draft={state.messageDraft}
                 editableTitle={state.conversationTitle}
                 editingMessageId={state.editingMessageId}
@@ -196,7 +206,6 @@ export function EidolonApp() {
                 notice={state.notice}
                 pendingOutgoingContent={state.pendingOutgoingContent}
                 privateTurn={state.privateTurn}
-                providerName={state.runtimeStatus.llmProvider}
                 privacyMode={state.activeConversationPrivacyMode}
                 rememberedMessageIds={rememberedMessageIds}
                 rememberingMessageId={state.rememberingMessageId}
@@ -210,12 +219,19 @@ export function EidolonApp() {
                 setScenarioDraft={actions.setConversationScenarioDraft}
                 streamPhase={state.streamPhase}
                 streamingContent={state.streamingContent}
+                threadActionId={state.threadActionId}
+                threadDraft={state.threadDraft}
+                setThreadDraft={actions.setThreadDraft}
+                onAddContinuityThread={actions.addContinuityThread}
                 onCancelEdit={actions.cancelEditMessage}
                 onDelete={actions.deleteMessage}
                 onEdit={actions.startEditMessage}
                 onOpenMemories={() => navigate("memories")}
                 onQueueProactive={actions.queueProactive}
+                onDeleteContinuityThread={actions.deleteContinuityThread}
+                onReopenContinuityThread={actions.reopenContinuityThread}
                 onRemember={actions.rememberMessage}
+                onResolveContinuityThread={actions.resolveContinuityThread}
                 onReroll={actions.rerollMessage}
                 onResetScenario={actions.resetActiveConversationScenario}
                 onSaveScenario={actions.saveActiveConversationScenario}
@@ -261,7 +277,22 @@ export function EidolonApp() {
                   />
                 ) : null}
                 {view === "relationship" ? (
-                  <RelationshipExperience characterName={characterName} draft={state.characterDraft} journals={state.journals} relationship={state.relationship} timeline={state.timeline} />
+                  <RelationshipExperience
+                    actionId={state.threadActionId}
+                    characterName={characterName}
+                    draft={state.characterDraft}
+                    journals={state.journals}
+                    relationship={state.relationship}
+                    threads={state.continuityThreads}
+                    timeline={state.timeline}
+                    onDelete={actions.deleteContinuityThread}
+                    onReopen={actions.reopenContinuityThread}
+                    onResolve={actions.resolveContinuityThread}
+                    onReturn={(thread) => {
+                      actions.setMessageDraft(`Can we come back to this: ${thread.content}`);
+                      navigate("chat");
+                    }}
+                  />
                 ) : null}
                 {view === "moments" ? (
                   <MomentsJournal
@@ -306,6 +337,7 @@ export function EidolonApp() {
                     user={currentUser}
                     onChangeContentMode={(mode) => { actions.changeContentMode(mode); }}
                     onClearMemories={actions.clearMemories}
+                    onClearAdultContinuity={actions.clearAdultContinuity}
                     onClearMessages={actions.clearConversationMessages}
                     onDeleteAccount={actions.deleteAccount}
                     onDeleteConversation={actions.deleteActiveConversation}

@@ -419,6 +419,15 @@ class ChatResponse(BaseModel):
     assistant_message: MessageOut
 
 
+class ContinuityReceiptOut(BaseModel):
+    state: Literal["pending", "ready", "degraded", "skipped"]
+    memory_ids: list[uuid.UUID] = Field(default_factory=list)
+    moment_id: uuid.UUID | None = None
+    change_labels: list[
+        Literal["remembered", "reinforced", "corrected", "moment", "relationship"]
+    ] = Field(default_factory=list)
+
+
 class ChatRerollRequest(BaseModel):
     conversation_id: uuid.UUID
     assistant_message_id: uuid.UUID | None = None
@@ -434,6 +443,8 @@ class MemoryOut(BaseModel):
     user_id: uuid.UUID
     character_id: uuid.UUID
     source_message_id: uuid.UUID | None
+    scope: Literal["general", "adult"]
+    claim_key: str | None
     memory_type: str
     content: str
     importance: float
@@ -452,6 +463,7 @@ class MemoryOut(BaseModel):
 
 
 class MemoryCreate(BaseModel):
+    scope: Literal["general", "adult"] = "general"
     memory_type: str = Field(default="preference", min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=1000)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -477,6 +489,68 @@ class MemoryResolveResponse(BaseModel):
     memory: MemoryOut
     removed: int
     removed_memory_ids: list[uuid.UUID]
+
+
+class ContinuityThreadOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    character_id: uuid.UUID
+    conversation_id: uuid.UUID | None
+    source_message_id: uuid.UUID | None
+    thread_kind: Literal["follow_up", "plan", "promise", "repair", "ritual"]
+    content: str
+    status: Literal["open", "resolved"]
+    salience: float
+    confidence: float
+    last_referenced_at: datetime | None
+    last_proactive_at: datetime | None
+    resolved_at: datetime | None
+    metadata_json: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ContinuityThreadCreate(BaseModel):
+    conversation_id: uuid.UUID | None = None
+    thread_kind: Literal["follow_up", "plan", "promise", "repair", "ritual"] = "follow_up"
+    content: str = Field(min_length=1, max_length=600)
+    salience: float = Field(default=0.7, ge=0.0, le=1.0)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("A living thread needs visible text.")
+        return normalized
+
+
+class ContinuityThreadUpdate(BaseModel):
+    thread_kind: Literal["follow_up", "plan", "promise", "repair", "ritual"] | None = None
+    content: str | None = Field(default=None, min_length=1, max_length=600)
+    status: Literal["open", "resolved"] | None = None
+    salience: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("A living thread needs visible text.")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_update(self) -> ContinuityThreadUpdate:
+        if not self.model_fields_set:
+            raise ValueError("At least one living thread field must be provided.")
+        for field_name in self.model_fields_set:
+            if getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null.")
+        return self
 
 
 class RelationshipOut(BaseModel):
@@ -524,6 +598,7 @@ class EpisodicJournalOut(BaseModel):
     user_id: uuid.UUID
     character_id: uuid.UUID
     conversation_id: uuid.UUID | None
+    scope: Literal["general", "adult"]
     journal_type: str
     title: str
     summary: str
@@ -587,6 +662,8 @@ class AdultGateStatus(BaseModel):
     allowed: bool
     reasons: list[str]
     intensity: int
+    stored_memory_count: int = Field(ge=0)
+    stored_moment_count: int = Field(ge=0)
 
 
 class DeleteResponse(BaseModel):
@@ -601,5 +678,6 @@ class ExportOut(BaseModel):
     messages: list[dict[str, Any]]
     memories: list[dict[str, Any]]
     episodic_journals: list[dict[str, Any]]
+    continuity_threads: list[dict[str, Any]]
     relationship_states: list[dict[str, Any]]
     scheduled_jobs: list[dict[str, Any]]

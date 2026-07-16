@@ -32,6 +32,10 @@ from app.schemas import (
     MessageUpdate,
 )
 from app.services.chat import create_conversation, edit_latest_user_turn, memory_storage_allowed
+from app.services.continuity import (
+    delete_conversation_threads,
+    remove_message_source_threads,
+)
 from app.services.conversation_presence import (
     advance_read_cursor,
     get_conversation_summary,
@@ -247,6 +251,11 @@ async def remember_message(
             message_id=message.id,
             content=message.content,
             source_role=message.role,
+            scope=(
+                "adult"
+                if (message.metadata_json or {}).get("content_mode") == "adult"
+                else "general"
+            ),
         )
     except MemoryCaptureError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -384,6 +393,7 @@ async def clear_conversation_messages(
         session,
         for_update=True,
     )
+    await delete_conversation_threads(session, conversation.id)
     result = await session.execute(
         delete(Message).where(Message.conversation_id == conversation.id)
     )
@@ -466,6 +476,12 @@ async def _delete_latest_user_turn(
             metadata.get("relationship_effect"),
         )
     await remove_message_source_memories(
+        session,
+        user_id=user.id,
+        character_id=conversation.character_id,
+        message_id=user_message.id,
+    )
+    await remove_message_source_threads(
         session,
         user_id=user.id,
         character_id=conversation.character_id,

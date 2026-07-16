@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,9 +32,10 @@ async def get_journals(
     character_id: uuid.UUID,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: Literal["general", "adult"] = Query(default="general"),
 ) -> list[EpisodicJournal]:
     character = await require_character(character_id, user, session)
-    return await list_journals(session, user.id, character.id)
+    return await list_journals(session, user.id, character.id, scope=scope)
 
 
 @router.post("", response_model=EpisodicJournalOut, status_code=201)
@@ -54,6 +55,7 @@ async def add_journal(
         user.id,
         character.id,
         conversation_id=payload.conversation_id,
+        scope="general",
         journal_type=payload.journal_type,
         title=payload.title,
         summary=payload.summary,

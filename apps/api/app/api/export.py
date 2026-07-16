@@ -11,8 +11,10 @@ from app.db.session import get_session
 from app.dependencies import get_current_user
 from app.models import (
     Character,
+    ContinuityThread,
     Conversation,
     EpisodicJournal,
+    EpisodicJournalSource,
     MemoryItem,
     Message,
     RelationshipState,
@@ -54,8 +56,22 @@ async def export_account(
     memories = (
         await session.execute(select(MemoryItem).where(MemoryItem.user_id == user.id))
     ).scalars()
-    journals = (
-        await session.execute(select(EpisodicJournal).where(EpisodicJournal.user_id == user.id))
+    journal_list = list(
+        (await session.execute(select(EpisodicJournal).where(EpisodicJournal.user_id == user.id)))
+        .scalars()
+        .all()
+    )
+    journal_sources: dict[str, list[str]] = {}
+    if journal_list:
+        source_rows = await session.execute(
+            select(EpisodicJournalSource).where(
+                EpisodicJournalSource.journal_id.in_([journal.id for journal in journal_list])
+            )
+        )
+        for source in source_rows.scalars().all():
+            journal_sources.setdefault(str(source.journal_id), []).append(str(source.message_id))
+    continuity_threads = (
+        await session.execute(select(ContinuityThread).where(ContinuityThread.user_id == user.id))
     ).scalars()
     relationships = (
         await session.execute(select(RelationshipState).where(RelationshipState.user_id == user.id))
@@ -77,7 +93,11 @@ async def export_account(
         conversations=[conversation_to_dict(conversation) for conversation in conversation_list],
         messages=[message_to_dict(message) for message in messages],
         memories=[memory_to_dict(memory) for memory in memories],
-        episodic_journals=[journal_to_dict(journal) for journal in journals],
+        episodic_journals=[
+            journal_to_dict(journal, journal_sources.get(str(journal.id), []))
+            for journal in journal_list
+        ],
+        continuity_threads=[continuity_thread_to_dict(thread) for thread in continuity_threads],
         relationship_states=[relationship_to_dict(relationship) for relationship in relationships],
         scheduled_jobs=[job_to_dict(job) for job in jobs],
     )
@@ -145,6 +165,8 @@ def memory_to_dict(memory: MemoryItem) -> dict:
         "user_id": str(memory.user_id),
         "character_id": str(memory.character_id),
         "source_message_id": str(memory.source_message_id) if memory.source_message_id else None,
+        "scope": memory.scope,
+        "claim_key": memory.claim_key,
         "memory_type": memory.memory_type,
         "content": memory.content,
         "importance": memory.importance,
@@ -161,12 +183,14 @@ def memory_to_dict(memory: MemoryItem) -> dict:
     }
 
 
-def journal_to_dict(journal: EpisodicJournal) -> dict:
+def journal_to_dict(journal: EpisodicJournal, source_message_ids: list[str]) -> dict:
     return {
         "id": str(journal.id),
         "user_id": str(journal.user_id),
         "character_id": str(journal.character_id),
         "conversation_id": str(journal.conversation_id) if journal.conversation_id else None,
+        "scope": journal.scope,
+        "source_message_ids": source_message_ids,
         "journal_type": journal.journal_type,
         "title": journal.title,
         "summary": journal.summary,
@@ -177,6 +201,27 @@ def journal_to_dict(journal: EpisodicJournal) -> dict:
         "metadata_json": journal.metadata_json,
         "created_at": journal.created_at.isoformat(),
         "updated_at": journal.updated_at.isoformat(),
+    }
+
+
+def continuity_thread_to_dict(thread: ContinuityThread) -> dict:
+    return {
+        "id": str(thread.id),
+        "user_id": str(thread.user_id),
+        "character_id": str(thread.character_id),
+        "conversation_id": str(thread.conversation_id) if thread.conversation_id else None,
+        "source_message_id": (str(thread.source_message_id) if thread.source_message_id else None),
+        "thread_kind": thread.thread_kind,
+        "content": thread.content,
+        "status": thread.status,
+        "salience": thread.salience,
+        "confidence": thread.confidence,
+        "last_referenced_at": isoformat_or_none(thread.last_referenced_at),
+        "last_proactive_at": isoformat_or_none(thread.last_proactive_at),
+        "resolved_at": isoformat_or_none(thread.resolved_at),
+        "metadata_json": thread.metadata_json,
+        "created_at": thread.created_at.isoformat(),
+        "updated_at": thread.updated_at.isoformat(),
     }
 
 

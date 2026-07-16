@@ -53,6 +53,21 @@ class OllamaProvider:
         except (httpx.HTTPError, ValueError) as exc:
             raise LLMProviderUnavailable(OLLAMA_UNAVAILABLE) from exc
 
+    async def generate_structured(
+        self,
+        prompt: str,
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        max_output_tokens: int,
+    ) -> LLMGeneration:
+        del prompt, schema_name, schema, max_output_tokens
+        raise LLMProviderUnavailable(
+            "The configured provider does not support strict structured cognition.",
+            failure_type="model_unavailable",
+            retryable=False,
+        )
+
     async def stream(self, prompt: str) -> AsyncIterator[LLMStreamEvent]:
         try:
             async with self._managed_client() as client:

@@ -90,6 +90,13 @@ export type DeliveryState = {
   away_state?: string;
 };
 
+export type ContinuityReceipt = {
+  state: "pending" | "ready" | "degraded" | "skipped";
+  memory_ids: string[];
+  moment_id: string | null;
+  change_labels: ("remembered" | "reinforced" | "corrected" | "moment" | "relationship")[];
+};
+
 export type Message = {
   id: string;
   conversation_id: string;
@@ -109,6 +116,7 @@ export type Message = {
     generation_retry_count?: number;
     reply_to_user_message_id?: string;
     delivery_state?: DeliveryState;
+    continuity_receipt?: ContinuityReceipt;
     reroll_of?: string;
     edited?: boolean;
     system_event?: boolean;
@@ -131,6 +139,8 @@ export type MemoryItem = {
   user_id: string;
   character_id: string;
   source_message_id: string | null;
+  scope: "general" | "adult";
+  claim_key: string | null;
   memory_type: string;
   content: string;
   importance: number;
@@ -226,6 +236,7 @@ export type Journal = {
   user_id: string;
   character_id: string;
   conversation_id: string | null;
+  scope: "general" | "adult";
   journal_type: string;
   title: string;
   summary: string;
@@ -243,12 +254,36 @@ export type Journal = {
   updated_at: string;
 };
 
+export type ContinuityThreadKind = "follow_up" | "plan" | "promise" | "repair" | "ritual";
+export type ContinuityThreadStatus = "open" | "resolved";
+
+export type ContinuityThread = {
+  id: string;
+  user_id: string;
+  character_id: string;
+  conversation_id: string | null;
+  source_message_id: string | null;
+  thread_kind: ContinuityThreadKind;
+  content: string;
+  status: ContinuityThreadStatus;
+  salience: number;
+  confidence: number;
+  last_referenced_at: string | null;
+  last_proactive_at: string | null;
+  resolved_at: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AdultStatus = {
   requested_mode: ContentMode;
   effective_mode: ContentMode;
   allowed: boolean;
   reasons: string[];
   intensity: number;
+  stored_memory_count: number;
+  stored_moment_count: number;
 };
 
 export type DebugRelationshipSnapshot = {
@@ -341,6 +376,11 @@ export type AssembledContext = {
     };
     memory_items: ContextMemoryItem[];
     journal_items: ContextJournalItem[];
+    continuity_threads?: {
+      id: string;
+      thread_kind: ContinuityThreadKind;
+      status: ContinuityThreadStatus;
+    }[];
     recent_messages: {
       id: string;
       role: Message["role"];

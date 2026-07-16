@@ -14,6 +14,7 @@ from app.companion.planning import plan_response
 from app.companion.soul import character_soul
 from app.models import (
     Character,
+    ContinuityThread,
     EpisodicJournal,
     MemoryItem,
     Message,
@@ -77,6 +78,7 @@ def build_response_plan(
     relationship: RelationshipState,
     memories: Sequence[MemoryItem],
     journals: Sequence[EpisodicJournal],
+    threads: Sequence[ContinuityThread],
     recent_messages: Sequence[Message],
     current_message: str,
     content_mode: str,
@@ -91,6 +93,7 @@ def build_response_plan(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         current_message=current_message,
         content_mode=content_mode,
@@ -99,11 +102,13 @@ def build_response_plan(
     continuity = _continuity(recent_messages, pending_proactive_events)
     memory_focus = _memory_focus(memories)
     episode_focus = _episode_focus(journals)
+    thread_focus = _thread_focus(threads)
     scene = _scene_focus(scenario_mode, scenario_text)
     summary = structured.private_summary()
     return _compact(
         f"{summary}; Continuity: {continuity}; Memory focus: {memory_focus}; "
-        f"Episode focus: {episode_focus}; Scene: {scene}; Timing: {time_context}",
+        f"Episode focus: {episode_focus}; Living thread: {thread_focus}; "
+        f"Scene: {scene}; Timing: {time_context}",
         1200,
     )
 
@@ -114,6 +119,7 @@ def build_structured_response_plan(
     relationship: RelationshipState,
     memories: Sequence[MemoryItem],
     journals: Sequence[EpisodicJournal],
+    threads: Sequence[ContinuityThread],
     recent_messages: Sequence[Message],
     current_message: str,
     content_mode: str,
@@ -127,6 +133,7 @@ def build_structured_response_plan(
         current_message,
         recent_messages=list(recent_messages),
         journals=list(journals),
+        threads=list(threads),
     )
     selected_emotion = emotion or project_emotional_state(relationship)
     plan = plan_response(
@@ -136,6 +143,7 @@ def build_structured_response_plan(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         content_mode=content_mode,
         safety_status=safety_status,
@@ -233,6 +241,16 @@ def _episode_focus(journals: Sequence[EpisodicJournal]) -> str:
             return f"callback available: {_compact(journal.callbacks_json[-1], 140)}"
     strongest = max(journals, key=lambda journal: journal.importance)
     return f"episode anchor: {_compact(strongest.title, 120)}"
+
+
+def _thread_focus(threads: Sequence[ContinuityThread]) -> str:
+    if not threads:
+        return "none selected; do not invent an unfinished promise or plan"
+    strongest = max(threads, key=lambda thread: (thread.salience, thread.confidence))
+    return (
+        f"{strongest.thread_kind.replace('_', ' ')} grounded in the user's words: "
+        f"{_compact(strongest.content, 160)}; mention only if relevant"
+    )
 
 
 def _boundary_focus(content_mode: str, safety_status: dict, profile: dict) -> str:

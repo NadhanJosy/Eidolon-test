@@ -4,18 +4,19 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.companion.soul import canonical_soul_json
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_character
-from app.models import Character, User
+from app.models import Character, EpisodicJournal, MemoryItem, User
 from app.schemas import (
     AdultGateStatus,
     CharacterCreate,
     CharacterOut,
     CharacterUpdate,
+    DeleteResponse,
     RelationshipOut,
 )
 from app.services.proactive import proactive_preferences, reschedule_pending_proactive_jobs
@@ -148,5 +149,48 @@ async def get_adult_status(
     character = await require_character(character_id, user, session)
     relationship = await get_current_relationship(session, user.id, character.id)
     status = adult_gate_status(user, character, "adult", relationship=relationship)
+    memory_count = await session.scalar(
+        select(func.count(MemoryItem.id)).where(
+            MemoryItem.user_id == user.id,
+            MemoryItem.character_id == character.id,
+            MemoryItem.scope == "adult",
+        )
+    )
+    moment_count = await session.scalar(
+        select(func.count(EpisodicJournal.id)).where(
+            EpisodicJournal.user_id == user.id,
+            EpisodicJournal.character_id == character.id,
+            EpisodicJournal.scope == "adult",
+        )
+    )
+    status["stored_memory_count"] = int(memory_count or 0)
+    status["stored_moment_count"] = int(moment_count or 0)
     await session.commit()
     return status
+
+
+@router.delete("/{character_id}/adult-continuity", response_model=DeleteResponse)
+async def delete_adult_continuity(
+    character_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DeleteResponse:
+    character = await require_character(character_id, user, session)
+    memory_result = await session.execute(
+        delete(MemoryItem).where(
+            MemoryItem.user_id == user.id,
+            MemoryItem.character_id == character.id,
+            MemoryItem.scope == "adult",
+        )
+    )
+    moment_result = await session.execute(
+        delete(EpisodicJournal).where(
+            EpisodicJournal.user_id == user.id,
+            EpisodicJournal.character_id == character.id,
+            EpisodicJournal.scope == "adult",
+        )
+    )
+    await session.commit()
+    return DeleteResponse(
+        deleted=int(memory_result.rowcount or 0) + int(moment_result.rowcount or 0)
+    )

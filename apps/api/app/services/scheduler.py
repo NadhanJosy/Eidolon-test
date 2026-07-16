@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.db.session import AsyncSessionLocal
 from app.llm.factory import get_llm_provider
-from app.models import Character, Conversation, Message, ScheduledJob, User, utc_now
+from app.models import Character, Conversation, MemoryItem, Message, ScheduledJob, User, utc_now
+from app.services.cognition import analyze_completed_turn, apply_cognition_report
+from app.services.continuity import sync_continuity_from_message
 from app.services.conversation_privacy import conversation_is_private, message_is_private
 from app.services.jobs import (
     claim_due_jobs,
@@ -37,7 +39,11 @@ from app.services.proactive import (
     proactive_deferred_until,
     proactive_relationship_delivery_block,
 )
-from app.services.relationship import ensure_relationship_decay_job, get_current_relationship
+from app.services.relationship import (
+    ensure_relationship_decay_job,
+    get_current_relationship,
+    refine_relationship_from_evidence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +150,7 @@ async def _run_job(
         await _run_memory_extract_job(session, job)
         return
     if job.job_type == "chat_postprocess":
-        await _run_chat_postprocess_job(session, job)
+        await _run_chat_postprocess_job(session, job, settings)
         return
     if job.job_type in PROACTIVE_JOB_TYPES:
         await _run_proactive_job(session, job, settings)
@@ -243,6 +249,7 @@ async def _run_proactive_job(
         force=_bool_payload(payload.get("force"), default=True),
         proactive_type=proactive_type,
         provider=get_llm_provider(settings),
+        continuity_thread_id=_optional_uuid(payload.get("continuity_thread_id")),
     )
     if message is None:
         _merge_payload(job, {"result": "skipped_by_cooldown_or_state"})
@@ -286,6 +293,11 @@ async def _run_memory_extract_job(session: AsyncSession, job: ScheduledJob) -> N
             message_id=message.id,
             content=message.content,
             memory_preferences=memory_preferences,
+            scope=(
+                "adult"
+                if (message.metadata_json or {}).get("content_mode") == "adult"
+                else "general"
+            ),
         )
         if memory is None:
             skipped += 1
@@ -306,7 +318,11 @@ async def _run_memory_extract_job(session: AsyncSession, job: ScheduledJob) -> N
     )
 
 
-async def _run_chat_postprocess_job(session: AsyncSession, job: ScheduledJob) -> None:
+async def _run_chat_postprocess_job(
+    session: AsyncSession,
+    job: ScheduledJob,
+    settings: Settings,
+) -> None:
     if job.user_id is None or job.character_id is None:
         raise ValueError("Post-chat job is missing user or character.")
     conversation = await _conversation_from_job(session, job)
@@ -315,9 +331,68 @@ async def _run_chat_postprocess_job(session: AsyncSession, job: ScheduledJob) ->
     if character is None or user is None:
         raise ValueError("Post-chat job owner or character was not found.")
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
-    if payload.get("memory_allowed") is True:
+    source_message = await _message_from_job(session, job)
+    assistant_message = await _assistant_from_job(session, job)
+    scope = (
+        "adult"
+        if (source_message.metadata_json or {}).get("content_mode") == "adult"
+        else "general"
+    )
+    cognition_allowed = payload.get("memory_allowed") is True and settings.cognition_mode != "off"
+    analysis = None
+    application = None
+    relationship_changed = False
+    if cognition_allowed and get_llm_provider(settings).name != "mock":
+        selected_memories = await _selected_cognition_memories(
+            session,
+            source_message=source_message,
+            user_id=user.id,
+            character_id=character.id,
+            scope=scope,
+        )
+        analysis = await analyze_completed_turn(
+            provider=get_llm_provider(settings),
+            user_message=source_message,
+            assistant_message=assistant_message,
+            recent_messages=await _recent_cognition_messages(
+                session,
+                conversation_id=conversation.id,
+                source_message=source_message,
+            ),
+            selected_memories=selected_memories,
+            mode=settings.cognition_mode,
+            max_output_tokens=settings.cognition_max_output_tokens,
+        )
+        if analysis.report is not None:
+            application = await apply_cognition_report(
+                session,
+                report=analysis.report,
+                user_id=user.id,
+                character_id=character.id,
+                conversation_id=conversation.id,
+                user_message=source_message,
+                assistant_message=assistant_message,
+                scope=scope,
+                memory_preferences=memory_preferences_from_boundaries(character.boundaries_json),
+            )
+            if scope == "general":
+                relationship_changed = await refine_relationship_from_evidence(
+                    session,
+                    user_id=user.id,
+                    character_id=character.id,
+                    source_message=source_message,
+                    signals=application.relationship_signals,
+                    confidence=application.relationship_confidence,
+                )
+
+    deterministic_fallback = payload.get("memory_allowed") is True and (
+        settings.cognition_mode == "off"
+        or get_llm_provider(settings).name == "mock"
+        or (analysis is not None and analysis.source == "degraded")
+    )
+    if deterministic_fallback:
         await _run_memory_extract_job(session, job)
-    else:
+    elif payload.get("memory_allowed") is not True:
         _merge_payload(
             job,
             {
@@ -326,23 +401,66 @@ async def _run_chat_postprocess_job(session: AsyncSession, job: ScheduledJob) ->
                 "extracted_count": 0,
             },
         )
-    journal = await maybe_create_journal_from_conversation(
+    continuity_result = await sync_continuity_from_message(
         session,
-        user=user,
+        user_id=user.id,
         character=character,
         conversation=conversation,
+        message=source_message,
     )
-    await ensure_proactive_jobs(
-        session,
-        conversation=conversation,
-        user_id=user.id,
-        character_id=character.id,
+    journal = None
+    if deterministic_fallback:
+        journal = await maybe_create_journal_from_conversation(
+            session,
+            user=user,
+            character=character,
+            conversation=conversation,
+        )
+    if scope == "general":
+        await ensure_proactive_jobs(
+            session,
+            conversation=conversation,
+            user_id=user.id,
+            character_id=character.id,
+        )
+    receipt_state = (
+        "ready"
+        if application is not None
+        else "degraded"
+        if analysis is not None and analysis.source == "degraded"
+        else "skipped"
     )
+    receipt_labels = list(application.change_labels if application else ())
+    if relationship_changed and "relationship" not in receipt_labels:
+        receipt_labels.append("relationship")
+    receipt = {
+        "state": receipt_state,
+        "memory_ids": [
+            str(memory_id) for memory_id in (application.memory_ids if application else ())
+        ],
+        "moment_id": str(application.moment_id) if application and application.moment_id else None,
+        "change_labels": receipt_labels,
+    }
+    assistant_message.metadata_json = {
+        **(assistant_message.metadata_json or {}),
+        "continuity_receipt": receipt,
+    }
     _merge_payload(
         job,
         {
             "result": "chat_postprocess_complete",
-            "journal_id": str(journal.id) if journal is not None else None,
+            "journal_id": (
+                str(application.moment_id)
+                if application is not None and application.moment_id is not None
+                else str(journal.id)
+                if journal is not None
+                else None
+            ),
+            "continuity": continuity_result.safe_metadata(),
+            "cognition_source": analysis.source if analysis is not None else "deterministic",
+            "cognition_failure": analysis.failure_code if analysis is not None else None,
+            "cognition_usage": _safe_token_usage(analysis.usage if analysis is not None else None),
+            "continuity_receipt": receipt,
         },
     )
 
@@ -353,7 +471,8 @@ async def _process_claimed_job(
     settings: Settings,
 ) -> None:
     try:
-        await _run_job(session, job, settings)
+        async with session.begin_nested():
+            await _run_job(session, job, settings)
         await mark_job_done(session, job)
     except ScheduledJobDeferred as exc:
         payload = job.payload_json if isinstance(job.payload_json, dict) else {}
@@ -370,6 +489,7 @@ async def _process_claimed_job(
         )
         await mark_job_deferred(session, job, run_at=exc.run_at)
     except ValueError as exc:
+        await _mark_post_chat_receipt_degraded(session, job)
         await mark_job_failed(session, job, str(exc))
     except Exception:  # noqa: BLE001 - failed job rows need safe, deterministic state
         logger.warning("Scheduled job %s failed unexpectedly.", job.id)
@@ -382,7 +502,31 @@ async def _process_claimed_job(
                 run_at=utc_now() + timedelta(seconds=retry_delay),
             )
         else:
+            await _mark_post_chat_receipt_degraded(session, job)
             await mark_job_failed(session, job, "Job failed during execution.")
+
+
+async def _mark_post_chat_receipt_degraded(
+    session: AsyncSession,
+    job: ScheduledJob,
+) -> None:
+    if job.job_type != "chat_postprocess":
+        return
+    receipt = {
+        "state": "degraded",
+        "memory_ids": [],
+        "moment_id": None,
+        "change_labels": [],
+    }
+    _merge_payload(job, {"continuity_receipt": receipt})
+    try:
+        assistant_message = await _assistant_from_job(session, job)
+    except ValueError:
+        return
+    assistant_message.metadata_json = {
+        **(assistant_message.metadata_json or {}),
+        "continuity_receipt": receipt,
+    }
 
 
 async def _run_relationship_decay_job(session: AsyncSession, job: ScheduledJob) -> None:
@@ -470,6 +614,93 @@ async def _memory_extract_messages(session: AsyncSession, job: ScheduledJob) -> 
     return list(reversed(result.scalars().all()))
 
 
+async def _assistant_from_job(session: AsyncSession, job: ScheduledJob) -> Message:
+    value = (job.payload_json or {}).get("assistant_message_id")
+    try:
+        assistant_message_id = uuid.UUID(str(value))
+    except ValueError as exc:
+        raise ValueError("Post-chat job is missing a valid assistant message.") from exc
+    conversation_id = _conversation_id(job)
+    result = await session.execute(
+        select(Message).where(
+            Message.id == assistant_message_id,
+            Message.conversation_id == conversation_id,
+            Message.role == "assistant",
+        )
+    )
+    message = result.scalar_one_or_none()
+    if message is None:
+        raise ValueError("Assistant message for post-chat cognition was not found.")
+    return message
+
+
+async def _recent_cognition_messages(
+    session: AsyncSession,
+    *,
+    conversation_id: uuid.UUID,
+    source_message: Message,
+) -> list[Message]:
+    result = await session.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.created_at <= source_message.created_at,
+            Message.role.in_(("user", "assistant")),
+        )
+        .order_by(desc(Message.created_at))
+        .limit(8)
+    )
+    return [
+        message for message in reversed(result.scalars().all()) if not message_is_private(message)
+    ]
+
+
+async def _selected_cognition_memories(
+    session: AsyncSession,
+    *,
+    source_message: Message,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    scope: str,
+) -> list[MemoryItem]:
+    manifest = (source_message.metadata_json or {}).get("_prompt_context")
+    raw_items = manifest.get("memory_items") if isinstance(manifest, dict) else None
+    selected_ids: list[uuid.UUID] = []
+    if isinstance(raw_items, list):
+        for item in raw_items[:12]:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("id")
+            try:
+                selected_ids.append(uuid.UUID(str(value)))
+            except ValueError:
+                continue
+    if not selected_ids:
+        return []
+    readable_scopes = ("general", "adult") if scope == "adult" else ("general",)
+    result = await session.execute(
+        select(MemoryItem).where(
+            MemoryItem.id.in_(selected_ids),
+            MemoryItem.user_id == user_id,
+            MemoryItem.character_id == character_id,
+            MemoryItem.scope.in_(readable_scopes),
+            MemoryItem.forgotten_at.is_(None),
+        )
+    )
+    by_id = {memory.id: memory for memory in result.scalars().all()}
+    return [by_id[memory_id] for memory_id in selected_ids if memory_id in by_id]
+
+
+def _safe_token_usage(usage) -> dict[str, int | None]:
+    if usage is None:
+        return {"input_tokens": None, "output_tokens": None, "total_tokens": None}
+    return {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+    }
+
+
 async def _message_from_job(session: AsyncSession, job: ScheduledJob) -> Message:
     message_id = _message_id(job)
     conversation_id = _conversation_id(job)
@@ -524,6 +755,15 @@ def _bool_payload(value: object, *, default: bool) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return default
+
+
+def _optional_uuid(value: object) -> uuid.UUID | None:
+    if value is None:
+        return None
+    try:
+        return uuid.UUID(str(value))
+    except ValueError:
+        return None
 
 
 def _increment_count(counts: dict[str, int], key: str | None) -> None:

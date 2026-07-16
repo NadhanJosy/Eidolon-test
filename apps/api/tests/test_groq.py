@@ -70,6 +70,51 @@ async def test_groq_non_streaming_uses_server_side_chat_completions_contract() -
     assert generation.usage == TokenUsage(42, 4, 46)
 
 
+async def test_groq_structured_generation_uses_strict_bounded_schema() -> None:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"decision": {"type": "string"}},
+        "required": ["decision"],
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["temperature"] == 0.1
+        assert payload["max_completion_tokens"] == 321
+        assert payload["reasoning_effort"] == "low"
+        assert payload["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "test_decision",
+                "strict": True,
+                "schema": schema,
+            },
+        }
+        return httpx.Response(
+            200,
+            json={
+                "model": MODEL,
+                "choices": [
+                    {"message": {"content": '{"decision":"keep"}'}, "finish_reason": "stop"}
+                ],
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        generation = await provider(client).generate_structured(
+            "private cognition prompt",
+            schema_name="test_decision",
+            schema=schema,
+            max_output_tokens=321,
+        )
+    finally:
+        await client.aclose()
+
+    assert generation.content == '{"decision":"keep"}'
+
+
 async def test_groq_stream_parser_emits_text_finish_reason_and_usage() -> None:
     async def handler(_: httpx.Request) -> httpx.Response:
         body = "".join(
@@ -343,6 +388,17 @@ class _StubProvider:
             raise self.failure
         return LLMGeneration("fallback", self.name, self.model, "stop")
 
+    async def generate_structured(
+        self,
+        _: str,
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        max_output_tokens: int,
+    ) -> LLMGeneration:
+        del schema_name, schema, max_output_tokens
+        return await self.generate("")
+
     async def stream(self, _: str):
         self.calls += 1
         for event in self.events:
@@ -395,3 +451,24 @@ async def test_configured_fallback_never_replaces_partial_live_output() -> None:
 
     assert collected == ["partial"]
     assert fallback.calls == 0
+
+
+async def test_configured_fallback_covers_structured_cognition_before_output() -> None:
+    primary = _StubProvider(
+        "groq",
+        "primary",
+        failure=LLMProviderUnavailable(failure_type="provider_unavailable"),
+    )
+    fallback = _StubProvider("groq", "fallback")
+    provider_with_fallback = FallbackLLMProvider(primary, fallback)
+
+    generation = await provider_with_fallback.generate_structured(
+        "prompt",
+        schema_name="test_schema",
+        schema={"type": "object"},
+        max_output_tokens=128,
+    )
+
+    assert generation.content == "fallback"
+    assert primary.calls == 1
+    assert fallback.calls == 1
