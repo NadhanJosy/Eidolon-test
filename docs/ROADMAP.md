@@ -35,8 +35,10 @@ more surface area.
      API/database is worth its operational and cost overhead
 
 4. Product polish
-   - continue mobile and keyboard accessibility review
-   - improve concise failure/retry guidance
+   - add deterministic browser smoke coverage for authenticated mobile and
+     desktop journeys, responsive layout, keyboard focus, and scroll restoration
+   - add visual-regression and screen-reader checks around the design system,
+     onboarding dialog, chat composer, and destructive confirmations
    - build a consented SFW evaluation set for cognition precision/recall,
      correction accuracy, moment worthiness, and natural callback quality
    - tune prompt budgets and repetitive-response checks from real SFW evidence

@@ -5,20 +5,27 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#090908",
-        panel: "#121210",
-        line: "#302d28",
-        paper: "#f3eee5",
-        ember: "#c68c5b",
-        moss: "#9b9b78",
-        tide: "#a97a62"
+        ink: "var(--color-canvas)",
+        panel: "var(--color-surface)",
+        line: "var(--color-border)",
+        paper: "var(--color-text)",
+        ember: "var(--color-accent)",
+        moss: "var(--color-success)",
+        tide: "var(--color-accent-deep)"
       },
       boxShadow: {
-        veil: "0 28px 80px rgba(0, 0, 0, 0.42)",
+        veil: "var(--shadow-overlay)",
         ember: "0 18px 56px rgba(122, 73, 50, 0.16)"
       },
       letterSpacing: {
         editorial: "0.18em"
+      },
+      maxWidth: {
+        chat: "var(--measure-chat)",
+        copy: "var(--measure-copy)"
+      },
+      transitionTimingFunction: {
+        arrive: "var(--ease-arrive)"
       }
     }
   },

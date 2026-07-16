@@ -68,7 +68,7 @@ export function SettingsExperience({
   onExport: () => Promise<boolean>;
   onClearMessages: () => Promise<boolean>;
   onClearMemories: () => Promise<boolean>;
-  onClearAdultContinuity: () => Promise<boolean>;
+  onClearAdultContinuity: () => void;
   onDeleteConversation: () => Promise<boolean>;
   onDeleteAccount: (password: string, confirmation: string) => Promise<boolean>;
   onLogout: () => void;
@@ -104,9 +104,16 @@ export function SettingsExperience({
 }
 
 function CompanionSettings({ draft, saving, update, onSave }: SettingsFormProps) {
+  const themes = [
+    { id: "ember", label: "Ember", color: "bg-[#9b5e46]" },
+    { id: "cedar", label: "Cedar", color: "bg-[#777355]" },
+    { id: "rain", label: "Rain", color: "bg-[#53696c]" },
+    { id: "plum", label: "Plum", color: "bg-[#76586a]" }
+  ];
   return (
     <SettingsPanel eyebrow="Companion" title="Their presence" description="These details guide a point of view and a way of speaking. They are not a script; the relationship still grows through conversation.">
       <div className="grid gap-5 sm:grid-cols-2"><Field label="Name"><input className={fieldClass} maxLength={120} onChange={(event) => update("name", event.target.value)} value={draft.name} /></Field><Field label="Relationship expectation"><input className={fieldClass} maxLength={2000} onChange={(event) => update("relationship_type", event.target.value)} value={draft.relationship_type} /></Field></div>
+      <fieldset><legend className="text-sm font-medium text-[#d8cec3]">Room tone</legend><div className="mt-3 grid grid-cols-4 gap-2">{themes.map((theme) => <button aria-pressed={draft.visual_theme === theme.id} className={`flex min-h-12 items-center gap-2 rounded-2xl border px-3 text-xs transition ${draft.visual_theme === theme.id ? "border-white/[0.22] bg-white/[0.07] text-[#e2d7cc]" : "border-white/[0.08] text-[#837b73] hover:border-white/[0.16]"}`} key={theme.id} onClick={() => update("visual_theme", theme.id)} type="button"><span className={`h-3 w-3 rounded-full ${theme.color}`} /><span className="hidden sm:inline">{theme.label}</span></button>)}</div></fieldset>
       <Field label="Appearance & impression"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("appearance", event.target.value)} value={draft.appearance} /></Field>
       <Field label="Atmosphere"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("description", event.target.value)} value={draft.description} /></Field>
       <Field label="Personality"><textarea className={`${fieldClass} min-h-32 resize-none`} maxLength={4000} onChange={(event) => update("personality_core", event.target.value)} value={draft.personality_core} /></Field>
@@ -114,6 +121,19 @@ function CompanionSettings({ draft, saving, update, onSave }: SettingsFormProps)
       <Field label="Communication style"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("speech_style", event.target.value)} value={draft.speech_style} /></Field>
       <div className="grid gap-5 sm:grid-cols-2"><Field label="Humour"><input className={fieldClass} maxLength={2000} onChange={(event) => update("humor_style", event.target.value)} value={draft.humor_style} /></Field><Field label="Interests"><input className={fieldClass} maxLength={2000} onChange={(event) => update("interests", event.target.value)} value={draft.interests} /></Field></div>
       <Field label="The greeting at the start of a new conversation"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={600} onChange={(event) => update("greeting", event.target.value)} value={draft.greeting} /></Field>
+      <details className="group rounded-[1.5rem] border border-white/[0.08] bg-white/[0.018] p-5">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4"><span><span className="block text-sm text-[#d0c5ba]">Refine their inner life</span><span className="mt-1 block text-xs text-[#756e67]">Worldview, temperament, affection, conflict, initiative, and shared context</span></span><Icon className="h-4 w-4 text-[#8f7c71] transition group-open:rotate-180" name="chevron-down" /></summary>
+        <div className="mt-6 grid gap-5 border-t border-white/[0.07] pt-6 sm:grid-cols-2">
+          <Field label="Worldview"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("worldview", event.target.value)} value={draft.worldview} /></Field>
+          <Field label="Emotional temperament"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("temperament", event.target.value)} value={draft.temperament} /></Field>
+          <Field label="How they show care"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={1600} onChange={(event) => update("affection_style", event.target.value)} value={draft.affection_style} /></Field>
+          <Field label="Conflict and repair"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={1600} onChange={(event) => update("conflict_style", event.target.value)} value={draft.conflict_style} /></Field>
+          <Field label="Initiative"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={1600} onChange={(event) => update("initiative_style", event.target.value)} value={draft.initiative_style} /></Field>
+          <Field label="Conversational habits"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={1600} onChange={(event) => update("habits", event.target.value)} value={draft.habits} /></Field>
+          <div className="sm:col-span-2"><Field label="Backstory"><textarea className={`${fieldClass} min-h-28 resize-none`} maxLength={4000} onChange={(event) => update("backstory", event.target.value)} value={draft.backstory} /></Field></div>
+          <div className="sm:col-span-2"><Field label="Usual shared atmosphere"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={4000} onChange={(event) => update("scenario_preset", event.target.value)} value={draft.scenario_preset} /></Field></div>
+        </div>
+      </details>
       <SaveRow saving={saving} onSave={onSave} />
     </SettingsPanel>
   );
@@ -141,7 +161,7 @@ function PresenceSettings({ draft, saving, update, onSave }: SettingsFormProps) 
   );
 }
 
-function PrivacySettings({ user, characterName, draft, saving, contentMode, privacyMode, adultStatus, adultReadinessState, adultModeAvailable, update, replaceDraft, onToggleAgeGate, onChangeContentMode, onSetPrivacyMode, onClearAdultContinuity, onSave }: SettingsFormProps & { user: User; characterName: string; contentMode: ContentMode; privacyMode: ConversationPrivacyMode; adultStatus: AdultStatus | null; adultReadinessState: AdultReadinessState; adultModeAvailable: boolean; replaceDraft: (draft: CharacterDraft) => void; onToggleAgeGate: () => void; onChangeContentMode: (mode: ContentMode) => void; onSetPrivacyMode: (mode: ConversationPrivacyMode) => void; onClearAdultContinuity: () => Promise<boolean> }) {
+function PrivacySettings({ user, characterName, draft, saving, contentMode, privacyMode, adultStatus, adultReadinessState, adultModeAvailable, update, replaceDraft, onToggleAgeGate, onChangeContentMode, onSetPrivacyMode, onClearAdultContinuity, onSave }: SettingsFormProps & { user: User; characterName: string; contentMode: ContentMode; privacyMode: ConversationPrivacyMode; adultStatus: AdultStatus | null; adultReadinessState: AdultReadinessState; adultModeAvailable: boolean; replaceDraft: (draft: CharacterDraft) => void; onToggleAgeGate: () => void; onChangeContentMode: (mode: ContentMode) => void; onSetPrivacyMode: (mode: ConversationPrivacyMode) => void; onClearAdultContinuity: () => void }) {
   const adultAge = Number.parseInt(draft.explicit_age, 10);
   const adultAgeReady = Number.isInteger(adultAge) && adultAge >= 18;
   const reasons = adultStatus?.reasons.filter((reason) => reason.trim()) ?? [];
@@ -166,11 +186,11 @@ function PrivacySettings({ user, characterName, draft, saving, contentMode, priv
           <Field label="How to return to calm"><textarea className={`${fieldClass} min-h-20 resize-none`} maxLength={4000} onChange={(event) => update("aftercare_style", event.target.value)} value={draft.aftercare_style} /></Field>
           <div className="py-4"><Field label="Preferred intensity"><select className={fieldClass} disabled={!draft.adult_mode_allowed} onChange={(event) => update("content_intensity", event.target.value)} value={draft.content_intensity}><option value="0">Off</option><option value="1">Tender</option><option value="2">Open</option><option value="3">Expressive</option></select></Field></div>
           <Toggle checked={draft.adult_memory_storage} disabled={!draft.adult_mode_allowed || draft.private_mode_default} detail={draft.private_mode_default ? "Private-by-default conversations never enter durable memory." : "Off by default. Intimate details can remain conversation-only."} label="Allow intimate memory" onChange={(checked) => update("adult_memory_storage", checked)} />
-          <div className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm text-[#c8bdb2]">Separate intimate continuity</p><p className="mt-1 text-xs leading-5 text-[#766f68]">{adultContinuityCount === 0 ? "Nothing is stored in the adult-only archive." : `${adultStatus?.stored_memory_count ?? 0} adult-only memories and ${adultStatus?.stored_moment_count ?? 0} private moments. They never enter everyday recall or notes later.`}</p></div><DangerButton disabled={adultContinuityCount === 0} onClick={() => void onClearAdultContinuity()}>Remove intimate continuity</DangerButton></div>
+          <div className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm text-[#c8bdb2]">Separate intimate continuity</p><p className="mt-1 text-xs leading-5 text-[#766f68]">{adultContinuityCount === 0 ? "Nothing is stored in the adult-only archive." : `${adultStatus?.stored_memory_count ?? 0} adult-only memories and ${adultStatus?.stored_moment_count ?? 0} private moments. They never enter everyday recall or notes later.`}</p></div><DangerButton disabled={adultContinuityCount === 0} onClick={onClearAdultContinuity}>Remove intimate continuity</DangerButton></div>
         </div>
         {adultReadinessState === "error" ? <p className="mt-4 rounded-xl bg-[#7e3f34]/10 p-3 text-xs leading-5 text-[#c58e82]">Readiness could not be checked, so the safe setting remains active.</p> : null}
         {reasons.length > 0 && !adultModeAvailable ? <ul className="mt-4 space-y-1 text-xs leading-5 text-[#887c73]">{reasons.map((reason) => <li className="flex gap-2" key={reason}><span aria-hidden="true">·</span><span>{humanAdultReason(reason)}</span></li>)}</ul> : null}
-        <div className="mt-6 flex flex-col gap-3 border-t border-white/[0.07] pt-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm text-[#c8bdb2]">Conversation tone</p><p className="mt-1 text-xs text-[#766f68]">Changed here, never in the main header.</p></div><div className="grid grid-cols-2 rounded-full border border-white/[0.09] p-1"><button aria-pressed={contentMode === "sfw"} className={`rounded-full px-4 py-2 text-xs ${contentMode === "sfw" ? "bg-white/[0.09] text-[#ded3c8]" : "text-[#746d66]"}`} onClick={() => onChangeContentMode("sfw")} type="button">Everyday</button><button aria-pressed={contentMode === "adult"} className={`rounded-full px-4 py-2 text-xs ${contentMode === "adult" ? "bg-[#b98265]/15 text-[#d8ab93]" : "text-[#746d66]"}`} disabled={!adultModeAvailable} onClick={() => onChangeContentMode("adult")} type="button">Adult</button></div></div>
+        <div className="mt-6 flex flex-col gap-3 border-t border-white/[0.07] pt-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm text-[#c8bdb2]">Conversation tone</p><p className="mt-1 text-xs text-[#766f68]">Changed here, never in the main header.</p></div><div className="grid grid-cols-2 rounded-full border border-white/[0.09] p-1"><button aria-pressed={contentMode === "sfw"} className={`min-h-11 rounded-full px-4 py-2 text-xs ${contentMode === "sfw" ? "bg-white/[0.09] text-[#ded3c8]" : "text-[#746d66]"}`} onClick={() => onChangeContentMode("sfw")} type="button">Everyday</button><button aria-pressed={contentMode === "adult"} className={`min-h-11 rounded-full px-4 py-2 text-xs ${contentMode === "adult" ? "bg-[#b98265]/15 text-[#d8ab93]" : "text-[#746d66]"}`} disabled={!adultModeAvailable} onClick={() => onChangeContentMode("adult")} type="button">Adult</button></div></div>
       </div>
       <SaveRow saving={saving} onSave={onSave} />
     </SettingsPanel>
@@ -198,7 +218,7 @@ function AccountSettings({ user, displayName, setDisplayName, accountActionId, s
   );
 }
 
-function SettingsTab({ active, icon, label, onClick }: { active: boolean; icon: "moon" | "settings" | "shield" | "user"; label: string; onClick: () => void }) { return <button aria-current={active ? "page" : undefined} className={`flex shrink-0 items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition lg:w-full lg:rounded-xl lg:px-4 ${active ? "bg-white/[0.075] text-[#e0d5ca]" : "text-[#807870] hover:bg-white/[0.035] hover:text-[#b7ada3]"}`} onClick={onClick} type="button"><Icon className={`h-4 w-4 shrink-0 ${active ? "text-[#b98265]" : ""}`} name={icon} /><span className="min-w-0 leading-4 lg:truncate">{label}</span></button>; }
+function SettingsTab({ active, icon, label, onClick }: { active: boolean; icon: "moon" | "settings" | "shield" | "user"; label: string; onClick: () => void }) { return <button aria-current={active ? "page" : undefined} className={`flex min-h-11 shrink-0 items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition lg:w-full lg:rounded-xl lg:px-4 ${active ? "bg-white/[0.075] text-[#e0d5ca]" : "text-[#807870] hover:bg-white/[0.035] hover:text-[#b7ada3]"}`} onClick={onClick} type="button"><Icon className={`h-4 w-4 shrink-0 ${active ? "text-[#b98265]" : ""}`} name={icon} /><span className="min-w-0 leading-4 lg:truncate">{label}</span></button>; }
 function SettingsPanel({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children: ReactNode }) { return <section className="reveal-up"><p className="text-xs uppercase tracking-[0.18em] text-[#91786b]">{eyebrow}</p><h2 className="mt-3 font-eidolon-display text-4xl">{title}</h2><p className="mt-4 max-w-2xl text-sm leading-6 text-[#8c837b]">{description}</p><div className="mt-8 space-y-6">{children}</div></section>; }
 function SettingGroup({ children }: { children: ReactNode }) { return <div className="divide-y divide-white/[0.07] rounded-[1.5rem] border border-white/[0.08] bg-white/[0.018] px-5 py-2">{children}</div>; }
 type SettingsFormProps = { draft: CharacterDraft; saving: boolean; update: <K extends keyof CharacterDraft>(field: K, value: CharacterDraft[K]) => void; onSave: () => Promise<boolean> };

@@ -802,14 +802,6 @@ export function useChatController({
     ) {
       return;
     }
-    const confirmed = window.confirm(
-      message.role === "user"
-        ? "Delete this turn and the companion reply that followed it?"
-        : "Delete this message from the current conversation?"
-    );
-    if (!confirmed) {
-      return;
-    }
     const authToken = token;
     const conversationId = activeConversation.id;
     const characterId = activeCharacterId;

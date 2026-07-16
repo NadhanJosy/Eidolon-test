@@ -53,10 +53,14 @@ The frontend is a lightweight authenticated client. It owns:
 
 - responsive navigation and presentation
 - unsaved form drafts
+- current-tab onboarding draft restoration and non-sensitive numeric scroll
+  positions
 - the in-memory access token
 - streamed partial text while a response is in progress
 - request cancellation and stale-result guards
 - runtime validation before API data enters visible React state
+- safe, code-native rendering of the supported rich-text subset; model prose is
+  never injected as HTML
 
 It does not own:
 
@@ -69,7 +73,14 @@ It does not own:
 - canonical conversation or read state
 
 The production build is static. It has no service worker and does not cache
-authenticated application data for offline use.
+authenticated application data for offline use. Session storage is limited to
+an unfinished authored companion draft and numeric conversation scroll offsets;
+the app writes only a non-sensitive onboarding-completion marker to local
+storage, while startup compatibility code removes legacy auth keys from earlier
+deployments. Access tokens, transcripts, memories, relationship state, and
+diagnostic payloads are not newly persisted by the client. The normal consumer
+shell does not fetch diagnostic payloads; the explicit guarded “invite a
+check-in” action retains its existing owner-scoped proactive POST route.
 
 ## Backend boundary
 

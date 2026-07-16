@@ -70,3 +70,29 @@ Validation:
 - Backend: 237 tests passed and the opt-in live-provider test was skipped.
 - Ruff lint and format checks passed.
 - Frontend ESLint, TypeScript, and static production build passed.
+
+## 2026-07-16 — The Eidolon experience
+
+Outcome:
+
+- Recast the static client around a reusable paper-and-ember design language,
+  responsive companion-led navigation, progressive resumable onboarding, and
+  unified premium treatments for chat, memory, relationship, moments, settings,
+  authentication, and all empty/loading/error states.
+- Made chat the centrepiece with safe rich replies and copyable code, controlled
+  streaming follow behaviour, per-thread scroll restoration, unread boundaries,
+  offline drafting, conversation-switch skeletons, and accessible confirmations.
+- Removed the obsolete dashboard/inspector component tree and stopped the normal
+  client from fetching unused diagnostic/job payloads while preserving every
+  backend-owned safety, privacy, continuity, and API contract.
+
+Validation:
+
+- Alembic upgrade passed.
+- Backend: 237 tests passed and the opt-in live-provider test was skipped.
+- Ruff lint and format checks passed.
+- Frontend ESLint, TypeScript, and static production build passed.
+- Disposable Chromium smoke checks passed at 390×844 and 1440×900 across
+  authentication, resumable onboarding, streaming chat, offline recovery,
+  confirmations, every primary view, responsive overflow, keyboard dismissal,
+  default-title continuity, and account erasure.

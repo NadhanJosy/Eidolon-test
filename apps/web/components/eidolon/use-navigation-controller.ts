@@ -56,13 +56,6 @@ type UseNavigationControllerArgs = {
   setError: (value: string | null) => void;
   setNotice: (value: string | null) => void;
   onActiveCharacterChange: (characterId: string | null) => void;
-  loadConversation: (
-    authToken: string,
-    conversationId: string,
-    signal?: AbortSignal,
-    shouldApply?: () => boolean,
-    expectedCharacterId?: string
-  ) => Promise<void>;
   refreshSideState: (
     authToken: string,
     characterId: string,
@@ -157,7 +150,6 @@ export function useNavigationController({
   setError,
   setNotice,
   onActiveCharacterChange,
-  loadConversation,
   refreshSideState
 }: UseNavigationControllerArgs) {
   const navigationVersion = useRef(0);
@@ -183,6 +175,7 @@ export function useNavigationController({
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [conversationSwitchingId, setConversationSwitchingId] = useState<string | null>(null);
   const activeConversationRef = useRef<Conversation | null>(activeConversation);
   activeConversationRef.current = activeConversation;
   const [conversationTitle, setConversationTitle] = useState("");
@@ -235,16 +228,6 @@ export function useNavigationController({
       character,
       title: conversation.title ?? ""
     };
-    await loadConversation(
-      authToken,
-      conversation.id,
-      undefined,
-      shouldApply,
-      character.id
-    );
-    if (shouldApply !== undefined && !shouldApply()) {
-      return;
-    }
     await refreshSideState(
       authToken,
       character.id,
@@ -591,6 +574,7 @@ export function useNavigationController({
       return false;
     }
     const fallback = stableNavigation.current;
+    setConversationSwitchingId(conversation.id);
     clearSearchState();
     setActiveConversation(conversation);
     setConversationTitle(conversation.title ?? "");
@@ -648,6 +632,10 @@ export function useNavigationController({
         ).catch(() => undefined);
       }
       return false;
+    } finally {
+      if (selectionVersion === navigationVersion.current) {
+        setConversationSwitchingId(null);
+      }
     }
   }
 
@@ -779,23 +767,23 @@ export function useNavigationController({
     }
   }
 
-  async function saveConversationTitle() {
-    const titleSnapshot = canonicalConversationTitle(conversationTitle);
+  async function saveConversationTitle(titleOverride?: string): Promise<boolean> {
+    const titleSnapshot = canonicalConversationTitle(titleOverride ?? conversationTitle);
     if (titleSnapshot === undefined) {
       setError(
         "Keep the conversation title to 200 characters or fewer."
       );
-      return;
+      return false;
     }
     if (activeConversation?.title === titleSnapshot) {
       setError(null);
       setConversationTitle(titleSnapshot ?? "");
       setNotice("Thread title is already saved.");
-      return;
+      return true;
     }
     const action = beginConversationMetadataMutation({ kind: "title", title: titleSnapshot });
     if (!action) {
-      return;
+      return false;
     }
     setBusy(true);
     setError(null);
@@ -804,19 +792,21 @@ export function useNavigationController({
         title: titleSnapshot
       });
       if (!updated || !conversationMetadataMutationStillApplies(action)) {
-        return;
+        return false;
       }
       const ownsActive = conversationMetadataMutationOwnsActive(action);
       mergeVerifiedMetadataSummary(action, updated, ownsActive);
       if (!ownsActive) {
-        return;
+        return true;
       }
       setConversationTitle(updated.title ?? "");
       setNotice("Thread title saved.");
+      return true;
     } catch (caught) {
       if (conversationMetadataMutationOwnsActive(action)) {
         setError(readError(caught));
       }
+      return false;
     } finally {
       finishConversationMetadataMutation(action);
     }
@@ -1356,6 +1346,7 @@ export function useNavigationController({
       return;
     }
     setActiveConversation(null);
+    setConversationSwitchingId(null);
     setConversationTitle("");
     setConversationScenarioDraft("");
     clearSearchState();
@@ -1741,6 +1732,7 @@ export function useNavigationController({
     setCharacters([]);
     setConversations([]);
     setActiveConversation(null);
+    setConversationSwitchingId(null);
     setConversationTitle("");
     setConversationScenarioDraft("");
     setScenarioSaving(false);
@@ -1939,6 +1931,7 @@ export function useNavigationController({
       characterMutating: characterActionId !== null,
       conversations,
       activeConversation,
+      conversationSwitchingId,
       conversationCreationMode,
       conversationCreating: conversationCreationMode !== null,
       provisioningCharacterId,

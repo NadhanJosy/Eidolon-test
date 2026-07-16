@@ -1,9 +1,9 @@
 "use client";
 
-import type { FormEvent } from "react";
+import { type FormEvent, useState } from "react";
 
 import type { AuthMode } from "./types";
-import { Feedback, fieldClass } from "./experience-primitives";
+import { EidolonWordmark, Feedback, fieldClass } from "./experience-primitives";
 import { Icon } from "./icons";
 
 type AuthStage = "submitting" | "opening" | null;
@@ -37,6 +37,7 @@ export function AuthScreen({
   notice: string | null;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const registering = authMode === "register";
   const actionLabel =
     authStage === "opening"
@@ -57,8 +58,7 @@ export function AuthScreen({
       <div className="relative z-10 mx-auto grid min-h-[100svh] max-w-[1440px] lg:grid-cols-[1.2fr_0.8fr]">
         <section className="safe-area-auth-top safe-area-auth-bottom hidden min-h-[100svh] flex-col justify-between border-r border-white/[0.07] px-12 lg:flex xl:px-20">
           <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-full border border-[#b98265]/25 bg-[#b98265]/10 font-eidolon-display text-lg text-[#d5aa91]">E</span>
-            <span className="font-eidolon-display text-xl">Eidolon</span>
+            <EidolonWordmark compact />
           </div>
 
           <div className="max-w-2xl pb-8">
@@ -80,8 +80,7 @@ export function AuthScreen({
         <section className="safe-area-auth-top safe-area-auth-bottom flex min-h-[100svh] items-center justify-center px-5 sm:px-10 lg:px-12">
           <div className="w-full max-w-md reveal-up">
             <div className="mb-12 flex items-center justify-center gap-3 lg:hidden">
-              <span className="grid h-10 w-10 place-items-center rounded-full border border-[#b98265]/25 bg-[#b98265]/10 font-eidolon-display text-xl text-[#d5aa91]">E</span>
-              <span className="font-eidolon-display text-2xl">Eidolon</span>
+              <EidolonWordmark />
             </div>
 
             <div>
@@ -101,7 +100,7 @@ export function AuthScreen({
             <div className="mt-9 grid grid-cols-2 rounded-full border border-white/[0.09] bg-black/20 p-1" role="group" aria-label="Account action">
               <button
                 aria-pressed={!registering}
-                className={`min-h-10 rounded-full text-sm transition ${!registering ? "bg-white/[0.09] text-[#f2e9df] shadow-sm" : "text-[#80786f] hover:text-[#c9beb2]"}`}
+                className={`min-h-11 rounded-full text-sm transition ${!registering ? "bg-white/[0.09] text-[#f2e9df] shadow-sm" : "text-[#80786f] hover:text-[#c9beb2]"}`}
                 disabled={busy}
                 onClick={() => onModeChange("login")}
                 type="button"
@@ -110,7 +109,7 @@ export function AuthScreen({
               </button>
               <button
                 aria-pressed={registering}
-                className={`min-h-10 rounded-full text-sm transition ${registering ? "bg-white/[0.09] text-[#f2e9df] shadow-sm" : "text-[#80786f] hover:text-[#c9beb2]"}`}
+                className={`min-h-11 rounded-full text-sm transition ${registering ? "bg-white/[0.09] text-[#f2e9df] shadow-sm" : "text-[#80786f] hover:text-[#c9beb2]"}`}
                 disabled={busy}
                 onClick={() => onModeChange("register")}
                 type="button"
@@ -152,18 +151,21 @@ export function AuthScreen({
               </label>
               <label className="block">
                 <span className="text-sm text-[#cfc4b8]">Password</span>
-                <input
-                  autoComplete={registering ? "new-password" : "current-password"}
-                  className={`${fieldClass} mt-2`}
-                  disabled={busy}
-                  maxLength={256}
-                  minLength={registering ? 12 : 1}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder={registering ? "At least 12 characters" : "Your password"}
-                  required
-                  type="password"
-                  value={password}
-                />
+                <span className="relative mt-2 block">
+                  <input
+                    autoComplete={registering ? "new-password" : "current-password"}
+                    className={`${fieldClass} pr-16`}
+                    disabled={busy}
+                    maxLength={256}
+                    minLength={registering ? 12 : 1}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder={registering ? "At least 12 characters" : "Your password"}
+                    required
+                    type={passwordVisible ? "text" : "password"}
+                    value={password}
+                  />
+                  <button aria-pressed={passwordVisible} className="absolute inset-y-0 right-1 min-w-14 rounded-xl text-xs text-[#8f857c] transition hover:text-[#d5c9bd]" disabled={busy} onClick={() => setPasswordVisible((visible) => !visible)} type="button">{passwordVisible ? "Hide" : "Show"}</button>
+                </span>
               </label>
 
               <Feedback error={error} notice={notice} />

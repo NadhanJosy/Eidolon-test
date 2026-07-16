@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AuthScreen } from "./eidolon/auth-screen";
 import { authoredCharacterDraft } from "./eidolon/character-builder-model";
 import { ChatSurface } from "./eidolon/chat-surface";
 import { relationshipPhase } from "./eidolon/cognition";
+import {
+  ConfirmationDialog,
+  type ConfirmationRequest
+} from "./eidolon/confirmation-dialog";
 import {
   characterMemoryCapturePolicy,
   characterScenarioPreset,
@@ -14,14 +18,27 @@ import {
   memorySourceMessageIds
 } from "./eidolon/controller-utils";
 import { ConversationLibrary } from "./eidolon/conversation-library";
-import { CompanionPortrait, Feedback } from "./eidolon/experience-primitives";
+import {
+  CompanionPortrait,
+  EidolonWordmark,
+  Feedback
+} from "./eidolon/experience-primitives";
 import { Icon, type IconName } from "./eidolon/icons";
 import { MemoryArchive } from "./eidolon/memory-archive";
 import { MomentsJournal } from "./eidolon/moments-journal";
 import { OnboardingExperience } from "./eidolon/onboarding-experience";
 import { RelationshipExperience } from "./eidolon/relationship-experience";
 import { SettingsExperience } from "./eidolon/settings-experience";
-import type { Character, CharacterDraft, Conversation, Message } from "./eidolon/types";
+import type {
+  Character,
+  CharacterDraft,
+  ContinuityThread,
+  Conversation,
+  ConversationPrivacyMode,
+  Journal,
+  MemoryItem,
+  Message
+} from "./eidolon/types";
 import { useEidolonController } from "./eidolon/use-eidolon-controller";
 
 type AppView = "chat" | "memories" | "relationship" | "moments" | "settings";
@@ -38,8 +55,16 @@ export function EidolonApp() {
   const { state, actions } = useEidolonController();
   const [view, setView] = useState<AppView>("chat");
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [librarySelectionBusy, setLibrarySelectionBusy] = useState(false);
   const [completedOnboardingKey, setCompletedOnboardingKey] = useState<string | null>(null);
   const [creatingCompanion, setCreatingCompanion] = useState(false);
+  const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
+  const [unreadEntry, setUnreadEntry] = useState<{
+    conversationId: string;
+    after: string;
+  } | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const viewScrollPositions = useRef<Partial<Record<AppView, number>>>({});
   const onboardingStorageKey =
     state.user && state.activeCharacter && state.activeConversation
       ? `eidolon:onboarding:${state.user.id}:${state.activeCharacter.id}`
@@ -56,6 +81,15 @@ export function EidolonApp() {
       : null;
 
   const closeLibrary = useCallback(() => setLibraryOpen(false), []);
+
+  useEffect(() => {
+    if (view === "chat") return;
+    const frame = window.requestAnimationFrame(() => {
+      const scroller = contentScrollRef.current;
+      if (scroller) scroller.scrollTop = viewScrollPositions.current[view] ?? 0;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [view]);
 
   if (!state.sessionReady) {
     return <SessionOpening />;
@@ -84,6 +118,11 @@ export function EidolonApp() {
   const currentUser = state.user;
   const characterName = state.activeCharacter?.name ?? "Eidolon";
   const rememberedMessageIds = state.memories.flatMap(memorySourceMessageIds);
+  const experienceError = state.error ?? state.sideStateError;
+  const activeUnreadAfter =
+    unreadEntry && unreadEntry.conversationId === state.activeConversation?.id
+      ? unreadEntry.after
+      : null;
   const interactionBusy =
     state.busy ||
     state.sending ||
@@ -93,6 +132,7 @@ export function EidolonApp() {
     state.conversationCreating ||
     state.conversationProvisioning ||
     state.conversationDeleting ||
+    state.conversationSwitchingId !== null ||
     state.memoryMutating ||
     state.journalMutating ||
     state.threadMutating ||
@@ -100,26 +140,64 @@ export function EidolonApp() {
     state.conversationMutating;
 
   function navigate(nextView: AppView) {
+    if (view !== "chat" && contentScrollRef.current) {
+      viewScrollPositions.current[view] = contentScrollRef.current.scrollTop;
+    }
     setView(nextView);
     setLibraryOpen(false);
   }
 
   async function openCharacter(character: Character) {
-    if (await actions.selectCharacter(character)) {
-      setView("chat");
-      setLibraryOpen(false);
+    if (librarySelectionBusy) return;
+    const knownConversation = state.conversations.find(
+      (conversation) => conversation.character_id === character.id
+    );
+    const unread =
+      knownConversation && knownConversation.unread_count > 0
+        ? {
+            conversationId: knownConversation.id,
+            after: knownConversation.last_read_at
+          }
+        : null;
+    const previousUnreadEntry = unreadEntry;
+    setUnreadEntry(unread);
+    setLibrarySelectionBusy(true);
+    try {
+      if (await actions.selectCharacter(character)) {
+        setView("chat");
+        setLibraryOpen(false);
+      } else {
+        setUnreadEntry(previousUnreadEntry);
+      }
+    } finally {
+      setLibrarySelectionBusy(false);
     }
   }
 
   async function openConversation(conversation: Conversation) {
-    if (await actions.selectConversation(conversation)) {
-      setView("chat");
-      setLibraryOpen(false);
+    if (librarySelectionBusy) return;
+    const unread =
+      conversation.unread_count > 0
+        ? { conversationId: conversation.id, after: conversation.last_read_at }
+        : null;
+    const previousUnreadEntry = unreadEntry;
+    setUnreadEntry(unread);
+    setLibrarySelectionBusy(true);
+    try {
+      if (await actions.selectConversation(conversation)) {
+        setView("chat");
+        setLibraryOpen(false);
+      } else {
+        setUnreadEntry(previousUnreadEntry);
+      }
+    } finally {
+      setLibrarySelectionBusy(false);
     }
   }
 
   async function createConversation() {
     if (await actions.createConversationForCurrentCharacter("normal")) {
+      setUnreadEntry(null);
       setView("chat");
       setLibraryOpen(false);
     }
@@ -131,6 +209,7 @@ export function EidolonApp() {
     }
     setView("chat");
     setLibraryOpen(false);
+    setUnreadEntry(null);
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         const target = document.getElementById(`message-${message.id}`);
@@ -143,9 +222,24 @@ export function EidolonApp() {
   }
 
   async function completeOnboarding(draft: CharacterDraft) {
+    const previousName = state.activeCharacter?.name.trim() || "Eidolon";
+    const currentTitle = state.activeConversation?.title?.trim() ?? "";
+    const shouldRefreshDefaultTitle =
+      !currentTitle ||
+      currentTitle === "Chat with Eidolon" ||
+      currentTitle === `Chat with ${previousName}`;
     const ok = await actions.saveCharacter(draft);
     if (!ok) {
       return { ok: false, error: "Those details could not be saved yet. Everything you wrote is still here." };
+    }
+    if (
+      shouldRefreshDefaultTitle &&
+      !(await actions.saveConversationTitle(`Chat with ${draft.name.trim()}`))
+    ) {
+      return {
+        ok: false,
+        error: `${draft.name.trim()} is saved, but the opening conversation title could not be refreshed. Try once more.`
+      };
     }
     if (onboardingKey) {
       window.localStorage.setItem(onboardingKey, "complete");
@@ -171,17 +265,73 @@ export function EidolonApp() {
       ? state.activeCharacter.boundaries_json.visual_theme
       : "ember";
 
+  function confirmMessageDeletion(message: Message) {
+    setConfirmation({
+      title: message.role === "user" ? "Remove this turn?" : "Remove this reply?",
+      detail:
+        message.role === "user"
+          ? "Your message, the companion reply that followed it, and continuity grounded in that turn will be removed."
+          : "This reply will leave the conversation. Any continuity grounded in it will be reconciled by Eidolon.",
+      actionLabel: message.role === "user" ? "Remove turn" : "Remove reply",
+      onConfirm: () => actions.deleteMessage(message)
+    });
+  }
+
+  function confirmMemoryDeletion(memory: MemoryItem) {
+    setConfirmation({
+      title: "Release this memory?",
+      detail: "It will be removed permanently from this companion’s continuity and cannot be restored.",
+      actionLabel: "Release memory",
+      onConfirm: () => actions.deleteMemory(memory)
+    });
+  }
+
+  function confirmJournalDeletion(journal: Journal) {
+    setConfirmation({
+      title: "Remove this reflection?",
+      detail: "This reflection will leave your shared journal permanently.",
+      actionLabel: "Remove reflection",
+      onConfirm: () => actions.deleteJournal(journal)
+    });
+  }
+
+  function confirmThreadDeletion(thread: ContinuityThread) {
+    setConfirmation({
+      title: "Release this thread?",
+      detail: "It will no longer appear in your shared continuity and cannot be reopened.",
+      actionLabel: "Release thread",
+      onConfirm: () => actions.deleteContinuityThread(thread)
+    });
+  }
+
+  function confirmAdultContinuityDeletion() {
+    setConfirmation({
+      title: "Remove intimate continuity?",
+      detail: "Every adult-only memory and private moment for this companion will be erased. Your conversation messages will remain.",
+      actionLabel: "Remove continuity",
+      onConfirm: actions.clearAdultContinuity
+    });
+  }
+
   return (
     <main
       className="eidolon-room relative h-[100dvh] overflow-hidden text-[#f3eee5]"
       data-companion-theme={companionTheme}
     >
       <div className="relative z-10 flex h-full min-h-0">
-        <DesktopNavigation active={view} onNavigate={navigate} />
+        <DesktopNavigation
+          active={view}
+          characterName={characterName}
+          theme={state.characterDraft.visual_theme}
+          onNavigate={navigate}
+          onOpenLibrary={() => setLibraryOpen(true)}
+        />
 
         <div className="flex min-w-0 flex-1 flex-col">
           <CompanionHeader
             characterName={characterName}
+            conversationTitle={state.activeConversation?.title}
+            privacyMode={state.activeConversationPrivacyMode}
             theme={state.characterDraft.visual_theme}
             relationshipLabel={relationshipLabel(state.relationship ? relationshipPhase(state.relationship) : "new connection")}
             unreadCount={state.conversations.reduce((total, conversation) => total + conversation.unread_count, 0)}
@@ -195,14 +345,17 @@ export function EidolonApp() {
                 character={state.activeCharacter}
                 characterScenario={characterScenarioPreset(state.activeCharacter)}
                 contentMode={state.contentMode}
+                conversationId={state.activeConversation?.id ?? null}
                 continuityThreads={state.continuityThreads}
                 draft={state.messageDraft}
                 editableTitle={state.conversationTitle}
                 editingMessageId={state.editingMessageId}
-                error={state.error}
+                error={experienceError}
                 failedTurn={state.failedTurn}
                 memoryCapturePolicy={characterMemoryCapturePolicy(state.activeCharacter)}
                 messages={state.sortedMessages}
+                loading={state.conversationSwitchingId === state.activeConversation?.id}
+                unreadAfter={activeUnreadAfter}
                 notice={state.notice}
                 pendingOutgoingContent={state.pendingOutgoingContent}
                 privateTurn={state.privateTurn}
@@ -224,11 +377,11 @@ export function EidolonApp() {
                 setThreadDraft={actions.setThreadDraft}
                 onAddContinuityThread={actions.addContinuityThread}
                 onCancelEdit={actions.cancelEditMessage}
-                onDelete={actions.deleteMessage}
+                onDelete={confirmMessageDeletion}
                 onEdit={actions.startEditMessage}
                 onOpenMemories={() => navigate("memories")}
                 onQueueProactive={actions.queueProactive}
-                onDeleteContinuityThread={actions.deleteContinuityThread}
+                onDeleteContinuityThread={confirmThreadDeletion}
                 onReopenContinuityThread={actions.reopenContinuityThread}
                 onRemember={actions.rememberMessage}
                 onResolveContinuityThread={actions.resolveContinuityThread}
@@ -240,11 +393,12 @@ export function EidolonApp() {
                 onSubmit={actions.sendMessage}
                 onRetryFailed={actions.retryFailedTurn}
                 onStop={actions.stopResponse}
+                onUnreadSeen={() => setUnreadEntry(null)}
               />
             ) : null}
 
             {view !== "chat" ? (
-              <div className="h-full overflow-y-auto overscroll-contain">
+              <div className="h-full overflow-y-auto overscroll-contain" ref={contentScrollRef}>
                 {view === "memories" ? (
                   <MemoryArchive
                     characterName={characterName}
@@ -267,7 +421,7 @@ export function EidolonApp() {
                     setMemoryType={actions.setMemoryType}
                     onAdd={actions.addMemory}
                     onChangeView={actions.changeMemoryView}
-                    onDelete={actions.deleteMemory}
+                    onDelete={confirmMemoryDeletion}
                     onForget={actions.forgetMemories}
                     onForgetMemory={actions.forgetMemory}
                     onResolveConflict={actions.resolveMemoryConflict}
@@ -285,7 +439,7 @@ export function EidolonApp() {
                     relationship={state.relationship}
                     threads={state.continuityThreads}
                     timeline={state.timeline}
-                    onDelete={actions.deleteContinuityThread}
+                    onDelete={confirmThreadDeletion}
                     onReopen={actions.reopenContinuityThread}
                     onResolve={actions.resolveContinuityThread}
                     onReturn={(thread) => {
@@ -310,7 +464,7 @@ export function EidolonApp() {
                     title={state.journalTitle}
                     onAdd={actions.addJournal}
                     onCancelEdit={actions.cancelJournalEdit}
-                    onDelete={actions.deleteJournal}
+                    onDelete={confirmJournalDeletion}
                     onSaveEdit={actions.saveJournalEdit}
                     onStartEdit={actions.startJournalEdit}
                   />
@@ -337,7 +491,7 @@ export function EidolonApp() {
                     user={currentUser}
                     onChangeContentMode={(mode) => { actions.changeContentMode(mode); }}
                     onClearMemories={actions.clearMemories}
-                    onClearAdultContinuity={actions.clearAdultContinuity}
+                    onClearAdultContinuity={confirmAdultContinuityDeletion}
                     onClearMessages={actions.clearConversationMessages}
                     onDeleteAccount={actions.deleteAccount}
                     onDeleteConversation={actions.deleteActiveConversation}
@@ -350,7 +504,7 @@ export function EidolonApp() {
                   />
                 ) : null}
                 <div className="fixed bottom-24 left-1/2 z-50 w-[min(92vw,34rem)] -translate-x-1/2 lg:bottom-6">
-                  <Feedback error={state.error} notice={state.notice} />
+                  <Feedback error={experienceError} notice={state.notice} />
                 </div>
               </div>
             ) : null}
@@ -363,7 +517,7 @@ export function EidolonApp() {
       <ConversationLibrary
         activeCharacter={state.activeCharacter}
         activeConversation={state.activeConversation}
-        busy={interactionBusy}
+        busy={interactionBusy || librarySelectionBusy}
         characters={state.characters}
         conversations={state.conversations}
         creating={state.conversationCreating}
@@ -383,42 +537,67 @@ export function EidolonApp() {
       />
 
       {onboardingKey && state.activeCharacter ? (
-        <OnboardingExperience initialDraft={state.characterDraft} userName={currentUser.display_name ?? "you"} onComplete={completeOnboarding} />
+        <OnboardingExperience
+          initialDraft={state.characterDraft}
+          storageKey={`eidolon:onboarding-draft:${currentUser.id}:${state.activeCharacter.id}`}
+          userName={currentUser.display_name ?? "you"}
+          onComplete={completeOnboarding}
+        />
       ) : null}
 
       {creatingCompanion ? (
-        <OnboardingExperience creatingAnother initialDraft={authoredCharacterDraft()} userName={currentUser.display_name ?? "you"} onClose={() => setCreatingCompanion(false)} onComplete={completeNewCompanion} />
+        <OnboardingExperience
+          creatingAnother
+          initialDraft={authoredCharacterDraft()}
+          storageKey={`eidolon:onboarding-draft:${currentUser.id}:new`}
+          userName={currentUser.display_name ?? "you"}
+          onClose={() => setCreatingCompanion(false)}
+          onComplete={completeNewCompanion}
+        />
       ) : null}
+
+      <ConfirmationDialog request={confirmation} onClose={() => setConfirmation(null)} />
     </main>
   );
 }
 
-function CompanionHeader({ characterName, theme, relationshipLabel, unreadCount, onOpenLibrary }: { characterName: string; theme: string; relationshipLabel: string; unreadCount: number; onOpenLibrary: () => void }) {
+function CompanionHeader({ characterName, conversationTitle, privacyMode, theme, relationshipLabel, unreadCount, onOpenLibrary }: { characterName: string; conversationTitle: string | null | undefined; privacyMode: ConversationPrivacyMode; theme: string; relationshipLabel: string; unreadCount: number; onOpenLibrary: () => void }) {
   return (
-    <header className="safe-area-header relative z-40 flex min-h-[4.6rem] items-center justify-between gap-4 border-b border-white/[0.07] bg-[#0b0a09]/82 px-4 backdrop-blur-2xl sm:px-6 lg:px-8">
-      <button className="group flex min-w-0 items-center gap-3 rounded-full pr-3 text-left transition hover:bg-white/[0.035]" onClick={onOpenLibrary} type="button">
+    <header className="safe-area-header relative z-40 flex min-h-[4.75rem] items-center justify-between gap-4 border-b border-white/[0.07] bg-[#0b0a09]/88 px-4 backdrop-blur-2xl sm:px-6 lg:px-8">
+      <button aria-label={`Open conversations with ${characterName}`} className="group flex min-h-11 min-w-0 items-center gap-3 rounded-2xl pr-3 text-left transition hover:bg-white/[0.035]" onClick={onOpenLibrary} type="button">
         <CompanionPortrait name={characterName} size="small" theme={theme} />
-        <span className="min-w-0"><span className="flex items-center gap-2"><span className="truncate font-eidolon-display text-xl text-[#eee5dc]">{characterName}</span><Icon className="h-3.5 w-3.5 text-[#756c64] transition group-hover:text-[#a88a79]" name="chevron-down" /></span><span className="block truncate text-[0.65rem] text-[#776f67]">{relationshipLabel}</span></span>
+        <span className="min-w-0"><span className="flex items-center gap-2"><span className="truncate font-eidolon-display text-xl text-[#eee5dc]">{characterName}</span><Icon className="h-3.5 w-3.5 text-[#847b72] transition group-hover:text-[#ba907a]" name="chevron-down" /></span><span className="block max-w-[55vw] truncate text-[0.68rem] text-[#8b8279] sm:max-w-sm">{conversationTitle?.trim() || relationshipLabel}{privacyMode === "private" ? " · Private" : ""}</span></span>
       </button>
-      <button className="relative flex min-h-10 items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.025] px-3 text-xs text-[#91887f] transition hover:border-white/[0.16] hover:text-[#c7bcb1]" onClick={onOpenLibrary} type="button"><Icon className="h-4 w-4" name="archive" /><span className="hidden sm:inline">Past conversations</span>{unreadCount > 0 ? <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#a96f54] px-1 text-[0.58rem] font-semibold text-[#190f0b]">{unreadCount > 9 ? "9+" : unreadCount}</span> : null}</button>
+      <button className="relative flex min-h-11 items-center gap-2 rounded-full border border-white/[0.09] bg-white/[0.025] px-3 text-xs text-[#9b9187] transition hover:border-white/[0.18] hover:text-[#d4c8bd]" onClick={onOpenLibrary} type="button"><Icon className="h-4 w-4" name="archive" /><span className="hidden sm:inline">Shared history</span>{unreadCount > 0 ? <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#bd8163] px-1 text-[0.58rem] font-semibold text-[#190f0b]">{unreadCount > 9 ? "9+" : unreadCount}</span> : null}</button>
     </header>
   );
 }
 
-function DesktopNavigation({ active, onNavigate }: { active: AppView; onNavigate: (view: AppView) => void }) {
-  return <aside className="hidden w-[5.25rem] shrink-0 flex-col items-center border-r border-white/[0.07] bg-[#0b0a09]/75 py-5 backdrop-blur-xl lg:flex"><div className="grid h-10 w-10 place-items-center rounded-full border border-[#b98265]/25 bg-[#b98265]/[0.08] font-eidolon-display text-lg text-[#d1a087]">E</div><nav aria-label="Primary" className="mt-auto mb-auto space-y-3">{destinations.map((item) => <NavigationButton active={active === item.id} icon={item.icon} key={item.id} label={item.label} onClick={() => onNavigate(item.id)} />)}</nav><span className="text-[0.58rem] uppercase tracking-[0.2em] text-[#57524d] [writing-mode:vertical-rl]">Private companion</span></aside>;
+function DesktopNavigation({ active, characterName, theme, onNavigate, onOpenLibrary }: { active: AppView; characterName: string; theme: string; onNavigate: (view: AppView) => void; onOpenLibrary: () => void }) {
+  return (
+    <aside className="hidden w-[5.5rem] shrink-0 flex-col border-r border-white/[0.07] bg-[#0b0a09]/78 px-3 py-5 backdrop-blur-xl lg:flex xl:w-[16rem] xl:px-4">
+      <div className="w-10 overflow-hidden xl:w-full"><EidolonWordmark compact /></div>
+      <nav aria-label="Primary" className="my-auto space-y-2">
+        {destinations.map((item) => <NavigationButton active={active === item.id} icon={item.icon} key={item.id} label={item.label} onClick={() => onNavigate(item.id)} />)}
+      </nav>
+      <button className="flex min-h-12 items-center justify-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-1.5 text-left transition hover:border-white/[0.14] hover:bg-white/[0.04] xl:justify-start xl:p-2" onClick={onOpenLibrary} type="button">
+        <CompanionPortrait name={characterName} quiet size="small" theme={theme} />
+        <span className="hidden min-w-0 xl:block"><span className="block truncate text-sm text-[#d4c9bf]">{characterName}</span><span className="mt-0.5 block text-[0.65rem] text-[#817970]">Switch companion or chapter</span></span>
+      </button>
+    </aside>
+  );
 }
 
 function NavigationButton({ active, icon, label, onClick }: { active: boolean; icon: IconName; label: string; onClick: () => void }) {
-  return <button aria-current={active ? "page" : undefined} aria-label={label} className={`group relative grid h-11 w-11 place-items-center rounded-full transition ${active ? "bg-[#b98265]/[0.12] text-[#d2a088]" : "text-[#6f6861] hover:bg-white/[0.04] hover:text-[#b7ada3]"}`} onClick={onClick} title={label} type="button"><Icon className="h-[1.15rem] w-[1.15rem]" name={icon} />{active ? <span className="absolute -left-[1.3rem] h-5 w-0.5 rounded-full bg-[#b98265]" /> : null}<span className="pointer-events-none absolute left-14 z-50 hidden whitespace-nowrap rounded-lg border border-white/[0.08] bg-[#171512] px-2.5 py-1.5 text-[0.68rem] text-[#b7ada3] shadow-xl group-hover:block">{label}</span></button>;
+  return <button aria-current={active ? "page" : undefined} aria-label={label} className={`group relative flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl px-3 transition xl:justify-start ${active ? "bg-[color:var(--color-accent)]/[0.11] text-[color:var(--color-accent-soft)]" : "text-[#817970] hover:bg-white/[0.04] hover:text-[#c1b6ab]"}`} onClick={onClick} title={label} type="button"><Icon className="h-[1.1rem] w-[1.1rem] shrink-0" name={icon} /><span className="hidden text-sm xl:block">{label}</span>{active ? <span className="absolute -left-3 h-6 w-0.5 rounded-full bg-[color:var(--color-accent)] xl:-left-4" /> : null}<span className="pointer-events-none absolute left-14 z-50 hidden whitespace-nowrap rounded-xl border border-white/[0.08] bg-[#171512] px-2.5 py-1.5 text-[0.68rem] text-[#c4b9ae] shadow-xl group-hover:block xl:hidden">{label}</span></button>;
 }
 
 function MobileNavigation({ active, onNavigate }: { active: AppView; onNavigate: (view: AppView) => void }) {
-  return <nav aria-label="Primary" className="safe-area-nav fixed inset-x-0 bottom-0 z-50 grid grid-cols-5 border-t border-white/[0.08] bg-[#0d0c0b]/94 px-1 pt-1.5 backdrop-blur-2xl lg:hidden">{destinations.map((item) => <button aria-current={active === item.id ? "page" : undefined} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl text-[0.58rem] transition ${active === item.id ? "text-[#d2a088]" : "text-[#6e6760]"}`} key={item.id} onClick={() => onNavigate(item.id)} type="button"><Icon className="h-[1.05rem] w-[1.05rem]" name={item.icon} /><span className="truncate">{item.label}</span></button>)}</nav>;
+  return <nav aria-label="Primary" className="safe-area-nav fixed inset-x-2 bottom-1 z-50 grid grid-cols-5 rounded-[1.35rem] border border-white/[0.1] bg-[#11100e]/95 px-1 pt-1 shadow-[0_16px_55px_rgba(0,0,0,0.5)] backdrop-blur-2xl lg:hidden">{destinations.map((item) => <button aria-current={active === item.id ? "page" : undefined} className={`relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl text-[0.6rem] transition ${active === item.id ? "bg-white/[0.045] text-[color:var(--color-accent-soft)]" : "text-[#807870]"}`} key={item.id} onClick={() => onNavigate(item.id)} type="button"><Icon className="h-[1.05rem] w-[1.05rem]" name={item.icon} /><span className="truncate">{item.label}</span>{active === item.id ? <span className="absolute bottom-1 h-0.5 w-4 rounded-full bg-[color:var(--color-accent)]" /> : null}</button>)}</nav>;
 }
 
 function SessionOpening() {
-  return <main className="eidolon-room relative flex min-h-[100svh] items-center justify-center overflow-hidden px-6 text-[#f3eee5]"><div aria-live="polite" className="relative z-10 text-center" role="status"><div className="companion-aura mx-auto grid h-20 w-20 place-items-center rounded-full border border-[#b98265]/25 bg-[#b98265]/[0.08] font-eidolon-display text-3xl text-[#d5a48b]">E</div><p className="mt-8 font-eidolon-display text-4xl">Eidolon</p><p className="mt-3 text-xs tracking-wide text-[#776f67]">Opening your private space</p><span className="mx-auto mt-5 block h-px w-20 overflow-hidden bg-white/[0.08]"><span className="block h-full w-1/2 animate-pulse bg-[#b98265]" /></span></div></main>;
+  return <main className="eidolon-room relative flex min-h-[100svh] items-center justify-center overflow-hidden px-6 text-[#f3eee5]"><div aria-live="polite" className="relative z-10 text-center" role="status"><EidolonWordmark /><p className="mt-6 text-xs tracking-wide text-[#8a8178]">Opening your private space</p><span className="mx-auto mt-5 block h-px w-24 overflow-hidden bg-white/[0.08]"><span className="block h-full w-1/2 animate-pulse bg-[color:var(--color-accent)]" /></span></div></main>;
 }
 
 function relationshipLabel(phase: string): string {

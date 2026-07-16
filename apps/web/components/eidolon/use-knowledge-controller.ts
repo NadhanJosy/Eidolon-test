@@ -21,9 +21,13 @@ import type {
   MemoryResolveResult,
   Message
 } from "./types";
-import { parseDecimal } from "./ui";
 
 export type MemoryView = "active" | "forgotten";
+
+function parseDecimal(value: string, fallback: number): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 type MemoryActionKind =
   | "add"
@@ -1029,10 +1033,7 @@ export function useKnowledgeController({
       !token ||
       !activeCharacterId ||
       !activeConversation ||
-      memoryActionInFlight.current ||
-      !window.confirm(
-        "Delete every adult-mode memory and private moment for this companion? Conversation messages will remain."
-      )
+      memoryActionInFlight.current
     ) {
       return false;
     }

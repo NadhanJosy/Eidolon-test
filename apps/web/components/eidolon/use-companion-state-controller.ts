@@ -6,10 +6,7 @@ import { apiJson } from "@/lib/api";
 
 import {
   completeAdultStatus,
-  completeConversationDebugPayload,
-  completeDebugPayload,
   completeRelationship,
-  completeScheduledJobs,
   isCompleteContinuityThreadList,
   isCompleteJournalList,
   isCompleteMemoryList
@@ -18,14 +15,10 @@ import { emptyRelationship } from "./controller-utils";
 import type {
   AdultStatus,
   AdultReadinessState,
-  ConversationDebugPayload,
   ContinuityThread,
-  DebugPayload,
   Journal,
   MemoryItem,
-  Panel,
-  Relationship,
-  ScheduledJob
+  Relationship
 } from "./types";
 
 type UseCompanionStateControllerArgs = {
@@ -43,24 +36,19 @@ export function useCompanionStateController({
 }: UseCompanionStateControllerArgs) {
   const refreshVersion = useRef(0);
   const stateCharacterIdRef = useRef<string | null>(null);
-  const debugCharacterIdRef = useRef<string | null>(null);
   const adultStatusCharacterIdRef = useRef<string | null>(null);
   const [relationship, setRelationship] = useState<Relationship>(emptyRelationship);
   const [adultStatus, setAdultStatus] = useState<AdultStatus | null>(null);
   const [adultStatusCharacterId, setAdultStatusCharacterId] = useState<string | null>(null);
   const [adultReadinessState, setAdultReadinessState] =
     useState<AdultReadinessState>("idle");
-  const [jobs, setJobs] = useState<ScheduledJob[]>([]);
-  const [debug, setDebug] = useState<DebugPayload | null>(null);
-  const [conversationDebug, setConversationDebug] = useState<ConversationDebugPayload | null>(null);
-  const [panel, setPanel] = useState<Panel>("overview");
-
-  const timeline = relationship.metadata_json.timeline ?? debug?.relationship?.timeline ?? [];
+  const [supportingStateError, setSupportingStateError] = useState<string | null>(null);
+  const timeline = relationship.metadata_json.timeline ?? [];
 
   async function refreshCompanionState(
     authToken: string,
     characterId: string,
-    conversationId?: string,
+    _conversationId?: string,
     shouldApply?: () => boolean
   ) {
     const requestVersion = ++refreshVersion.current;
@@ -71,11 +59,6 @@ export function useCompanionStateController({
       setContinuityThreads([]);
       setRelationship(emptyRelationship);
     }
-    if (debugCharacterIdRef.current !== characterId) {
-      debugCharacterIdRef.current = null;
-      setDebug(null);
-      setConversationDebug(null);
-    }
     if (adultStatusCharacterIdRef.current !== characterId) {
       adultStatusCharacterIdRef.current = null;
       setAdultStatus(null);
@@ -85,27 +68,17 @@ export function useCompanionStateController({
     const [
       memoryResult,
       relationshipResult,
-      debugResult,
-      jobsResult,
       journalsResult,
       threadsResult,
-      adultResult,
-      conversationDebugResult
+      adultResult
     ] = await Promise.allSettled([
         apiJson<unknown>(`/characters/${characterId}/memories`, { token: authToken }),
         apiJson<unknown>(`/characters/${characterId}/relationship`, { token: authToken }),
-        apiJson<unknown>(`/debug/character/${characterId}`, { token: authToken }),
-        apiJson<unknown>("/debug/jobs", { token: authToken }),
         apiJson<unknown>(`/characters/${characterId}/journals`, { token: authToken }),
         apiJson<unknown>(`/characters/${characterId}/threads?status=all`, {
           token: authToken
         }),
-        apiJson<unknown>(`/characters/${characterId}/adult-status`, { token: authToken }),
-        conversationId
-          ? apiJson<unknown>(`/debug/conversation/${conversationId}`, {
-              token: authToken
-            })
-          : Promise.resolve(null)
+        apiJson<unknown>(`/characters/${characterId}/adult-status`, { token: authToken })
       ]);
 
     if (
@@ -120,38 +93,35 @@ export function useCompanionStateController({
     ) {
       setMemories(memoryResult.value);
     }
+    const unavailable: string[] = [];
+    if (
+      memoryResult.status !== "fulfilled" ||
+      !isCompleteMemoryList(memoryResult.value, characterId, "active")
+    ) unavailable.push("memories");
     const completeRelationshipValue =
       relationshipResult.status === "fulfilled"
         ? completeRelationship(relationshipResult.value, characterId)
         : null;
     if (completeRelationshipValue) {
       setRelationship(completeRelationshipValue);
-    }
-    if (debugResult.status === "fulfilled") {
-      const completeDebug = completeDebugPayload(debugResult.value, characterId);
-      debugCharacterIdRef.current = completeDebug ? characterId : null;
-      setDebug(completeDebug);
     } else {
-      debugCharacterIdRef.current = null;
-      setDebug(null);
-    }
-    if (jobsResult.status === "fulfilled") {
-      const completeJobs = completeScheduledJobs(jobsResult.value);
-      if (completeJobs) {
-        setJobs(completeJobs);
-      }
+      unavailable.push("relationship history");
     }
     if (
       journalsResult.status === "fulfilled" &&
       isCompleteJournalList(journalsResult.value, characterId)
     ) {
       setJournals(journalsResult.value);
+    } else {
+      unavailable.push("moments");
     }
     if (
       threadsResult.status === "fulfilled" &&
       isCompleteContinuityThreadList(threadsResult.value, characterId)
     ) {
       setContinuityThreads(threadsResult.value);
+    } else {
+      unavailable.push("living threads");
     }
     if (adultResult.status === "fulfilled") {
       const completeAdult = completeAdultStatus(adultResult.value);
@@ -167,32 +137,22 @@ export function useCompanionStateController({
       setAdultReadinessState("error");
       onAdultStatusChange(characterId, null);
     }
-    if (conversationId && conversationDebugResult.status === "fulfilled") {
-      setConversationDebug(
-        completeConversationDebugPayload(
-          conversationDebugResult.value,
-          conversationId,
-          characterId
-        )
-      );
-    } else {
-      setConversationDebug(null);
-    }
+    setSupportingStateError(
+      unavailable.length > 0
+        ? `${humanList(unavailable)} could not be opened just now. Your conversation is safe; reopen this companion or try again in a moment.`
+        : null
+    );
   }
 
   function resetCompanionState() {
     refreshVersion.current += 1;
     stateCharacterIdRef.current = null;
-    debugCharacterIdRef.current = null;
     adultStatusCharacterIdRef.current = null;
     setRelationship(emptyRelationship);
     setAdultStatus(null);
     setAdultStatusCharacterId(null);
     setAdultReadinessState("idle");
-    setJobs([]);
-    setDebug(null);
-    setConversationDebug(null);
-    setPanel("overview");
+    setSupportingStateError(null);
   }
 
   return {
@@ -201,16 +161,17 @@ export function useCompanionStateController({
       adultStatus,
       adultStatusCharacterId,
       adultReadinessState,
-      jobs,
-      debug,
-      conversationDebug,
-      panel,
+      supportingStateError,
       timeline
     },
     actions: {
-      setPanel,
       refreshCompanionState,
       resetCompanionState
     }
   };
+}
+
+function humanList(items: string[]): string {
+  if (items.length === 1) return items[0][0].toUpperCase() + items[0].slice(1);
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`.replace(/^./u, (letter) => letter.toUpperCase());
 }

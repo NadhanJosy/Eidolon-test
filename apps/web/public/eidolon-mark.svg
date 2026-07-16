@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
   <title id="title">Eidolon</title>
-  <rect width="512" height="512" fill="#0d0d0f" />
-  <path d="M132 92H380V148H200V228H352V284H200V364H380V420H132V92Z" fill="#f4f4f5" />
-  <path d="M104 92H120V420H104V92Z" fill="#0891b2" />
+  <rect width="512" height="512" rx="112" fill="#0b0a09" />
+  <path d="M256 78C360 123 414 182 414 256S360 389 256 434C152 389 98 330 98 256S152 123 256 78Z" fill="none" stroke="#e8ddd1" stroke-width="18" />
+  <path d="M256 134C322 168 354 208 354 256S322 344 256 378C190 344 158 304 158 256S190 168 256 134Z" fill="none" stroke="#bd8163" stroke-width="14" stroke-linecap="round" stroke-dasharray="132 34" />
+  <path d="M256 172V340" stroke="#e8ddd1" stroke-width="16" stroke-linecap="round" />
+  <circle cx="256" cy="256" r="20" fill="#bd8163" />
 </svg>
