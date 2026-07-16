@@ -1,0 +1,202 @@
+# Data Model
+
+## Authority
+
+SQLAlchemy models in `apps/api/app/models.py` and Alembic revisions in
+`apps/api/alembic/versions` are the executable schema. This document explains
+the stable ownership and lifecycle contracts.
+
+Design rules:
+
+- UUID primary keys
+- timezone-aware timestamps
+- PostgreSQL foreign keys with deliberate cascade behaviour
+- direct or transitive ownership for every private row
+- JSONB for bounded flexible metadata, not core ownership
+- no secrets, password hashes, refresh-token hashes, or embeddings in normal
+  API/export payloads
+
+## Entity relationships
+
+```text
+users
+  |-- refresh_tokens
+  |-- characters
+  |     |-- relationship_states (one per user + character)
+  |     |-- memory_items
+  |     |-- episodic_journals
+  |     `-- scheduled_jobs
+  `-- conversations
+        |-- messages
+        |-- episodic_journals
+        `-- scheduled_jobs (conversation ID in bounded payload metadata)
+
+diagnostic_events belong to a user and may reference a character/conversation.
+auth_throttles are non-profile operational state keyed by secret fingerprints.
+```
+
+## `users`
+
+Account identity and top-level safety posture:
+
+- canonical unique email
+- Argon2 password hash
+- optional display name
+- user age-gate confirmation
+- created and updated timestamps
+
+Account deletion cascades owned state. Exports exclude the password hash.
+
+## `refresh_tokens`
+
+Server-side refresh sessions:
+
+- owning user
+- hash of an opaque random token
+- expiry and optional revocation time
+- creation time
+
+The raw token exists only in the HttpOnly browser cookie. Rotation revokes the
+old row and issues a new token.
+
+## `auth_throttles`
+
+Cross-process registration/login resource controls:
+
+- HMAC-SHA256 scoped fingerprint
+- failed/accepted expensive-attempt count
+- window start, last attempt, and optional block expiry
+
+Raw attempted emails and client addresses are not stored. These rows are not
+user profile data and are omitted from export.
+
+## `characters`
+
+An owner-scoped authored companion:
+
+- name and legacy description/personality/speech fields
+- validated `soul_json` for identity and relating style
+- bounded `boundaries_json` for scenario, consent, memory, privacy, and
+  proactive preferences
+- explicit age, adult eligibility, and content intensity
+
+Canonicalization enforces dependent adult/privacy settings. Flexible profile
+JSON is bounded by serialized size, depth, fan-out, key length, and string
+length before persistence or prompt use.
+
+## `conversations`
+
+An owned thread tied to one companion:
+
+- optional title
+- metadata JSON
+- durable `last_read_at` cursor
+- created and updated timestamps
+
+Known metadata includes:
+
+- `privacy_mode`: `normal` or `private`
+- `scenario_mode`: `default` or `custom`
+- bounded custom `scenario_text` only in custom mode
+
+`last_message_at` and unread count are derived from messages rather than stored
+as independent counters.
+
+## `messages`
+
+Ordered thread content:
+
+- role: `user`, `assistant`, or controlled `system`
+- bounded text content
+- bounded metadata JSON
+- creation time
+
+Metadata can carry privacy/content provenance, completion/provider telemetry,
+proactive labels, reroll/source links, controlled system-event labels, and a
+private prompt-context manifest. Normal API serialization strips private
+underscore-prefixed metadata.
+
+Private provenance is immutable cognition input: later changing the thread mode
+does not make a private message eligible for memory or normal prompt history.
+
+## `memory_items`
+
+Durable semantic memory owned by a user and companion:
+
+- optional source message
+- memory type and text
+- importance, confidence, emotional weight, pin state, and decay score
+- nullable `vector(384)` embedding
+- contradiction group and metadata links
+- last recall and optional forgotten time
+- bounded lifecycle/provenance metadata
+
+Embeddings are backend-owned and never serialized. Forgotten rows remain
+owner-visible but are excluded from active retrieval, prompt assembly, recall
+timestamps, and contradiction resolution until restored.
+
+Current memory types include user facts, preferences, interests, people, places,
+dates, events, promises, themes, shared lore/moments, inside jokes, boundaries,
+and relationship milestones.
+
+## `episodic_journals`
+
+Durable episode summaries and manual notes:
+
+- owner, companion, and optional source conversation
+- type, title, summary, emotional tags
+- unresolved threads, callbacks, importance, and metadata
+
+Generated rows record deterministic ownership/provenance and may be rebuilt from
+their conversation. Manual rows remain user-owned and are not overwritten by
+automatic journal refresh.
+
+## `relationship_states`
+
+Exactly one row per user-companion pair:
+
+- trust and warmth in `-100..100`
+- intimacy, tension, familiarity, and attachment in `0..100`
+- mood, conflict state, and repair flag
+- private bounded emotional-state JSON
+- tags, last interaction, timeline/milestone/evidence metadata
+
+Source turns may store reversible relationship effects in message metadata so a
+latest-turn edit/delete can undo and recompute its contribution without guessing
+at older legacy turns.
+
+## `scheduled_jobs`
+
+Durable asynchronous work:
+
+- optional user and companion ownership
+- type and due time
+- status: `pending`, `running`, `done`, `failed`, or `cancelled`
+- lock owner/time, retry count, safe last error, and bounded payload
+
+Current work includes maintenance, `memory_extract`, `chat_postprocess`,
+`relationship_decay`, and `proactive_*` jobs. Internal exception text and
+rejected generated prose do not belong in job metadata.
+
+## `diagnostic_events`
+
+Bounded safe records for foreground generation failures:
+
+- owner and optional companion/conversation
+- controlled source, operation, error code, and provider label
+- controlled safe message and timestamp
+
+Rows are capped per user. Raw prompt/message text, exception bodies, provider
+responses, URLs, credentials, and stack traces are forbidden.
+
+## Migrations
+
+- Every model/schema change requires an Alembic revision.
+- Test upgrades from the real migration chain; do not replace it with
+  `Base.metadata.create_all`.
+- Cloud Run applies migrations before each new API revision starts.
+- The migration advisory lock must remain intact.
+- Prefer additive/backward-compatible production migrations because old and new
+  Cloud Run revisions can briefly overlap.
+- Destructive migrations require a verified backup and a staged compatibility
+  plan.
