@@ -87,7 +87,7 @@ export function MemoryArchive({
       />
 
       {adding ? (
-        <form className="glass-surface mt-8 rounded-[1.75rem] p-5 reveal-up sm:p-7" onSubmit={(event) => { onAdd(event); if (memoryContent.trim()) setAdding(false); }}>
+        <form className="glass-surface mt-8 rounded-[1.75rem] p-5 reveal-up sm:p-7" onSubmit={onAdd}>
           <div className="flex items-start justify-between gap-4"><div><h2 className="font-eidolon-display text-2xl">What should stay with you?</h2><p className="mt-2 text-sm text-[#877e75]">Write it in your own words. You can change or release it whenever you like.</p></div><IconButton icon="close" label="Close memory form" onClick={() => setAdding(false)} /></div>
           <textarea autoFocus aria-label="Something to remember" className={`${fieldClass} mt-6 min-h-28 resize-none`} maxLength={1000} onChange={(event) => setMemoryContent(event.target.value)} placeholder="A person, a promise, a small ritual, something that mattered…" value={memoryContent} />
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -105,11 +105,11 @@ export function MemoryArchive({
 
       <div className="mt-9 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
         <div className="hide-scrollbar flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Memory categories">
-          {(["all", "people", "promises", "moments", "inside-jokes", "patterns"] as MemoryFilter[]).map((item) => <button aria-selected={filter === item} className={`shrink-0 rounded-full border px-4 py-2 text-xs capitalize transition ${filter === item ? "border-[#b98265]/35 bg-[#b98265]/10 text-[#d5aa94]" : "border-white/[0.08] text-[#837b73] hover:border-white/[0.16]"}`} key={item} onClick={() => setFilter(item)} role="tab" type="button">{item.replace("-", " ")}</button>)}
+          {(["all", "people", "promises", "moments", "inside-jokes", "patterns"] as MemoryFilter[]).map((item) => <button aria-selected={filter === item} className={`min-h-11 shrink-0 rounded-full border px-4 py-2 text-xs capitalize transition ${filter === item ? "border-[#b98265]/35 bg-[#b98265]/10 text-[#d5aa94]" : "border-white/[0.08] text-[#837b73] hover:border-white/[0.16]"}`} key={item} onClick={() => setFilter(item)} role="tab" type="button">{item.replace("-", " ")}</button>)}
         </div>
         <div className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.02] p-1">
-          <button aria-pressed={memoryView === "active"} className={`rounded-full px-4 py-2 text-xs transition ${memoryView === "active" ? "bg-white/[0.08] text-[#dfd4c9]" : "text-[#756e67]"}`} onClick={() => onChangeView("active")} type="button">Held close</button>
-          <button aria-pressed={memoryView === "forgotten"} className={`rounded-full px-4 py-2 text-xs transition ${memoryView === "forgotten" ? "bg-white/[0.08] text-[#dfd4c9]" : "text-[#756e67]"}`} onClick={() => onChangeView("forgotten")} type="button">Allowed to fade</button>
+          <button aria-pressed={memoryView === "active"} className={`min-h-11 rounded-full px-4 py-2 text-xs transition ${memoryView === "active" ? "bg-white/[0.08] text-[#dfd4c9]" : "text-[#756e67]"}`} onClick={() => onChangeView("active")} type="button">Held close</button>
+          <button aria-pressed={memoryView === "forgotten"} className={`min-h-11 rounded-full px-4 py-2 text-xs transition ${memoryView === "forgotten" ? "bg-white/[0.08] text-[#dfd4c9]" : "text-[#756e67]"}`} onClick={() => onChangeView("forgotten")} type="button">Allowed to fade</button>
         </div>
       </div>
 
@@ -160,10 +160,10 @@ function MemoryCard({ memory, view, editing, editValue, memoryActionId, onEditVa
       <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-[0.66rem] uppercase tracking-[0.14em] text-[#8e7e73]"><Icon className="h-3.5 w-3.5 text-[#b98265]" name={memoryIcon(memory)} />{memoryTypeLabel(memory.memory_type)}</span>{memory.pinned ? <span title="Protected from fading"><Icon className="h-4 w-4 text-[#b98265]" name="bookmark" /></span> : null}</div>
       {editing ? <textarea autoFocus aria-label="Edit memory" className={`${fieldClass} mt-5 min-h-28 resize-none`} maxLength={1000} onChange={(event) => onEditValue(event.target.value)} value={editValue} /> : <p className="mt-5 whitespace-pre-wrap font-eidolon-display text-xl leading-7 text-[#dfd5ca]">{memory.content}</p>}
       <p className="mt-5 text-[0.67rem] text-[#6f6861]">{memoryOrigin(memory)} · {formatMemoryDate(memory.created_at)}</p>
-      {conflict && view === "active" ? <div className="mt-4 rounded-xl bg-[#b98265]/[0.08] p-3 text-xs leading-5 text-[#bd9986]"><p>This no longer matches another memory.</p><button className="mt-2 text-[#d6aa92] underline decoration-[#b98265]/40 underline-offset-4" disabled={memoryActionId !== null} onClick={() => onResolveConflict(memory)} type="button">Keep this version</button></div> : null}
+      {conflict && view === "active" ? <div className="mt-4 rounded-xl bg-[#b98265]/[0.08] p-3 text-xs leading-5 text-[#bd9986]"><p>This no longer matches another memory.</p><button className="mt-2 min-h-11 text-[#d6aa92] underline decoration-[#b98265]/40 underline-offset-4" disabled={memoryActionId !== null} onClick={() => onResolveConflict(memory)} type="button">Keep this version</button></div> : null}
       <div className="mt-5 flex flex-wrap gap-2 border-t border-white/[0.07] pt-4">
         {view === "forgotten" ? <QuietButton disabled={memoryActionId !== null} onClick={() => onRestore(memory)}>Bring back</QuietButton> : editing ? <><PrimaryButton disabled={!editValue.trim() || memoryActionId !== null} onClick={() => onSaveEdit(memory)}>Save</PrimaryButton><QuietButton onClick={onEdit}>Cancel</QuietButton></> : <><QuietButton disabled={memoryActionId !== null} onClick={onEdit}>Edit</QuietButton><QuietButton disabled={memoryActionId !== null} onClick={() => onTogglePinned(memory)}>{memory.pinned ? "Let it soften" : "Keep close"}</QuietButton><QuietButton disabled={memoryActionId !== null} onClick={() => onForget(memory)}>Let fade</QuietButton></>}
-        <IconButton className="ml-auto h-10 w-10 border-transparent" disabled={memoryActionId !== null} icon="trash" label={view === "forgotten" ? "Delete permanently" : "Delete memory"} onClick={() => onDelete(memory)} />
+        <IconButton className="ml-auto border-transparent" disabled={memoryActionId !== null} icon="trash" label={view === "forgotten" ? "Delete permanently" : "Delete memory"} onClick={() => onDelete(memory)} />
       </div>
     </article>
   );

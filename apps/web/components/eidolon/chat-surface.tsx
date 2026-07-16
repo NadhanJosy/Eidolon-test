@@ -1,12 +1,13 @@
 "use client";
 
-import type { FormEvent, KeyboardEvent } from "react";
+import { Fragment, type FormEvent, type KeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { characterOpeningGreeting } from "./controller-utils";
 import { CompanionPortrait, Feedback, IconButton, PrimaryButton, QuietButton, fieldClass } from "./experience-primitives";
 import { Icon } from "./icons";
 import { LivingThreadsPopover } from "./living-threads";
+import { MessageContent } from "./message-content";
 import type {
   Character,
   ContinuityReceipt,
@@ -26,6 +27,7 @@ type MemoryCapturePolicy = {
 
 export function ChatSurface({
   character,
+  conversationId,
   editableTitle,
   setEditableTitle,
   privacyMode,
@@ -39,6 +41,8 @@ export function ChatSurface({
   rememberedMessageIds,
   rememberingMessageId,
   messages,
+  loading,
+  unreadAfter,
   pendingOutgoingContent,
   streamingContent,
   streamPhase,
@@ -73,9 +77,11 @@ export function ChatSurface({
   onAddContinuityThread,
   onResolveContinuityThread,
   onReopenContinuityThread,
-  onDeleteContinuityThread
+  onDeleteContinuityThread,
+  onUnreadSeen
 }: {
   character: Character | null;
+  conversationId: string | null;
   editableTitle: string;
   setEditableTitle: (value: string) => void;
   privacyMode: ConversationPrivacyMode;
@@ -89,6 +95,8 @@ export function ChatSurface({
   rememberedMessageIds: string[];
   rememberingMessageId: string | null;
   messages: Message[];
+  loading: boolean;
+  unreadAfter: string | null;
   pendingOutgoingContent: string | null;
   streamingContent: string;
   streamPhase: StreamPhase | null;
@@ -124,12 +132,20 @@ export function ChatSurface({
   onResolveContinuityThread: (thread: ContinuityThread) => void;
   onReopenContinuityThread: (thread: ContinuityThread) => void;
   onDeleteContinuityThread: (thread: ContinuityThread) => void;
+  onUnreadSeen: () => void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [threadsOpen, setThreadsOpen] = useState(false);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const pinnedToLatestRef = useRef(true);
+  const restoredConversationRef = useRef<string | null>(null);
+  const unreadSeenRef = useRef(false);
+  const previousStreamPhaseRef = useRef<StreamPhase | null>(null);
+  const [latestBelow, setLatestBelow] = useState(false);
+  const [browserOnline, setBrowserOnline] = useState(true);
+  const [streamAnnouncement, setStreamAnnouncement] = useState("");
   const rememberedIds = useMemo(() => new Set(rememberedMessageIds), [rememberedMessageIds]);
   const visibleMessages = useMemo(
     () => messages.filter((message) => message.role !== "system" || message.content.trim()),
@@ -142,10 +158,62 @@ export function ChatSurface({
   const name = character?.name ?? "Eidolon";
   const greeting = characterOpeningGreeting(character);
   const openThreadCount = continuityThreads.filter((thread) => thread.status === "open").length;
+  const unreadMessageId = useMemo(() => {
+    if (!unreadAfter) return null;
+    const boundary = Date.parse(unreadAfter);
+    if (!Number.isFinite(boundary)) return null;
+    return visibleMessages.find(
+      (message) =>
+        message.role === "assistant" && Date.parse(message.created_at) > boundary
+    )?.id ?? null;
+  }, [unreadAfter, visibleMessages]);
+  const unreadMessageIdRef = useRef<string | null>(unreadMessageId);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, streamingContent, streamPhase]);
+    unreadMessageIdRef.current = unreadMessageId;
+  }, [unreadMessageId]);
+
+  useEffect(() => {
+    if (!conversationId || loading) return;
+    unreadSeenRef.current = false;
+    restoredConversationRef.current = null;
+    let activeScroller = scrollRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      const scroller = scrollRef.current;
+      if (!scroller) return;
+      activeScroller = scroller;
+      const unreadDivider = unreadMessageIdRef.current
+        ? scroller.querySelector<HTMLElement>("[data-unread-divider]")
+        : null;
+      const stored = readScrollPosition(conversationId);
+      if (unreadDivider) {
+        scroller.scrollTop = Math.max(0, unreadDivider.offsetTop - 24);
+      } else if (stored !== null) {
+        scroller.scrollTop = Math.min(stored, scroller.scrollHeight - scroller.clientHeight);
+      } else {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+      pinnedToLatestRef.current = isNearLatest(scroller);
+      setLatestBelow(!pinnedToLatestRef.current);
+      restoredConversationRef.current = conversationId;
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (activeScroller) saveScrollPosition(conversationId, activeScroller.scrollTop);
+    };
+  }, [conversationId, loading]);
+
+  useEffect(() => {
+    if (loading || !conversationId || restoredConversationRef.current !== conversationId) return;
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    if (pinnedToLatestRef.current) {
+      scroller.scrollTop = scroller.scrollHeight;
+      window.requestAnimationFrame(() => setLatestBelow(false));
+    } else if (messages.length > 0 || streamPhase) {
+      window.requestAnimationFrame(() => setLatestBelow(true));
+    }
+  }, [conversationId, loading, messages.length, pendingOutgoingContent, streamPhase, streamingContent]);
 
   useEffect(() => {
     const textarea = composerRef.current;
@@ -156,12 +224,53 @@ export function ChatSurface({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 168)}px`;
   }, [draft]);
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setBrowserOnline(navigator.onLine));
+    const handleOnline = () => setBrowserOnline(true);
+    const handleOffline = () => setBrowserOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    function closePopover(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setToolsOpen(false);
+      setContextOpen(false);
+      setThreadsOpen(false);
+    }
+    document.addEventListener("keydown", closePopover);
+    return () => document.removeEventListener("keydown", closePopover);
+  }, []);
+
+  useEffect(() => {
+    const previousPhase = previousStreamPhaseRef.current;
+    if (streamPhase && !previousPhase) {
+      setStreamAnnouncement(`${name} is responding.`);
+    } else if (!streamPhase && previousPhase) {
+      setStreamAnnouncement(
+        failedTurn ? `${name}’s response was interrupted.` : `${name}’s response is ready.`
+      );
+    }
+    previousStreamPhaseRef.current = streamPhase;
+  }, [failedTurn, name, streamPhase]);
+
   function submitOnEnter(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+    if (
+      event.key !== "Enter" ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing ||
+      window.matchMedia("(pointer: coarse)").matches
+    ) {
       return;
     }
     event.preventDefault();
-    if (!sending && !busy && draft.trim()) {
+    if (browserOnline && !sending && !busy && draft.trim()) {
       event.currentTarget.form?.requestSubmit();
     }
   }
@@ -171,13 +280,42 @@ export function ChatSurface({
     window.requestAnimationFrame(() => composerRef.current?.focus());
   }
 
+  function handleScroll() {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const nearLatest = isNearLatest(scroller);
+    pinnedToLatestRef.current = nearLatest;
+    setLatestBelow(!nearLatest);
+    if (conversationId) saveScrollPosition(conversationId, scroller.scrollTop);
+    if (nearLatest && unreadMessageId && !unreadSeenRef.current) {
+      unreadSeenRef.current = true;
+      onUnreadSeen();
+    }
+  }
+
+  function jumpToLatest() {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
+    pinnedToLatestRef.current = true;
+    setLatestBelow(false);
+    if (unreadMessageId && !unreadSeenRef.current) {
+      unreadSeenRef.current = true;
+      onUnreadSeen();
+    }
+  }
+
   return (
     <section className="relative flex h-full min-h-0 flex-col" aria-label={`Conversation with ${name}`}>
+      <p aria-live="polite" className="sr-only" role="status">{streamAnnouncement}</p>
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-[#0b0a09] via-[#0b0a09]/70 to-transparent" />
 
       <div className="relative z-20 flex justify-center gap-2 px-4 pt-3">
         <button
-          className="group flex max-w-[min(92vw,32rem)] items-center gap-2 rounded-full border border-white/[0.07] bg-[#13110f]/75 px-3 py-1.5 text-xs text-[#8d847a] shadow-lg shadow-black/10 backdrop-blur-xl transition hover:border-white/[0.13] hover:text-[#bdb2a7]"
+          aria-controls="conversation-context"
+          aria-expanded={contextOpen}
+          className="group flex min-h-11 max-w-[min(92vw,32rem)] items-center gap-2 rounded-full border border-white/[0.07] bg-[#13110f]/75 px-3 py-1.5 text-xs text-[#8d847a] shadow-lg shadow-black/10 backdrop-blur-xl transition hover:border-white/[0.13] hover:text-[#bdb2a7]"
           onClick={() => {
             setThreadsOpen(false);
             setContextOpen((current) => !current);
@@ -195,8 +333,9 @@ export function ChatSurface({
           <Icon className={`h-3 w-3 transition ${contextOpen ? "rotate-180" : ""}`} name="chevron-down" />
         </button>
         <button
+          aria-controls="living-threads-popover"
           aria-expanded={threadsOpen}
-          className={`group flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg shadow-black/10 backdrop-blur-xl transition ${
+          className={`group flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg shadow-black/10 backdrop-blur-xl transition ${
             threadsOpen
               ? "border-[#b98265]/28 bg-[#b98265]/[0.09] text-[#c9a08a]"
               : "border-white/[0.07] bg-[#13110f]/75 text-[#8d847a] hover:border-white/[0.13] hover:text-[#bdb2a7]"
@@ -250,9 +389,11 @@ export function ChatSurface({
         />
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 pt-6 sm:px-8 lg:px-12" role="log" aria-live="polite" aria-relevant="additions text">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 pt-6 sm:px-8 lg:px-12" onScroll={handleScroll} ref={scrollRef} role="log" aria-live="off" aria-relevant="additions">
         <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-end">
-          {visibleMessages.length === 0 && !streamPhase ? (
+          {loading ? (
+            <ConversationSkeleton />
+          ) : visibleMessages.length === 0 && !streamPhase ? (
             <FirstConversation
               characterName={name}
               greeting={greeting}
@@ -262,21 +403,23 @@ export function ChatSurface({
           ) : (
             <div className="space-y-7 py-8 sm:space-y-9">
               {visibleMessages.map((message, index) => (
-                <MessageTurn
-                  canRemember={canRememberMessage(message, memoryCapturePolicy, privacyMode)}
-                  editing={editingMessageId === message.id}
-                  isLatestUser={message.id === latestUserMessageId}
-                  key={message.id}
-                  message={message}
-                  remembered={rememberedIds.has(message.id)}
-                  remembering={rememberingMessageId === message.id}
-                  showDate={shouldShowDate(visibleMessages[index - 1], message)}
-                  onCancelEdit={onCancelEdit}
-                  onDelete={onDelete}
-                  onEdit={onEdit}
-                  onRemember={onRemember}
-                  onReroll={onReroll}
-                />
+                <Fragment key={message.id}>
+                  {message.id === unreadMessageId ? <UnreadDivider /> : null}
+                  <MessageTurn
+                    canRemember={canRememberMessage(message, memoryCapturePolicy, privacyMode)}
+                    editing={editingMessageId === message.id}
+                    isLatestUser={message.id === latestUserMessageId}
+                    message={message}
+                    remembered={rememberedIds.has(message.id)}
+                    remembering={rememberingMessageId === message.id}
+                    showDate={shouldShowDate(visibleMessages[index - 1], message)}
+                    onCancelEdit={onCancelEdit}
+                    onDelete={onDelete}
+                    onEdit={onEdit}
+                    onRemember={onRemember}
+                    onReroll={onReroll}
+                  />
+                </Fragment>
               ))}
 
               {pendingOutgoingContent ? (
@@ -296,13 +439,30 @@ export function ChatSurface({
               ) : null}
             </div>
           )}
-          <div ref={bottomRef} />
         </div>
       </div>
+
+      {latestBelow && !loading ? (
+        <button
+          className="absolute bottom-[8.65rem] right-4 z-40 flex min-h-11 items-center gap-2 rounded-full border border-white/[0.12] bg-[#191613]/95 px-3.5 text-xs text-[#c7bbb0] shadow-[0_12px_35px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-white/[0.22] hover:text-[#f0e7de] sm:right-7"
+          onClick={jumpToLatest}
+          type="button"
+        >
+          <Icon className="h-3.5 w-3.5 rotate-180 text-[color:var(--color-accent)]" name="arrow-up" />
+          {unreadMessageId ? "Latest unread" : "Return to latest"}
+        </button>
+      ) : null}
 
       <div className="safe-area-composer relative z-30 bg-gradient-to-t from-[#090908] via-[#090908] to-transparent px-3 pt-3 sm:px-6 sm:pt-5">
         <div className="mx-auto w-full max-w-3xl">
           <Feedback error={error} notice={notice} />
+
+          {!browserOnline ? (
+            <div className="mb-2 flex items-start gap-2 rounded-2xl border border-white/[0.09] bg-[#171512]/95 px-4 py-3 text-xs leading-5 text-[#a89d92]" role="status">
+              <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#b98d75]" name="clock" />
+              <span>You’re offline. Keep writing—your draft stays here, and sending returns with the connection.</span>
+            </div>
+          ) : null}
 
           {privateTurn || privacyMode === "private" ? (
             <div className="mb-2 flex items-center justify-center gap-2 text-[0.68rem] text-[#92867c]">
@@ -332,8 +492,9 @@ export function ChatSurface({
             <div className="mt-1 flex items-center justify-between gap-2 px-1 pb-1">
               <div className="relative flex items-center gap-1">
                 <IconButton
+                  aria-controls="composer-actions"
                   aria-expanded={toolsOpen}
-                  className="h-9 w-9 border-transparent bg-transparent"
+                  className="h-11 w-11 border-transparent bg-transparent"
                   icon="plus"
                   label="Conversation actions"
                   onClick={() => setToolsOpen((current) => !current)}
@@ -343,7 +504,7 @@ export function ChatSurface({
                 ) : null}
 
                 {toolsOpen ? (
-                  <div className="glass-surface absolute bottom-12 left-0 z-50 w-64 rounded-2xl p-2 shadow-veil">
+                  <div aria-label="Conversation actions" className="glass-surface absolute bottom-12 left-0 z-50 w-64 rounded-2xl p-2 shadow-veil" id="composer-actions">
                     <ComposerAction
                       detail="Keep this single exchange outside memory"
                       icon="lock"
@@ -363,9 +524,9 @@ export function ChatSurface({
                       }}
                     />
                     <ComposerAction
-                      detail={`Invite ${name} to leave a thoughtful note later`}
+                      detail="Ask now; quiet hours, privacy, and cooldown still decide"
                       icon="moon"
-                      label="A note for later"
+                      label={`Invite a check-in from ${name}`}
                       onClick={() => {
                         onQueueProactive();
                         setToolsOpen(false);
@@ -377,12 +538,12 @@ export function ChatSurface({
 
               <div className="flex items-center gap-2">
                 {editingMessageId ? (
-                  <button className="px-2 text-xs text-[#9f958b] hover:text-[#e8ded4]" onClick={onCancelEdit} type="button">Cancel edit</button>
+                  <button className="min-h-11 px-2 text-xs text-[#9f958b] hover:text-[#e8ded4]" onClick={onCancelEdit} type="button">Cancel edit</button>
                 ) : null}
                 <button
                   aria-label={sending ? "Stop response" : editingMessageId ? "Save revised message" : "Send message"}
-                  className={`grid h-10 w-10 place-items-center rounded-full transition disabled:cursor-not-allowed disabled:bg-[#3c3732] disabled:text-[#777069] ${sending ? "bg-[#8f5d47] text-[#f5e6dc] hover:bg-[#a86c52]" : "bg-[#e7dbcf] text-[#281b16] hover:bg-[#f5ede5]"}`}
-                  disabled={!sending && (busy || !draft.trim())}
+                  className={`grid h-11 w-11 place-items-center rounded-full transition disabled:cursor-not-allowed disabled:bg-[#3c3732] disabled:text-[#777069] ${sending ? "bg-[#8f5d47] text-[#f5e6dc] hover:bg-[#a86c52]" : "bg-[#e7dbcf] text-[#281b16] hover:bg-[#f5ede5]"}`}
+                  disabled={!sending && (!browserOnline || busy || !draft.trim())}
                   onClick={sending ? onStop : undefined}
                   type={sending ? "button" : "submit"}
                 >
@@ -391,7 +552,7 @@ export function ChatSurface({
               </div>
             </div>
           </form>
-          <p className="mt-2 text-center text-[0.62rem] text-[#5f5a54]">
+          <p className="keyboard-hint mt-2 text-center text-[0.62rem] text-[#756e67]">
             Enter to send · Shift + Enter for a new line
           </p>
         </div>
@@ -429,7 +590,7 @@ function FirstConversation({
       <div className="mt-8 flex max-w-2xl flex-wrap justify-center gap-2">
         {prompts.map((prompt) => (
           <button
-            className="rounded-full border border-white/[0.09] bg-white/[0.025] px-4 py-2 text-xs text-[#aaa096] transition hover:border-[#b98265]/30 hover:bg-[#b98265]/[0.06] hover:text-[#d9c9bc]"
+            className="min-h-11 rounded-full border border-white/[0.09] bg-white/[0.025] px-4 py-2 text-xs text-[#aaa096] transition hover:border-[#b98265]/30 hover:bg-[#b98265]/[0.06] hover:text-[#d9c9bc]"
             key={prompt}
             onClick={() => onChoosePrompt(prompt)}
             type="button"
@@ -437,6 +598,28 @@ function FirstConversation({
             {prompt}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ConversationSkeleton() {
+  return (
+    <div aria-busy="true" className="w-full space-y-9 py-10" role="status">
+      <span className="sr-only">Opening this conversation</span>
+      <div className="mr-auto w-[72%] space-y-3">
+        <span className="block h-3 w-24 animate-pulse rounded-full bg-white/[0.055]" />
+        <span className="block h-4 w-full animate-pulse rounded-full bg-white/[0.07]" />
+        <span className="block h-4 w-[84%] animate-pulse rounded-full bg-white/[0.055]" />
+      </div>
+      <div className="ml-auto w-[58%] rounded-[1.35rem] rounded-br-md bg-white/[0.035] p-5">
+        <span className="block h-3 w-full animate-pulse rounded-full bg-white/[0.08]" />
+        <span className="mt-3 block h-3 w-[68%] animate-pulse rounded-full bg-white/[0.06]" />
+      </div>
+      <div className="mr-auto w-[80%] space-y-3">
+        <span className="block h-4 w-full animate-pulse rounded-full bg-white/[0.07]" />
+        <span className="block h-4 w-[91%] animate-pulse rounded-full bg-white/[0.055]" />
+        <span className="block h-4 w-[63%] animate-pulse rounded-full bg-white/[0.045]" />
       </div>
     </div>
   );
@@ -492,8 +675,8 @@ function MessageTurn({
       {proactive ? (
         <p className="mb-2 flex items-center gap-2 text-[0.67rem] uppercase tracking-[0.14em] text-[#9b7968]"><Icon className="h-3.5 w-3.5" name="moon" /> A note that found you</p>
       ) : null}
-      <div className={fromUser ? "rounded-[1.35rem] rounded-br-md bg-[#28231f] px-4 py-3 text-[#e7ded4] shadow-sm shadow-black/20 sm:px-5" : "pr-2 text-[#e4dbd1]"}>
-        <p className={`whitespace-pre-wrap text-[0.96rem] leading-7 ${fromUser ? "" : "font-eidolon-display text-[1.12rem] leading-8 sm:text-[1.18rem]"}`}>{message.content}</p>
+      <div className={fromUser ? "rounded-[1.35rem] rounded-br-md bg-[#28231f] px-4 py-3 text-[0.96rem] leading-7 text-[#e7ded4] shadow-sm shadow-black/20 sm:px-5" : "pr-2 font-eidolon-display text-[1.12rem] leading-8 text-[#e4dbd1] sm:text-[1.18rem]"}>
+        <MessageContent content={message.content} />
       </div>
       <div className={`mt-2 flex min-h-7 items-center gap-1 text-[#716a63] transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 ${fromUser ? "justify-end" : "justify-start"}`}>
         <span className="mr-1 text-[0.62rem]">{formatTime(message.created_at)}</span>
@@ -525,14 +708,14 @@ function MessageTurn({
 function StreamingTurn({ characterName, content, phase }: { characterName: string; content: string; phase: StreamPhase }) {
   const waiting = !content.trim();
   return (
-    <article className="message-enter mr-auto w-full max-w-[92%] pr-2" aria-label={`${characterName} is responding`}>
+    <article aria-live="off" className="message-enter mr-auto w-full max-w-[92%] pr-2" aria-label={`${characterName} is responding`}>
       {waiting ? (
         <div className="flex items-center gap-3 text-sm text-[#8c8278]">
           <span>{phase === "connecting" ? `${characterName} is here` : `${characterName} is thinking`}</span>
           <TypingMark />
         </div>
       ) : (
-        <p className="whitespace-pre-wrap font-eidolon-display text-[1.12rem] leading-8 text-[#e4dbd1] sm:text-[1.18rem]">{content}<span aria-hidden="true" className="ml-1 inline-block h-4 w-px animate-pulse bg-[#b98265]" /></p>
+        <div className="font-eidolon-display text-[1.12rem] leading-8 text-[#e4dbd1] sm:text-[1.18rem]"><MessageContent content={content} streaming /></div>
       )}
     </article>
   );
@@ -567,7 +750,7 @@ function FailedTurn({
       <div className="mt-3 flex items-center gap-3">
         {failure.retryable ? (
           <button
-            className="rounded-full border border-[#b98265]/30 px-3 py-1.5 text-xs text-[#d9b7a5] transition hover:bg-[#b98265]/10"
+            className="min-h-11 rounded-full border border-[#b98265]/30 px-3 py-1.5 text-xs text-[#d9b7a5] transition hover:bg-[#b98265]/10"
             onClick={onRetry}
             type="button"
           >
@@ -589,6 +772,16 @@ function TypingMark() {
       <span className="typing-dot h-1 w-1 rounded-full bg-current" />
       <span className="typing-dot h-1 w-1 rounded-full bg-current" />
     </span>
+  );
+}
+
+function UnreadDivider() {
+  return (
+    <div className="flex items-center gap-3 py-2" data-unread-divider role="separator">
+      <span className="h-px flex-1 bg-gradient-to-r from-transparent to-[color:var(--color-accent)]/35" />
+      <span className="text-[0.63rem] font-medium uppercase tracking-[0.16em] text-[color:var(--color-accent-soft)]">New since you were here</span>
+      <span className="h-px flex-1 bg-gradient-to-l from-transparent to-[color:var(--color-accent)]/35" />
+    </div>
   );
 }
 
@@ -627,7 +820,7 @@ function MiniAction({ icon, label, active = false, disabled = false, onClick }: 
   return (
     <button
       aria-label={label}
-      className={`grid h-7 w-7 place-items-center rounded-full transition hover:bg-white/[0.06] hover:text-[#d2c5b8] disabled:cursor-default ${active ? "text-[#b98265]" : ""}`}
+      className={`grid h-11 w-11 place-items-center rounded-full transition hover:bg-white/[0.06] hover:text-[#d2c5b8] disabled:cursor-default ${active ? "text-[#b98265]" : ""}`}
       disabled={disabled}
       onClick={onClick}
       title={label}
@@ -638,7 +831,7 @@ function MiniAction({ icon, label, active = false, disabled = false, onClick }: 
 
 function ComposerAction({ icon, label, detail, onClick }: { icon: "bookmark" | "lock" | "moon"; label: string; detail: string; onClick: () => void }) {
   return (
-    <button className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/[0.055]" onClick={onClick} type="button">
+    <button className="flex min-h-11 w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/[0.055]" onClick={onClick} type="button">
       <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[#b98265]" name={icon} />
       <span><span className="block text-sm text-[#d9cfc4]">{label}</span><span className="mt-0.5 block text-[0.68rem] leading-4 text-[#776f67]">{detail}</span></span>
     </button>
@@ -675,10 +868,10 @@ function ConversationContext({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute inset-x-3 top-14 z-50 mx-auto max-w-xl rounded-3xl glass-surface p-5 shadow-veil sm:inset-x-8 sm:p-6">
+    <div className="absolute inset-x-3 top-14 z-50 mx-auto max-w-xl rounded-3xl glass-surface p-5 shadow-veil sm:inset-x-8 sm:p-6" id="conversation-context">
       <div className="flex items-start justify-between gap-4">
         <div><p className="text-xs uppercase tracking-[0.18em] text-[#8c8076]">This conversation</p><h2 className="mt-2 font-eidolon-display text-2xl">Set the feeling of the room</h2></div>
-        <IconButton className="h-9 w-9" icon="close" label="Close conversation options" onClick={onClose} />
+        <IconButton icon="close" label="Close conversation options" onClick={onClose} />
       </div>
       <div className="mt-6 space-y-5">
         <label className="block text-sm text-[#cfc4b8]">A name for this chapter
@@ -692,7 +885,7 @@ function ConversationContext({
           {scenarioMode === "custom" ? <QuietButton disabled={busy} onClick={onResetScenario}>Return to your usual place</QuietButton> : null}
         </div>
         <div className="border-t border-white/[0.08] pt-4">
-          <button className="flex w-full items-center justify-between gap-4 text-left" disabled={busy} onClick={() => onSetPrivacyMode(privacyMode === "private" ? "normal" : "private")} type="button">
+          <button className="flex min-h-11 w-full items-center justify-between gap-4 text-left" disabled={busy} onClick={() => onSetPrivacyMode(privacyMode === "private" ? "normal" : "private")} type="button">
             <span><span className="block text-sm text-[#d9cfc4]">Keep this conversation separate</span><span className="mt-1 block text-xs leading-5 text-[#7e766e]">Messages remain in your history, but won’t shape memory, moments, or the relationship.</span></span>
             <span className={`relative h-6 w-11 shrink-0 rounded-full border transition ${privacyMode === "private" ? "border-[#b98265]/60 bg-[#8f5d47]" : "border-white/[0.12] bg-white/[0.07]"}`}><span className={`absolute left-1 top-1 h-4 w-4 rounded-full transition ${privacyMode === "private" ? "translate-x-5 bg-[#f4e6dc]" : "bg-[#a49a8f]"}`} /></span>
           </button>
@@ -743,4 +936,27 @@ function humanSystemEvent(message: Message): string {
 function characterTheme(character: Character | null): string {
   const value = character?.boundaries_json.visual_theme;
   return typeof value === "string" ? value : "";
+}
+
+function isNearLatest(scroller: HTMLElement): boolean {
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
+}
+
+function readScrollPosition(conversationId: string): number | null {
+  try {
+    const value = window.sessionStorage.getItem(`eidolon:scroll:${conversationId}`);
+    if (value === null) return null;
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveScrollPosition(conversationId: string, position: number) {
+  try {
+    window.sessionStorage.setItem(`eidolon:scroll:${conversationId}`, String(Math.max(0, position)));
+  } catch {
+    // Scroll restoration is an enhancement; conversation state remains server-owned.
+  }
 }

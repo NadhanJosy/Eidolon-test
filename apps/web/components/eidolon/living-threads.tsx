@@ -49,6 +49,7 @@ export function LivingThreadsPopover({
     <aside
       aria-label="Living threads"
       className="glass-surface absolute left-1/2 top-14 z-40 flex max-h-[min(36rem,calc(100dvh-11rem))] w-[min(94vw,38rem)] -translate-x-1/2 flex-col overflow-hidden rounded-[1.75rem] shadow-[0_28px_100px_rgba(0,0,0,0.65)] reveal-up"
+      id="living-threads-popover"
     >
       <div className="flex items-start justify-between gap-5 border-b border-white/[0.07] p-5 sm:p-6">
         <div>
@@ -83,7 +84,7 @@ export function LivingThreadsPopover({
         </div>
         {view === "open" && privacyMode === "normal" ? (
           <button
-            className="text-xs text-[#a6816d] transition hover:text-[#d1a58e]"
+            className="min-h-11 px-2 text-xs text-[#a6816d] transition hover:text-[#d1a58e]"
             onClick={() => setWriting((current) => !current)}
             type="button"
           >
@@ -270,7 +271,7 @@ function ThreadCard({
           </QuietButton>
         )}
         <IconButton
-          className="ml-auto h-9 w-9 border-transparent"
+          className="ml-auto border-transparent"
           disabled={busy}
           icon="trash"
           label="Release this thread permanently"
@@ -295,7 +296,7 @@ function ThreadTab({
   return (
     <button
       aria-pressed={active}
-      className={`rounded-full px-3 py-1.5 text-[0.67rem] transition ${
+      className={`min-h-11 rounded-full px-3 py-1.5 text-[0.67rem] transition ${
         active ? "bg-white/[0.09] text-[#dfd4ca]" : "text-[#746d66] hover:text-[#9e958c]"
       }`}
       onClick={onClick}

@@ -23,8 +23,8 @@ state rather than avatars, voice, video, or heavy visual effects.
   message.
 - Proactive notes are optional, restrained, and never pretend the companion was
   observing the user offline.
-- Operational and prompt internals stay in authenticated Debug surfaces rather
-  than leaking into the conversation.
+- Operational and prompt internals stay out of the consumer experience and are
+  available only through authenticated, owner-scoped diagnostic routes.
 - Safety gates remain structural even when adult mode is requested.
 
 ## Current product scope
@@ -53,6 +53,12 @@ Users can create and edit multiple companions. An authored profile covers:
 The API validates and canonicalizes the complete profile. The frontend is not a
 security boundary.
 
+First-run companion creation is a progressive meeting flow: presence,
+personality, relationship expectations, and an opening line appear before the
+deeper optional profile fields. An unfinished draft may be restored only within
+the same browser tab; the persisted companion remains the backend's source of
+truth.
+
 ### Conversations
 
 Each companion can have multiple threads. A thread supports:
@@ -67,6 +73,12 @@ Each companion can have multiple threads. A thread supports:
 - a normal or private thread mode
 - an optional thread-specific Shared Scene
 - one-turn privacy without changing the whole thread
+
+Chat safely renders a restrained subset of Markdown, including headings, lists,
+quotes, tables, links, and copyable fenced code. It restores a numeric scroll
+position per thread, opens unread replies at a visible boundary, and follows a
+stream only while the reader remains near the latest message. Browser offline
+status keeps the unsent draft editable but prevents a misleading send attempt.
 
 Thread and companion navigation must reject stale asynchronous results so a late
 request cannot overwrite a newer selection or session.
@@ -142,12 +154,15 @@ Thinking-of-you notes require an eligible general-scope shared moment; open-thre
 and milestone notes require their exact durable anchor. Generic availability is
 not enough reason to contact the user.
 
-### Debug and data control
+### Diagnostics and data control
 
-Authenticated Debug views expose bounded operational state for the current
-owner, including provider readiness, scheduler status, selected context IDs and
-types, recent safe diagnostic events, memory decisions, relationship state, and
-jobs.
+Authenticated diagnostic routes expose bounded operational state for the
+current owner, including provider readiness, scheduler status, selected context
+IDs and types, recent safe diagnostic events, memory decisions, relationship
+state, and jobs. The normal consumer client does not fetch or present these
+diagnostic payloads; its deliberate “invite a check-in” action retains the
+existing guarded proactive POST route. Export and erasure controls remain in
+Settings.
 
 They must not expose raw prompts, secrets, provider response bodies, stack
 traces, or another user's data.
@@ -156,12 +171,20 @@ traces, or another user's data.
 
 - lightweight, responsive, mobile-first, and keyboard usable
 - readable at narrow phone and desktop widths without document-level overflow
-- text-first, calm, and non-corporate
+- text-first, intimate, calm, and non-corporate, with a reusable dark
+  paper-and-ember visual language rather than a generic dashboard treatment
+- progressive onboarding that asks for essential choices first and keeps an
+  unfinished draft in the current tab
+- chat-centred navigation with stable per-view and per-thread scroll behaviour
 - visible but restrained composing and streaming states
+- safe rich-text replies, copyable code, and touch targets sized for mobile use
 - human continuity receipts that settle independently of reply streaming
-- understandable empty, loading, retry, and failure states
+- understandable empty, switching, offline, loading, retry, and failure states
+- deliberate confirmation for irreversible actions and explicit typed phrases
+  for bulk or account erasure
 - human relationship/privacy language in primary UI
-- provider, database, prompt, and scheduler details confined to Debug
+- provider, database, prompt, and scheduler details confined to authenticated
+  diagnostics rather than the normal client
 - reduced-motion support and no animation-dependent interaction
 - no authenticated offline cache or service worker
 

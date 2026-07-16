@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { validateCharacterDraft } from "./character-builder-model";
-import { CompanionPortrait, Feedback, IconButton, PrimaryButton, QuietButton, fieldClass } from "./experience-primitives";
+import { CompanionPortrait, EidolonWordmark, Feedback, IconButton, PrimaryButton, QuietButton, fieldClass } from "./experience-primitives";
 import { Icon } from "./icons";
 import type { CharacterDraft } from "./types";
 
@@ -14,12 +14,14 @@ const steps: OnboardingStep[] = ["welcome", "presence", "personality", "relation
 
 export function OnboardingExperience({
   initialDraft,
+  storageKey,
   userName,
   creatingAnother = false,
   onComplete,
   onClose
 }: {
   initialDraft: CharacterDraft;
+  storageKey: string;
   userName: string;
   creatingAnother?: boolean;
   onComplete: (draft: CharacterDraft) => Promise<{ ok: boolean; error?: string }>;
@@ -27,12 +29,44 @@ export function OnboardingExperience({
 }) {
   const [draft, setDraft] = useState<CharacterDraft>(initialDraft);
   const [step, setStep] = useState<OnboardingStep>(creatingAnother ? "presence" : "welcome");
+  const [draftHydrated, setDraftHydrated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const stepIndex = steps.indexOf(step);
   const visibleStepIndex = creatingAnother ? stepIndex - 1 : stepIndex;
   const visibleStepCount = creatingAnother ? steps.length - 1 : steps.length;
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const value = window.sessionStorage.getItem(storageKey);
+        if (value) {
+          const parsed = JSON.parse(value) as unknown;
+          if (isDraftSnapshot(parsed)) {
+            setDraft(restoreCharacterDraft(initialDraft, parsed.draft));
+            if (steps.includes(parsed.step) && !(creatingAnother && parsed.step === "welcome")) {
+              setStep(parsed.step);
+            }
+          }
+        }
+      } catch {
+        // The in-memory draft remains authoritative when browser storage is unavailable.
+      } finally {
+        setDraftHydrated(true);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [creatingAnother, initialDraft, storageKey]);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify({ draft, step }));
+    } catch {
+      // Drafts still remain available while this component stays mounted.
+    }
+  }, [draft, draftHydrated, step, storageKey]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -111,6 +145,12 @@ export function OnboardingExperience({
       const result = await onComplete(draft);
       if (!result.ok) {
         setError(result.error ?? "Your companion could not be saved just yet.");
+      } else {
+        try {
+          window.sessionStorage.removeItem(storageKey);
+        } catch {
+          // The persisted companion is authoritative even if local draft cleanup fails.
+        }
       }
     } catch {
       setError("Your companion could not be saved just yet. Everything you wrote is still here.");
@@ -124,7 +164,7 @@ export function OnboardingExperience({
       <div
         aria-labelledby="onboarding-title"
         aria-modal="true"
-        className="relative flex h-[100svh] w-full max-w-6xl overflow-hidden border-white/[0.09] bg-[#0d0c0b] shadow-veil sm:h-[min(88svh,54rem)] sm:rounded-[2rem] sm:border"
+        className="relative flex h-[100dvh] w-full max-w-6xl overflow-hidden border-white/[0.09] bg-[#0d0c0b] shadow-veil sm:h-[min(88dvh,54rem)] sm:rounded-[2rem] sm:border"
         ref={dialogRef}
         role="dialog"
       >
@@ -132,7 +172,7 @@ export function OnboardingExperience({
           <div aria-hidden="true" className="ambient-drift absolute -left-24 top-20 h-96 w-96 rounded-full bg-[#9e664d]/15 blur-[90px]" />
           <div aria-hidden="true" className="absolute -bottom-28 right-[-7rem] h-80 w-80 rounded-full bg-[#8b7b5c]/10 blur-[90px]" />
           <div className="relative flex h-full flex-col justify-between p-10">
-            <span className="font-eidolon-display text-xl">Eidolon</span>
+            <EidolonWordmark compact />
             <div className="flex flex-col items-center text-center">
               <CompanionPortrait name={companionName} size="large" theme={draft.visual_theme} />
               <p className="mt-7 text-xs uppercase tracking-[0.2em] text-[#8c7e73]">A presence taking shape</p>
@@ -165,7 +205,7 @@ export function OnboardingExperience({
           </div>
 
           <footer className="safe-area-composer flex items-center justify-between gap-3 border-t border-white/[0.07] bg-[#0d0c0b]/95 px-5 py-4 sm:px-8">
-            <div>{stepIndex > (creatingAnother ? 1 : 0) ? <QuietButton disabled={submitting} onClick={back}><span className="flex items-center gap-2"><Icon className="h-4 w-4" name="arrow-left" /> Back</span></QuietButton> : null}</div>
+            <div className="flex items-center gap-3">{stepIndex > (creatingAnother ? 1 : 0) ? <QuietButton disabled={submitting} onClick={back}><span className="flex items-center gap-2"><Icon className="h-4 w-4" name="arrow-left" /> Back</span></QuietButton> : null}<span className="hidden text-[0.65rem] text-[#746d65] sm:inline">Draft kept in this tab</span></div>
             {step === "begin" ? (
               <PrimaryButton disabled={submitting} onClick={() => void finish()}>{submitting ? "Bringing them closer…" : creatingAnother ? `Meet ${companionName}` : "Begin your first conversation"}</PrimaryButton>
             ) : (
@@ -227,6 +267,17 @@ function PersonalityStep({ draft, update }: StepProps) {
         <InputField label="What they care about"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("values", event.target.value)} placeholder="Honesty, curiosity, gentleness…" value={draft.values} /></InputField>
       </div>
       <InputField label="How their voice should feel"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("speech_style", event.target.value)} placeholder="Concise, intimate, unhurried, never clinical…" value={draft.speech_style} /></InputField>
+      <ProgressiveDetails label="Add more texture" detail="Worldview, emotional rhythm, affection, conflict, and initiative">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <InputField label="Worldview"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("worldview", event.target.value)} value={draft.worldview} /></InputField>
+          <InputField label="Emotional temperament"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("temperament", event.target.value)} value={draft.temperament} /></InputField>
+          <InputField label="How they show care"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={1600} onChange={(event) => update("affection_style", event.target.value)} value={draft.affection_style} /></InputField>
+          <InputField label="How they handle conflict"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={1600} onChange={(event) => update("conflict_style", event.target.value)} value={draft.conflict_style} /></InputField>
+          <InputField label="How they take initiative"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={1600} onChange={(event) => update("initiative_style", event.target.value)} value={draft.initiative_style} /></InputField>
+          <InputField label="Sense of humour"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("humor_style", event.target.value)} value={draft.humor_style} /></InputField>
+          <InputField label="Conversational habits"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={1600} onChange={(event) => update("habits", event.target.value)} value={draft.habits} /></InputField>
+        </div>
+      </ProgressiveDetails>
     </StepIntro>
   );
 }
@@ -235,9 +286,15 @@ function RelationshipStep({ draft, update }: StepProps) {
   const expectations = ["A trusted confidant", "A slow-building romance", "A playful companion", "A grounding presence"];
   return (
     <StepIntro eyebrow="The space between you" title="What kind of relationship can grow here?" description="This is an expectation, not a script. Closeness still has to emerge through the way you treat each other." id="onboarding-title">
-      <fieldset><legend className="sr-only">Relationship expectation</legend><div className="flex flex-wrap gap-2">{expectations.map((expectation) => <button aria-pressed={draft.relationship_type === expectation} className={`rounded-full border px-4 py-2.5 text-sm transition ${draft.relationship_type === expectation ? "border-[#b98265]/45 bg-[#b98265]/10 text-[#e1c8b8]" : "border-white/[0.09] text-[#9a9188] hover:border-white/[0.18]"}`} key={expectation} onClick={() => update("relationship_type", expectation)} type="button">{expectation}</button>)}</div></fieldset>
+      <fieldset><legend className="sr-only">Relationship expectation</legend><div className="flex flex-wrap gap-2">{expectations.map((expectation) => <button aria-pressed={draft.relationship_type === expectation} className={`min-h-11 rounded-full border px-4 py-2.5 text-sm transition ${draft.relationship_type === expectation ? "border-[#b98265]/45 bg-[#b98265]/10 text-[#e1c8b8]" : "border-white/[0.09] text-[#9a9188] hover:border-white/[0.18]"}`} key={expectation} onClick={() => update("relationship_type", expectation)} type="button">{expectation}</button>)}</div></fieldset>
       <InputField label="What good communication looks like"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={4000} onChange={(event) => update("consent_style", event.target.value)} placeholder="Checks in, respects pauses, asks rather than assumes…" value={draft.consent_style} /></InputField>
       <InputField label="Boundaries that should always hold"><textarea className={`${fieldClass} min-h-28 resize-none`} maxLength={4000} onChange={(event) => { update("boundary_notes", event.target.value); update("hard_limits", event.target.value); }} placeholder="What should they understand and never push past?" value={draft.boundary_notes} /></InputField>
+      <ProgressiveDetails label="Shape repair and gentler edges" detail="Optional nuance for hesitation, disagreement, and returning to calm">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <InputField label="Move gently around"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={4000} onChange={(event) => update("soft_limits", event.target.value)} placeholder="Topics or dynamics that need an extra check-in" value={draft.soft_limits} /></InputField>
+          <InputField label="How to return to calm"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={4000} onChange={(event) => update("aftercare_style", event.target.value)} placeholder="Space, reassurance, direct repair…" value={draft.aftercare_style} /></InputField>
+        </div>
+      </ProgressiveDetails>
       <p className="flex items-start gap-2 text-xs leading-5 text-[#756e67]"><Icon className="mt-0.5 h-4 w-4 shrink-0 text-[#9f7b68]" name="shield" /> Intimate settings stay separate and age-gated. You can decide on them later, privately, in Settings.</p>
     </StepIntro>
   );
@@ -255,6 +312,13 @@ function BeginStep({ draft, firstName, update }: StepProps & { firstName: string
         <label className="flex items-center justify-between gap-4 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4"><span><span className="block text-sm text-[#d2c7bc]">Remember what matters</span><span className="mt-1 block text-xs text-[#777068]">Preferences and meaningful details can become callbacks.</span></span><input checked={draft.remember_preferences} onChange={(event) => update("remember_preferences", event.target.checked)} type="checkbox" /></label>
         <label className="flex items-center justify-between gap-4 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4"><span><span className="block text-sm text-[#d2c7bc]">Thoughtful notes</span><span className="mt-1 block text-xs text-[#777068]">Allow occasional check-ins at respectful times.</span></span><input checked={draft.proactive_enabled} onChange={(event) => update("proactive_enabled", event.target.checked)} type="checkbox" /></label>
       </div>
+      <ProgressiveDetails label="Give the first chapter a little context" detail="Optional interests, backstory, and opening atmosphere">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <InputField label="Interests"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={2000} onChange={(event) => update("interests", event.target.value)} value={draft.interests} /></InputField>
+          <InputField label="Backstory"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={4000} onChange={(event) => update("backstory", event.target.value)} value={draft.backstory} /></InputField>
+        </div>
+        <InputField label="The atmosphere of your first conversations"><textarea className={`${fieldClass} min-h-24 resize-none`} maxLength={4000} onChange={(event) => update("scenario_preset", event.target.value)} value={draft.scenario_preset} /></InputField>
+      </ProgressiveDetails>
     </StepIntro>
   );
 }
@@ -269,6 +333,18 @@ function InputField({ label, children }: { label: string; children: ReactNode })
 
 function WelcomePromise({ icon, label }: { icon: "bookmark" | "heart" | "shield"; label: string }) {
   return <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4"><Icon className="h-5 w-5 text-[#b98265]" name={icon} /><p className="mt-3 text-sm text-[#c5baaf]">{label}</p></div>;
+}
+
+function ProgressiveDetails({ label, detail, children }: { label: string; detail: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-2xl border border-white/[0.08] bg-white/[0.018] p-4 sm:p-5">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4">
+        <span><span className="block text-sm text-[#cfc4b9]">{label}</span><span className="mt-1 block text-xs leading-5 text-[#777068]">{detail}</span></span>
+        <Icon className="h-4 w-4 shrink-0 text-[#8d7b70] transition group-open:rotate-180" name="chevron-down" />
+      </summary>
+      <div className="mt-5 space-y-5 border-t border-white/[0.07] pt-5">{children}</div>
+    </details>
+  );
 }
 
 type StepProps = { draft: CharacterDraft; update: <K extends keyof CharacterDraft>(field: K, value: CharacterDraft[K]) => void };
@@ -287,4 +363,30 @@ function stepError(step: OnboardingStep): string {
   if (step === "relationship") return "Choose a relationship expectation and boundaries that should hold.";
   if (step === "begin") return "Write the first line that will open your conversation.";
   return "A little more is needed before continuing.";
+}
+
+function isDraftSnapshot(value: unknown): value is { draft: Record<string, unknown>; step: OnboardingStep } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.draft === "object" &&
+    candidate.draft !== null &&
+    !Array.isArray(candidate.draft) &&
+    typeof candidate.step === "string" &&
+    steps.includes(candidate.step as OnboardingStep)
+  );
+}
+
+function restoreCharacterDraft(
+  initial: CharacterDraft,
+  stored: Record<string, unknown>
+): CharacterDraft {
+  const restored = { ...initial };
+  for (const key of Object.keys(initial) as Array<keyof CharacterDraft>) {
+    const value = stored[key];
+    if (typeof value === typeof initial[key]) {
+      (restored[key] as CharacterDraft[typeof key]) = value as CharacterDraft[typeof key];
+    }
+  }
+  return restored;
 }

@@ -56,13 +56,6 @@ type UseNavigationControllerArgs = {
   setError: (value: string | null) => void;
   setNotice: (value: string | null) => void;
   onActiveCharacterChange: (characterId: string | null) => void;
-  loadConversation: (
-    authToken: string,
-    conversationId: string,
-    signal?: AbortSignal,
-    shouldApply?: () => boolean,
-    expectedCharacterId?: string
-  ) => Promise<void>;
   refreshSideState: (
     authToken: string,
     characterId: string,
@@ -157,7 +150,6 @@ export function useNavigationController({
   setError,
   setNotice,
   onActiveCharacterChange,
-  loadConversation,
   refreshSideState
 }: UseNavigationControllerArgs) {
   const navigationVersion = useRef(0);
@@ -183,6 +175,7 @@ export function useNavigationController({
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [conversationSwitchingId, setConversationSwitchingId] = useState<string | null>(null);
   const activeConversationRef = useRef<Conversation | null>(activeConversation);
   activeConversationRef.current = activeConversation;
   const [conversationTitle, setConversationTitle] = useState("");
@@ -235,16 +228,6 @@ export function useNavigationController({
       character,
       title: conversation.title ?? ""
     };
-    await loadConversation(
-      authToken,
-      conversation.id,
-      undefined,
-      shouldApply,
-      character.id
-    );
-    if (shouldApply !== undefined && !shouldApply()) {
-      return;
-    }
     await refreshSideState(
       authToken,
       character.id,
@@ -591,6 +574,7 @@ export function useNavigationController({
       return false;
     }
     const fallback = stableNavigation.current;
+    setConversationSwitchingId(conversation.id);
     clearSearchState();
     setActiveConversation(conversation);
     setConversationTitle(conversation.title ?? "");
@@ -648,6 +632,10 @@ export function useNavigationController({
         ).catch(() => undefined);
       }
       return false;
+    } finally {
+      if (selectionVersion === navigationVersion.current) {
+        setConversationSwitchingId(null);
+      }
     }
   }
 
@@ -1356,6 +1344,7 @@ export function useNavigationController({
       return;
     }
     setActiveConversation(null);
+    setConversationSwitchingId(null);
     setConversationTitle("");
     setConversationScenarioDraft("");
     clearSearchState();
@@ -1741,6 +1730,7 @@ export function useNavigationController({
     setCharacters([]);
     setConversations([]);
     setActiveConversation(null);
+    setConversationSwitchingId(null);
     setConversationTitle("");
     setConversationScenarioDraft("");
     setScenarioSaving(false);
@@ -1939,6 +1929,7 @@ export function useNavigationController({
       characterMutating: characterActionId !== null,
       conversations,
       activeConversation,
+      conversationSwitchingId,
       conversationCreationMode,
       conversationCreating: conversationCreationMode !== null,
       provisioningCharacterId,

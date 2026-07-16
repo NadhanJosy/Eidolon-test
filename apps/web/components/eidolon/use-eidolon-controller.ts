@@ -37,7 +37,6 @@ import { useCompanionStateController } from "./use-companion-state-controller";
 import { useKnowledgeController } from "./use-knowledge-controller";
 import { useNavigationController } from "./use-navigation-controller";
 import { usePrivacyController } from "./use-privacy-controller";
-import { useRuntimeStatus } from "./use-runtime-status";
 
 type AuthStage = "submitting" | "opening";
 
@@ -86,8 +85,6 @@ export function useEidolonController() {
 
   const [requestedContentMode, setRequestedContentMode] = useState<ContentMode>("sfw");
 
-  const { runtimeStatus, refreshRuntimeStatus } = useRuntimeStatus();
-
   const [busy, setBusy] = useState(false);
   const [authStage, setAuthStage] = useState<AuthStage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +97,6 @@ export function useEidolonController() {
     setError,
     setNotice,
     onActiveCharacterChange: () => setRequestedContentMode("sfw"),
-    loadConversation,
     refreshSideState
   });
   const activeCharacterId = navigation.state.activeCharacterId;
@@ -230,7 +226,6 @@ export function useEidolonController() {
     }
     if (!adultStatusReady) {
       setRequestedContentMode("sfw");
-      companion.actions.setPanel("adult");
       setNotice(
         companion.state.adultReadinessState === "error"
           ? "Adult readiness could not be checked. Safe mode remains active."
@@ -240,7 +235,6 @@ export function useEidolonController() {
     }
     if (!adultModeAvailable) {
       setRequestedContentMode("sfw");
-      companion.actions.setPanel("adult");
       setNotice(adultModeBlockedNotice(companion.state.adultStatus));
       return false;
     }
@@ -587,7 +581,7 @@ export function useEidolonController() {
           );
         }
       } catch {
-        // Runtime status and explicit actions remain the user-facing error paths.
+        // Explicit actions remain the user-facing error path for presence refreshes.
       } finally {
         refreshing = false;
       }
@@ -691,21 +685,21 @@ export function useEidolonController() {
     if (shouldApply !== undefined && !shouldApply()) {
       return;
     }
-    await companion.actions.refreshCompanionState(
-      authToken,
-      characterId,
-      conversationId,
-      shouldApply
-    );
-    if (shouldApply !== undefined && !shouldApply()) {
-      return;
-    }
     await loadConversation(
       authToken,
       conversationId,
       undefined,
       shouldApply,
       characterId
+    );
+    if (shouldApply !== undefined && !shouldApply()) {
+      return;
+    }
+    await companion.actions.refreshCompanionState(
+      authToken,
+      characterId,
+      conversationId,
+      shouldApply
     );
   }
 
@@ -932,6 +926,7 @@ export function useEidolonController() {
       conversationProvisioning: navigation.state.conversationProvisioning,
       deletingConversationId: navigation.state.deletingConversationId,
       conversationDeleting: navigation.state.conversationDeleting,
+      conversationSwitchingId: navigation.state.conversationSwitchingId,
       activeConversationPrivacyMode: conversationPrivacyMode(navigation.state.activeConversation),
       conversationTitle: navigation.state.conversationTitle,
       conversationScenarioDraft: navigation.state.conversationScenarioDraft,
@@ -948,6 +943,7 @@ export function useEidolonController() {
       conversationMutating: privacy.conversationMutating,
       contentMode,
       adultReadinessState: companion.state.adultReadinessState,
+      sideStateError: companion.state.supportingStateError,
       adultStatusReady,
       adultModeAvailable,
       searchQuery: navigation.state.searchQuery,
@@ -983,11 +979,6 @@ export function useEidolonController() {
       accountMutating: account.state.accountMutating,
       relationship: companion.state.relationship,
       adultStatus: companion.state.adultStatus,
-      jobs: companion.state.jobs,
-      debug: companion.state.debug,
-      conversationDebug: companion.state.conversationDebug,
-      panel: companion.state.panel,
-      runtimeStatus,
       busy,
       sending: chat.state.sending,
       error,
@@ -1018,8 +1009,6 @@ export function useEidolonController() {
       setJournalEditTitle: knowledge.actions.setJournalEditTitle,
       setJournalEditSummary: knowledge.actions.setJournalEditSummary,
       setThreadDraft: knowledge.actions.setThreadDraft,
-      setPanel: companion.actions.setPanel,
-      refreshRuntimeStatus,
       handleAuth,
       createCharacter: navigation.actions.createCharacter,
       selectCharacter: navigation.actions.selectCharacter,

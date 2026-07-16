@@ -4,19 +4,56 @@
 
 :root {
   color-scheme: dark;
-  --ink: #090908;
-  --ink-soft: #0e0d0c;
-  --surface: #141310;
-  --surface-raised: #1b1916;
-  --paper: #f3eee5;
-  --paper-muted: #b8afa2;
-  --paper-faint: #7b746b;
-  --line: rgba(228, 215, 196, 0.13);
-  --line-strong: rgba(228, 215, 196, 0.24);
-  --accent: #b98265;
-  --accent-soft: #deb59d;
-  --accent-deep: #754a39;
-  --danger: #d79786;
+  /* Eidolon foundation: soot, vellum, and one companion-bound ember. */
+  --color-canvas: #090908;
+  --color-canvas-soft: #0e0d0c;
+  --color-surface: #141310;
+  --color-surface-raised: #1b1916;
+  --color-surface-quiet: rgba(255, 250, 242, 0.025);
+  --color-text: #f3eee5;
+  --color-text-soft: #c6bbae;
+  --color-text-muted: #978d82;
+  --color-text-faint: #746d65;
+  --color-border: rgba(228, 215, 196, 0.13);
+  --color-border-strong: rgba(228, 215, 196, 0.24);
+  --color-accent: #bd8163;
+  --color-accent-soft: #e0b59d;
+  --color-accent-deep: #754a39;
+  --color-danger: #d79786;
+  --color-success: #b5b58c;
+
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --tracking-eyebrow: 0.19em;
+  --measure-copy: 42rem;
+  --measure-chat: 48rem;
+  --radius-sm: 0.75rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.5rem;
+  --radius-xl: 2rem;
+  --radius-pill: 9999px;
+  --shadow-raised: 0 24px 70px rgba(0, 0, 0, 0.28);
+  --shadow-overlay: 0 30px 110px rgba(0, 0, 0, 0.62);
+  --ease-arrive: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-fast: 160ms;
+  --motion-base: 260ms;
+  --motion-slow: 520ms;
+
+  /* Backwards-compatible aliases while older utilities are retired. */
+  --ink: var(--color-canvas);
+  --ink-soft: var(--color-canvas-soft);
+  --surface: var(--color-surface);
+  --surface-raised: var(--color-surface-raised);
+  --paper: var(--color-text);
+  --paper-muted: var(--color-text-soft);
+  --paper-faint: var(--color-text-faint);
+  --line: var(--color-border);
+  --line-strong: var(--color-border-strong);
+  --accent: var(--color-accent);
+  --accent-soft: var(--color-accent-soft);
+  --accent-deep: var(--color-accent-deep);
+  --danger: var(--color-danger);
   --room-glow: 143 85 60;
   --room-low: 105 94 72;
   --aura-rgb: 190 128 94;
@@ -43,10 +80,8 @@ body {
   padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
   overflow-x: hidden;
   overscroll-behavior-y: none;
-  color: var(--paper);
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  color: var(--color-text);
+  font-family: var(--font-body);
   font-size: 16px;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
@@ -55,7 +90,7 @@ body {
 }
 
 .font-eidolon-display {
-  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-family: var(--font-display);
   font-weight: 400;
   letter-spacing: -0.025em;
 }
@@ -111,8 +146,16 @@ input:-webkit-autofill:focus {
 }
 
 :where(button, a, input, textarea, select, summary):focus-visible {
-  outline: 2px solid var(--accent-soft);
+  outline: 2px solid var(--color-accent-soft);
   outline-offset: 3px;
+}
+
+:where(button, a, summary) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(button, input, textarea, select):disabled {
+  cursor: not-allowed;
 }
 
 pre {
@@ -128,6 +171,8 @@ pre {
 }
 
 .eidolon-room[data-companion-theme="cedar"] {
+  --color-accent: #a8a379;
+  --color-accent-soft: #d3cea0;
   --accent: #a8a379;
   --accent-soft: #d3cea0;
   --room-glow: 111 116 72;
@@ -136,6 +181,8 @@ pre {
 }
 
 .eidolon-room[data-companion-theme="rain"] {
+  --color-accent: #78a7aa;
+  --color-accent-soft: #afd2d2;
   --accent: #78a7aa;
   --accent-soft: #afd2d2;
   --room-glow: 62 109 119;
@@ -144,6 +191,8 @@ pre {
 }
 
 .eidolon-room[data-companion-theme="plum"] {
+  --color-accent: #aa7f9b;
+  --color-accent-soft: #d6abc6;
   --accent: #aa7f9b;
   --accent-soft: #d6abc6;
   --room-glow: 121 69 104;
@@ -163,10 +212,110 @@ pre {
 }
 
 .glass-surface {
-  border: 1px solid var(--line);
+  border: 1px solid var(--color-border);
   background: linear-gradient(145deg, rgba(25, 23, 20, 0.9), rgba(15, 14, 12, 0.82));
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025), 0 24px 70px rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025), var(--shadow-raised);
   backdrop-filter: blur(18px);
+}
+
+.eidolon-surface {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-quiet);
+}
+
+.eidolon-eyebrow {
+  color: var(--color-text-muted);
+  font-size: 0.67rem;
+  font-weight: 600;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+}
+
+.eidolon-field {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--color-text);
+  box-shadow: inset 0 1px 8px rgba(0, 0, 0, 0.16);
+  transition:
+    border-color var(--motion-fast) ease,
+    background-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
+}
+
+.eidolon-field:hover {
+  border-color: var(--color-border-strong);
+}
+
+.eidolon-field:focus {
+  border-color: color-mix(in srgb, var(--color-accent) 72%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 11%, transparent);
+}
+
+.eidolon-prose {
+  overflow-wrap: anywhere;
+}
+
+.eidolon-prose > * + * {
+  margin-top: 0.85em;
+}
+
+.eidolon-prose :where(ul, ol) {
+  padding-left: 1.35rem;
+}
+
+.eidolon-prose ul {
+  list-style: disc;
+}
+
+.eidolon-prose ol {
+  list-style: decimal;
+}
+
+.eidolon-prose li + li {
+  margin-top: 0.32em;
+}
+
+.eidolon-prose blockquote {
+  border-left: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  padding-left: 1rem;
+  color: var(--color-text-soft);
+}
+
+.eidolon-prose a {
+  color: var(--color-accent-soft);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  text-underline-offset: 0.2em;
+}
+
+.eidolon-prose :not(pre) > code {
+  border: 1px solid var(--color-border);
+  border-radius: 0.4rem;
+  background: rgba(0, 0, 0, 0.24);
+  padding: 0.08em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.84em;
+}
+
+.eidolon-code {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #0a0908;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.eidolon-code pre {
+  max-height: 30rem;
+  overflow: auto;
+  padding: 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.65;
+  tab-size: 2;
 }
 
 .hairline {
@@ -180,6 +329,16 @@ pre {
 .context-strip,
 .hide-scrollbar {
   scrollbar-width: none;
+}
+
+.keyboard-hint {
+  display: none;
+}
+
+@media (pointer: fine) {
+  .keyboard-hint {
+    display: block;
+  }
 }
 
 .context-strip::-webkit-scrollbar,
@@ -214,12 +373,11 @@ pre {
 }
 
 .presence-dot {
-  box-shadow: 0 0 0 4px rgba(185, 130, 101, 0.08), 0 0 18px rgba(185, 130, 101, 0.48);
-  animation: presence-pulse 3.4s ease-in-out infinite;
+  box-shadow: 0 0 0 4px rgba(185, 130, 101, 0.08), 0 0 18px rgba(185, 130, 101, 0.34);
 }
 
 .message-enter {
-  animation: message-arrive 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: message-arrive 420ms var(--ease-arrive) both;
 }
 
 .ambient-drift {
@@ -227,11 +385,11 @@ pre {
 }
 
 .reveal-up {
-  animation: reveal-up 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: reveal-up var(--motion-slow) var(--ease-arrive) both;
 }
 
 .reveal-up-delayed {
-  animation: reveal-up 620ms 100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: reveal-up 620ms 100ms var(--ease-arrive) both;
 }
 
 .typing-dot {
@@ -257,11 +415,6 @@ pre {
 
 @keyframes aura-drift {
   to { transform: rotate(360deg); }
-}
-
-@keyframes presence-pulse {
-  0%, 100% { opacity: 0.72; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1.08); }
 }
 
 @keyframes message-arrive {

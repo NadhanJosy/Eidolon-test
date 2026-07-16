@@ -109,6 +109,7 @@ export function ConversationLibrary({
       <button aria-label="Close past conversations" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={onClose} type="button" />
       <aside
         aria-label="Past conversations"
+        aria-busy={busy}
         aria-modal="true"
         className="safe-area-header absolute bottom-0 left-0 top-0 flex w-[min(92vw,28rem)] flex-col border-r border-white/[0.09] bg-[#0f0e0d]/98 shadow-[30px_0_90px_rgba(0,0,0,0.45)] reveal-up"
         ref={panelRef}
@@ -126,7 +127,7 @@ export function ConversationLibrary({
           <section className="border-b border-white/[0.08] py-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xs uppercase tracking-[0.17em] text-[#81776e]">Companions</h3>
-              <button className="flex items-center gap-1.5 text-xs text-[#ad816b] hover:text-[#d4a88f]" disabled={busy} onClick={onCreateCompanion} type="button"><Icon className="h-3.5 w-3.5" name="plus" /> Shape another</button>
+              <button className="flex min-h-11 items-center gap-1.5 px-2 text-xs text-[#ad816b] hover:text-[#d4a88f]" disabled={busy} onClick={onCreateCompanion} type="button"><Icon className="h-3.5 w-3.5" name="plus" /> Shape another</button>
             </div>
             <div className="hide-scrollbar -mx-2 mt-4 flex gap-2 overflow-x-auto px-2 pb-1">
               {characters.map((character) => {
@@ -136,6 +137,7 @@ export function ConversationLibrary({
                     aria-pressed={active}
                     className={`flex min-w-36 items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${active ? "border-[#b98265]/30 bg-[#b98265]/[0.08]" : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14]"}`}
                     key={character.id}
+                    disabled={busy}
                     onClick={() => onSelectCharacter(character)}
                     type="button"
                   >
@@ -158,13 +160,14 @@ export function ConversationLibrary({
                 placeholder="Find something you said…"
                 value={searchQuery}
               />
-              <button className="absolute right-3 top-2.5 rounded-full px-2 py-1 text-xs text-[#9f7b68] disabled:opacity-40" disabled={!searchQuery.trim() || searchStatus === "loading"} type="submit">Find</button>
+              <button className="absolute inset-y-1 right-1 min-w-14 rounded-full px-2 text-xs text-[#9f7b68] disabled:opacity-40" disabled={!searchQuery.trim() || searchStatus === "loading"} type="submit">Find</button>
             </form>
             {searchError ? <p className="mt-3 text-xs text-[#d69587]" role="alert">{searchError}</p> : null}
+            {searchStatus === "loading" ? <p className="mt-3 flex items-center gap-2 text-xs text-[#8d8379]" role="status"><span className="typing-dot h-1.5 w-1.5 rounded-full bg-[color:var(--color-accent)]" /> Looking through this conversation…</p> : null}
             {searchStatus === "ready" && searchResults.length > 0 ? (
               <div className="mt-3 space-y-1 rounded-2xl border border-white/[0.08] bg-black/20 p-2">
                 {searchResults.map((message) => (
-                  <button className="block w-full rounded-xl px-3 py-2.5 text-left hover:bg-white/[0.05]" key={message.id} onClick={() => onSelectSearchResult(message)} type="button">
+                  <button className="block min-h-11 w-full rounded-xl px-3 py-2.5 text-left hover:bg-white/[0.05]" key={message.id} onClick={() => onSelectSearchResult(message)} type="button">
                     <span className="line-clamp-2 text-xs leading-5 text-[#b7ada2]">{message.content}</span>
                     <span className="mt-1 block text-[0.63rem] text-[#6e6861]">{message.role === "user" ? "You" : activeCharacter?.name ?? "Your companion"} · {shortDate(message.created_at)}</span>
                   </button>
@@ -187,6 +190,7 @@ export function ConversationLibrary({
                     aria-current={active ? "page" : undefined}
                     className={`group flex w-full items-center gap-4 rounded-2xl border px-4 py-4 text-left transition ${active ? "border-[#b98265]/25 bg-[#b98265]/[0.07]" : "border-transparent hover:border-white/[0.08] hover:bg-white/[0.025]"}`}
                     key={conversation.id}
+                    disabled={busy}
                     onClick={() => onSelectConversation(conversation)}
                     type="button"
                   >
@@ -202,6 +206,7 @@ export function ConversationLibrary({
             </div>
           </section>
         </div>
+        {busy ? <div className="absolute inset-x-0 bottom-0 border-t border-white/[0.07] bg-[#12100e]/95 px-5 py-3 text-center text-xs text-[#a1968b] backdrop-blur-xl" role="status">Opening that space…</div> : null}
       </aside>
     </div>
   );

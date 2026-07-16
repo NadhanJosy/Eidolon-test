@@ -2,6 +2,25 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 import { Icon, type IconName } from "./icons";
 
+export function EidolonWordmark({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-3">
+      <svg
+        aria-hidden="true"
+        className={`${compact ? "h-9 w-9 rounded-xl" : "h-10 w-10 rounded-[0.9rem]"} border border-white/[0.08] shadow-[0_8px_28px_rgba(0,0,0,0.24)]`}
+        viewBox="0 0 64 64"
+      >
+        <rect fill="#0b0a09" height="64" rx="14" width="64" />
+        <path d="M32 10C45 15.6 51.8 23 51.8 32S45 48.6 32 54.2C19 48.6 12.2 41.2 12.2 32S19 15.6 32 10Z" fill="none" stroke="#e8ddd1" strokeWidth="2.4" />
+        <path d="M32 17C40.3 21.2 44.3 26 44.3 32S40.3 42.8 32 47C23.7 42.8 19.7 38 19.7 32S23.7 21.2 32 17Z" fill="none" stroke="#bd8163" strokeDasharray="16.5 4.2" strokeLinecap="round" strokeWidth="1.8" />
+        <path d="M32 21.5V42.5" stroke="#e8ddd1" strokeLinecap="round" strokeWidth="2" />
+        <circle cx="32" cy="32" fill="#bd8163" r="2.5" />
+      </svg>
+      <span className={`font-eidolon-display ${compact ? "text-xl" : "text-2xl"}`}>Eidolon</span>
+    </span>
+  );
+}
+
 export function CompanionPortrait({
   name,
   theme,
@@ -59,7 +78,7 @@ function themeFromName(name: string): string {
 
 export function Eyebrow({ children }: { children: ReactNode }) {
   return (
-    <p className="text-[0.67rem] font-medium uppercase tracking-[0.2em] text-[#9a8f82]">
+    <p className="eidolon-eyebrow">
       {children}
     </p>
   );
@@ -105,7 +124,7 @@ export function IconButton({
   return (
     <button
       aria-label={label}
-      className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/[0.09] bg-white/[0.035] text-[#aaa095] transition hover:border-white/[0.2] hover:bg-white/[0.07] hover:text-[#f4ede4] disabled:cursor-not-allowed disabled:opacity-35 ${className}`}
+      className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border border-white/[0.09] bg-white/[0.035] text-[#aaa095] transition hover:border-white/[0.2] hover:bg-white/[0.07] hover:text-[#f4ede4] disabled:cursor-not-allowed disabled:opacity-35 ${className}`}
       title={label}
       type="button"
       {...props}
@@ -138,7 +157,7 @@ export function QuietButton({
 }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
-      className={`min-h-10 rounded-full border border-white/[0.11] bg-white/[0.025] px-4 text-sm text-[#c1b7ab] transition hover:border-white/[0.22] hover:bg-white/[0.06] hover:text-[#f2eae1] disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
+      className={`min-h-11 rounded-full border border-white/[0.11] bg-white/[0.025] px-4 text-sm text-[#c1b7ab] transition hover:border-white/[0.22] hover:bg-white/[0.06] hover:text-[#f2eae1] disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
       type="button"
       {...props}
     >
@@ -166,7 +185,7 @@ export function Field({
 }
 
 export const fieldClass =
-  "w-full rounded-2xl border border-white/[0.1] bg-black/20 px-4 py-3 text-sm leading-6 text-[#eee6dc] shadow-inner shadow-black/20 outline-none transition placeholder:text-[#69635c] hover:border-white/[0.16] focus:border-[#b98265]/70";
+  "eidolon-field px-4 py-3 text-sm leading-6 outline-none placeholder:text-[#746c64]";
 
 export function Toggle({
   checked,
