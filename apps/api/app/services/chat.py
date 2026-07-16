@@ -149,6 +149,7 @@ async def ensure_default_character(session: AsyncSession, user: User) -> Charact
             "memory_preferences": {
                 "remember_preferences": True,
                 "remember_emotional_notes": True,
+                "retention_mode": "balanced",
                 "private_mode_default": False,
                 "adult_memory_storage": False,
             },

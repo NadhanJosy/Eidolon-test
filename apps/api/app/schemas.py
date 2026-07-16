@@ -227,6 +227,11 @@ def _validate_memory_preferences(value: dict[str, Any]) -> None:
     ):
         if key in preferences and not isinstance(preferences[key], bool):
             raise ValueError(f"memory_preferences.{key} must be true or false.")
+    retention_mode = preferences.get("retention_mode")
+    if retention_mode not in {None, "minimal", "balanced", "long_lived"}:
+        raise ValueError(
+            "memory_preferences.retention_mode must be minimal, balanced, or long_lived."
+        )
 
 
 def _validate_proactive_preferences(value: dict[str, Any]) -> None:
@@ -445,15 +450,25 @@ class MemoryOut(BaseModel):
     source_message_id: uuid.UUID | None
     scope: Literal["general", "adult"]
     claim_key: str | None
+    retention_tier: Literal["transient", "normal", "core"]
+    lifecycle_state: Literal["active", "superseded", "forgotten"]
+    sensitivity: Literal["standard", "sensitive"]
     memory_type: str
     content: str
     importance: float
     confidence: float
     emotional_weight: float
+    emotional_context_json: dict[str, Any]
+    novelty: float
+    future_relevance: float
+    reinforcement_count: int
     pinned: bool
     decay_score: float
     contradiction_group: str | None
     last_recalled_at: datetime | None
+    last_reinforced_at: datetime | None
+    last_evidence_at: datetime | None
+    superseded_by_id: uuid.UUID | None
     forgotten_at: datetime | None
     metadata_json: dict[str, Any]
     created_at: datetime
@@ -469,6 +484,7 @@ class MemoryCreate(BaseModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     emotional_weight: float = Field(default=0.0, ge=-1.0, le=1.0)
+    retention_tier: Literal["transient", "normal", "core"] = "normal"
     pinned: bool = False
 
 
@@ -478,7 +494,40 @@ class MemoryUpdate(BaseModel):
     importance: float | None = Field(default=None, ge=0.0, le=1.0)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     emotional_weight: float | None = Field(default=None, ge=-1.0, le=1.0)
+    retention_tier: Literal["transient", "normal", "core"] | None = None
     pinned: bool | None = None
+
+
+class MemoryEvidenceOut(BaseModel):
+    id: uuid.UUID
+    memory_id: uuid.UUID
+    source_message_id: uuid.UUID | None
+    action: Literal[
+        "created",
+        "reinforced",
+        "merged",
+        "edited",
+        "corrected",
+        "forgotten",
+        "restored",
+        "resolved",
+    ]
+    actor: Literal["system", "user"]
+    reason: str
+    snapshot_json: dict[str, Any]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MemoryEntityOut(BaseModel):
+    id: uuid.UUID
+    entity_type: Literal["date", "person", "place", "project", "routine", "topic"]
+    name: str
+    first_seen_at: datetime
+    last_seen_at: datetime
+    mention_count: int
+    memory_count: int = Field(ge=0)
 
 
 class MemoryForgetResponse(BaseModel):
@@ -677,6 +726,9 @@ class ExportOut(BaseModel):
     conversations: list[dict[str, Any]]
     messages: list[dict[str, Any]]
     memories: list[dict[str, Any]]
+    memory_evidence: list[dict[str, Any]]
+    memory_entities: list[dict[str, Any]]
+    memory_entity_links: list[dict[str, Any]]
     episodic_journals: list[dict[str, Any]]
     continuity_threads: list[dict[str, Any]]
     relationship_states: list[dict[str, Any]]

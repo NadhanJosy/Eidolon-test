@@ -28,8 +28,10 @@ export function isCompleteMemoryItem(
   const forgottenAt = value.forgotten_at;
   const stateMatches =
     state === "any" ||
-    (state === "active" && forgottenAt === null) ||
-    (state === "forgotten" && validTimestamp(forgottenAt));
+    (state === "active" && forgottenAt === null && value.lifecycle_state === "active") ||
+    (state === "forgotten" &&
+      validTimestamp(forgottenAt) &&
+      (value.lifecycle_state === "forgotten" || value.lifecycle_state === "superseded"));
   return (
     validUuid(value.id) &&
     validUuid(value.user_id) &&
@@ -37,15 +39,30 @@ export function isCompleteMemoryItem(
     (value.source_message_id === null || validUuid(value.source_message_id)) &&
     (value.scope === "general" || value.scope === "adult") &&
     (value.claim_key === null || boundedText(value.claim_key, 160)) &&
+    (value.retention_tier === "transient" ||
+      value.retention_tier === "normal" ||
+      value.retention_tier === "core") &&
+    (value.lifecycle_state === "active" ||
+      value.lifecycle_state === "superseded" ||
+      value.lifecycle_state === "forgotten") &&
+    (value.sensitivity === "standard" || value.sensitivity === "sensitive") &&
     boundedText(value.memory_type, 80) &&
     boundedText(value.content, 1_000) &&
     finiteRange(value.importance, 0, 1) &&
     finiteRange(value.confidence, 0, 1) &&
     finiteRange(value.emotional_weight, -1, 1) &&
+    record(value.emotional_context_json) &&
+    finiteRange(value.novelty, 0, 1) &&
+    finiteRange(value.future_relevance, 0, 1) &&
+    Number.isInteger(value.reinforcement_count) &&
+    Number(value.reinforcement_count) >= 1 &&
     typeof value.pinned === "boolean" &&
     finiteRange(value.decay_score, 0, 1) &&
     (value.contradiction_group === null || boundedText(value.contradiction_group, 120)) &&
     (value.last_recalled_at === null || validTimestamp(value.last_recalled_at)) &&
+    (value.last_reinforced_at === null || validTimestamp(value.last_reinforced_at)) &&
+    (value.last_evidence_at === null || validTimestamp(value.last_evidence_at)) &&
+    (value.superseded_by_id === null || validUuid(value.superseded_by_id)) &&
     (forgottenAt === null || validTimestamp(forgottenAt)) &&
     stateMatches &&
     record(value.metadata_json) &&

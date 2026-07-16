@@ -105,7 +105,7 @@ async def build_reasoning_context(
         user_id=user.id,
         character_id=character.id,
         query=current_message,
-        limit=7,
+        limit=5,
         mark_recalled=False,
         scopes=scopes,
     )

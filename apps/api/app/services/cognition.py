@@ -15,9 +15,12 @@ from app.llm.base import LLMProvider, LLMProviderUnavailable, TokenUsage
 from app.models import EpisodicJournal, MemoryItem, Message, utc_now
 from app.services.journal import create_journal
 from app.services.memory import (
+    classify_memory_sensitivity,
     create_memory,
-    forget_memory,
     memory_type_allowed_by_preferences,
+    retention_tier_for_preferences,
+    supersede_memory,
+    user_opted_out_of_memory,
 )
 from app.services.relationship import clamp
 from app.services.safety import is_blocked_content
@@ -170,6 +173,25 @@ GROUNDING_PARAPHRASE_GROUPS = (
 )
 
 
+class CognitionEmotionalContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feeling: str | None = Field(default=None, max_length=120)
+    meaning: str | None = Field(default=None, max_length=240)
+    helped: str | None = Field(default=None, max_length=240)
+    hurt: str | None = Field(default=None, max_length=240)
+    resolution: str | None = Field(default=None, max_length=240)
+    resolved: bool | None = None
+
+
+class CognitionEntity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entity_type: str
+    name: str = Field(min_length=1, max_length=160)
+    evidence_quote: str = Field(min_length=1, max_length=240)
+
+
 class CognitionMemoryCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -181,6 +203,11 @@ class CognitionMemoryCandidate(BaseModel):
     salience: float = Field(ge=0.0, le=1.0)
     confidence: float = Field(ge=0.0, le=1.0)
     emotional_weight: float = Field(ge=-1.0, le=1.0)
+    novelty: float = Field(default=0.5, ge=0.0, le=1.0)
+    future_usefulness: float = Field(default=0.5, ge=0.0, le=1.0)
+    sensitivity: str = "standard"
+    emotional_context: CognitionEmotionalContext = Field(default_factory=CognitionEmotionalContext)
+    entities: list[CognitionEntity] = Field(default_factory=list, max_length=6)
     stability: str
     is_correction: bool
 
@@ -239,6 +266,10 @@ def turn_is_eligible(content: str, *, mode: str) -> bool:
     if mode == "off" or len(normalized) < 12:
         return False
     if any(marker in normalized for marker in UNSAFE_DURABLE_MARKERS):
+        return False
+    if user_opted_out_of_memory(content):
+        return False
+    if classify_memory_sensitivity(content) == "sensitive":
         return False
     if is_blocked_content(content):
         return False
@@ -321,6 +352,18 @@ async def apply_cognition_report(
             continue
         if candidate.stability == "transient" or candidate.confidence < 0.62:
             continue
+        if candidate.sensitivity != "standard":
+            continue
+        if classify_memory_sensitivity(candidate.canonical_text) != "standard":
+            continue
+        durable_value = (
+            candidate.salience * 0.3
+            + candidate.confidence * 0.25
+            + candidate.novelty * 0.15
+            + candidate.future_usefulness * 0.3
+        )
+        if durable_value < 0.58 and candidate.memory_type not in {"boundary", "promise"}:
+            continue
         memory, change = await _apply_memory_candidate(
             session,
             candidate=candidate,
@@ -328,6 +371,7 @@ async def apply_cognition_report(
             character_id=character_id,
             source_message_id=user_message.id,
             scope=scope,
+            memory_preferences=memory_preferences,
         )
         memory_ids.append(memory.id)
         if change not in labels:
@@ -386,6 +430,7 @@ async def _apply_memory_candidate(
     character_id: uuid.UUID,
     source_message_id: uuid.UUID,
     scope: str,
+    memory_preferences: dict[str, object],
 ) -> tuple[MemoryItem, str]:
     claim_key = _claim_key(candidate.claim_key, candidate.memory_type, candidate.canonical_text)
     result = await session.execute(
@@ -414,12 +459,18 @@ async def _apply_memory_candidate(
             importance=candidate.salience,
             confidence=candidate.confidence,
             emotional_weight=candidate.emotional_weight,
+            emotional_context=_grounded_emotional_context(candidate),
+            novelty=candidate.novelty,
+            future_relevance=candidate.future_usefulness,
+            retention_tier=_candidate_retention_tier(candidate, memory_preferences),
+            sensitivity="standard",
             source_message_id=source_message_id,
             extraction_metadata={"version": COGNITION_VERSION, "grounded": True},
             memory_source="grounded_cognition",
             scope=scope,
             claim_key=claim_key,
             retrieval_facets=candidate.retrieval_facets,
+            linked_entities=_grounded_entities(candidate),
         )
         return memory, "reinforced"
 
@@ -427,7 +478,6 @@ async def _apply_memory_candidate(
         marker in _normalized_text(candidate.evidence_quote) for marker in CORRECTION_MARKERS
     )
     if existing is not None and explicit_correction:
-        await forget_memory(session, existing, reason="superseded_by_explicit_correction")
         memory = await create_memory(
             session,
             user_id=user_id,
@@ -437,6 +487,11 @@ async def _apply_memory_candidate(
             importance=max(candidate.salience, 0.7),
             confidence=max(candidate.confidence, 0.82),
             emotional_weight=candidate.emotional_weight,
+            emotional_context=_grounded_emotional_context(candidate),
+            novelty=candidate.novelty,
+            future_relevance=max(candidate.future_usefulness, 0.75),
+            retention_tier=_candidate_retention_tier(candidate, memory_preferences),
+            sensitivity="standard",
             source_message_id=source_message_id,
             extraction_metadata={"version": COGNITION_VERSION, "grounded": True},
             memory_source="grounded_cognition",
@@ -445,11 +500,15 @@ async def _apply_memory_candidate(
             scope=scope,
             claim_key=claim_key,
             retrieval_facets=candidate.retrieval_facets,
+            linked_entities=_grounded_entities(candidate),
         )
-        existing.metadata_json = {
-            **(existing.metadata_json or {}),
-            "superseded_by_memory_id": str(memory.id),
-        }
+        await supersede_memory(
+            session,
+            existing,
+            replacement=memory,
+            reason="superseded_by_explicit_correction",
+            source_message_id=source_message_id,
+        )
         return memory, "corrected"
 
     memory = await create_memory(
@@ -461,6 +520,11 @@ async def _apply_memory_candidate(
         importance=candidate.salience,
         confidence=candidate.confidence,
         emotional_weight=candidate.emotional_weight,
+        emotional_context=_grounded_emotional_context(candidate),
+        novelty=candidate.novelty,
+        future_relevance=candidate.future_usefulness,
+        retention_tier=_candidate_retention_tier(candidate, memory_preferences),
+        sensitivity="standard",
         source_message_id=source_message_id,
         extraction_metadata={"version": COGNITION_VERSION, "grounded": True},
         memory_source="grounded_cognition",
@@ -468,6 +532,7 @@ async def _apply_memory_candidate(
         scope=scope,
         claim_key=claim_key,
         retrieval_facets=candidate.retrieval_facets,
+        linked_entities=_grounded_entities(candidate),
     )
     if existing is not None and existing.id != memory.id:
         group = f"claim:{hashlib.sha256(claim_key.encode()).hexdigest()[:32]}"
@@ -604,6 +669,8 @@ def _candidate_is_grounded(candidate: CognitionMemoryCandidate, source: str) -> 
         "transient",
     }:
         return False
+    if candidate.sensitivity not in {"standard", "sensitive"}:
+        return False
     evidence = _normalized_text(candidate.evidence_quote)
     normalized_source = _normalized_text(source)
     if not evidence or evidence not in normalized_source:
@@ -613,6 +680,64 @@ def _candidate_is_grounded(candidate: CognitionMemoryCandidate, source: str) -> 
     return _claim_is_grounded(
         candidate.canonical_text,
         candidate.evidence_quote,
+    )
+
+
+def _grounded_entities(candidate: CognitionMemoryCandidate) -> list[tuple[str, str]]:
+    allowed_types = {"date", "person", "place", "project", "routine", "topic"}
+    grounded: list[tuple[str, str]] = []
+    evidence_source = _normalized_text(candidate.evidence_quote)
+    for entity in candidate.entities:
+        entity_type = entity.entity_type.casefold()
+        evidence = _normalized_text(entity.evidence_quote)
+        if entity_type not in allowed_types or not evidence or evidence not in evidence_source:
+            continue
+        if not _claim_is_grounded(entity.name, entity.evidence_quote):
+            continue
+        pair = (entity_type, entity.name)
+        if pair not in grounded:
+            grounded.append(pair)
+    return grounded[:6]
+
+
+def _grounded_emotional_context(
+    candidate: CognitionMemoryCandidate,
+) -> dict[str, object]:
+    evidence = candidate.evidence_quote
+    context: dict[str, object] = {}
+    payload = candidate.emotional_context.model_dump(exclude_none=True)
+    for key in ("feeling", "meaning", "helped", "hurt", "resolution"):
+        value = payload.get(key)
+        if isinstance(value, str) and _claim_is_grounded(value, evidence):
+            context[key] = value
+    resolved = payload.get("resolved")
+    normalized_evidence = _normalized_text(evidence)
+    if resolved is True and any(
+        marker in normalized_evidence
+        for marker in ("better now", "fixed", "resolved", "worked it out")
+    ):
+        context["resolved"] = True
+    elif resolved is False and any(
+        marker in normalized_evidence
+        for marker in ("not resolved", "still hurts", "still unresolved", "unresolved")
+    ):
+        context["resolved"] = False
+    return context
+
+
+def _candidate_retention_tier(
+    candidate: CognitionMemoryCandidate,
+    memory_preferences: dict[str, object],
+) -> str:
+    proposed = (
+        "core"
+        if candidate.memory_type in {"boundary", "promise"} or candidate.future_usefulness >= 0.82
+        else "normal"
+    )
+    return retention_tier_for_preferences(
+        candidate.memory_type,
+        proposed,
+        memory_preferences,
     )
 
 
@@ -729,6 +854,15 @@ def _cognition_prompt(
             "Every evidence_quote must be an exact contiguous quote from that message.",
             "Do not infer unstated names, dates, preferences, relationships, or events.",
             "Prefer no memory over a speculative memory. Transient feelings are not durable facts.",
+            (
+                "Score novelty and future_usefulness independently. Mark contact, address, "
+                "financial, or similarly private identifiers as sensitive."
+            ),
+            (
+                "Emotional context must describe only what the evidence states: feeling, why it "
+                "mattered, what helped or hurt, and whether it resolved."
+            ),
+            "Entity names and entity evidence must be exact-grounded in the candidate evidence.",
             (
                 "An episode is worthy only when the exchange has specific lasting emotional "
                 "or shared-history value."

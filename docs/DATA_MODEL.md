@@ -128,11 +128,14 @@ does not make a private message eligible for memory or normal prompt history.
 Durable semantic memory owned by a user and companion:
 
 - optional source message, `general|adult` scope, and normalized claim key
+- `active|superseded|forgotten` lifecycle, `transient|normal|core` retention,
+  standard/sensitive classification, and optional replacement link
 - memory type and text
-- importance, confidence, emotional weight, pin state, and decay score
+- importance, confidence, novelty, future relevance, emotional weight/context,
+  recurrence count, pin state, and decay score
 - nullable `vector(384)` embedding
 - contradiction group and metadata links
-- last recall and optional forgotten time
+- last recall/evidence/reinforcement and optional forgotten time
 - bounded lifecycle/provenance metadata, including retrieval facets where useful
 
 Embeddings are backend-owned and never serialized. Forgotten rows remain
@@ -140,12 +143,24 @@ owner-visible but are excluded from active retrieval, prompt assembly, recall
 timestamps, and contradiction resolution until restored.
 
 Claim keys let an explicit grounded correction supersede the prior active claim;
-an unsupported difference remains an inspectable conflict instead. Adult rows
+the older row remains private correction history and cannot re-enter retrieval
+without a new decision. An unsupported difference remains an inspectable
+conflict instead. Adult rows
 are retrievable only for an effective adult turn and never enter normal recall.
 
 Current memory types include user facts, preferences, interests, people, places,
 dates, events, promises, themes, shared lore/moments, inside jokes, boundaries,
 and relationship milestones.
+
+`memory_evidence` stores the owner-exportable lifecycle record for creation,
+reinforcement, merge, edit, correction, forgetting, restoration, and conflict
+resolution. It links optional exact source messages and a bounded private
+snapshot; it is never written to diagnostics or prompt text.
+
+`memory_entities` deduplicates owner/companion-scoped people, places, dates,
+projects, routines, and topics. `memory_entity_links` forms the many-to-many
+shared-history graph. Entity rows track first/last evidence and mention count;
+hard memory deletion cascades links and removes orphan entities.
 
 ## `episodic_journals`
 
@@ -203,8 +218,8 @@ Durable asynchronous work:
 - status: `pending`, `running`, `done`, `failed`, or `cancelled`
 - lock owner/time, retry count, safe last error, and bounded payload
 
-Current work includes maintenance, `memory_extract`, `chat_postprocess`,
-`relationship_decay`, and `proactive_*` jobs. Internal exception text and
+Current work includes maintenance, `memory_extract`, `memory_maintenance`,
+`chat_postprocess`, `relationship_decay`, and `proactive_*` jobs. Internal exception text and
 rejected generated prose do not belong in job metadata.
 
 Post-chat payloads may retain safe cognition source/failure labels, bounded token

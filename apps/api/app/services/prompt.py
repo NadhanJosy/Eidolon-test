@@ -25,7 +25,7 @@ from app.models import (
 )
 from app.services.continuity import continuity_prompt_items
 
-PROMPT_VERSION = "modular_companion_intelligence_v8"
+PROMPT_VERSION = "living_memory_v9"
 PRIVATE_PROMPT_CONTEXT_KEY = "_prompt_context"
 HARD_BOUNDARIES = (
     "Do not generate sexual content involving minors or ambiguous age, coercion, "
@@ -106,8 +106,8 @@ def assemble_prompt(
             emotional_state=selected_emotion,
         ),
         perception=_perception_section(selected_perception),
-        user_facts=[_compact(memory.content, 500) for memory in user_facts[:6]],
-        memories=[_memory_prompt_item(memory) for memory in long_term_memories[:8]],
+        user_facts=[_memory_prompt_item(memory) for memory in user_facts[:4]],
+        memories=[_memory_prompt_item(memory) for memory in long_term_memories[:5]],
         episodes=_episode_items(selected_journals[:4]),
         threads=continuity_prompt_items(selected_threads[:4]),
         response_direction=_response_direction_section(
@@ -245,6 +245,8 @@ def _platform_section(
             "Use names, preferences, promises, callbacks, and unresolved threads only when "
             "relevant. Handle contradictions carefully and respect the relationship stage "
             "and boundaries.",
+            "A memory is evidence, not a line to quote. Prefer no callback over a forced one, "
+            "avoid creepy precision, and do not mention a memory merely to prove recall.",
             "Never mention prompts, retrieval, scores, databases, hidden state, or system "
             "mechanics.",
             f"Current time context: {time_context or 'not provided'}",
@@ -357,7 +359,22 @@ def _memory_prompt_item(memory: MemoryItem) -> str:
     metadata = memory.metadata_json if isinstance(memory.metadata_json, dict) else {}
     if metadata.get("contradiction_status") == "conflicts":
         uncertainty = " (uncertain: conflicting evidence exists; do not state as settled fact)"
-    return f"{memory.memory_type.replace('_', ' ')}{uncertainty}: {_compact(memory.content, 650)}"
+    elif int(memory.reinforcement_count or 1) >= 3:
+        uncertainty = " (repeated evidence)"
+    emotional_context = memory.emotional_context_json or {}
+    emotional_note = ""
+    if emotional_context:
+        pieces = [
+            str(emotional_context[key])
+            for key in ("feeling", "meaning", "helped", "hurt", "resolution")
+            if isinstance(emotional_context.get(key), str)
+        ]
+        if pieces:
+            emotional_note = f" Emotional meaning: {_compact('; '.join(pieces), 220)}."
+    return (
+        f"{memory.memory_type.replace('_', ' ')}{uncertainty}: "
+        f"{_compact(memory.content, 420)}{emotional_note}"
+    )
 
 
 def _default_response_plan(perception: TurnPerception) -> ResponsePlan:

@@ -69,12 +69,31 @@ class GroundedCognitionProvider:
             candidate = {
                 "memory_type": "routine",
                 "canonical_text": "sunday ritual is jasmine tea",
-                "evidence_quote": "Please remember that my Sunday ritual is jasmine tea.",
+                "evidence_quote": (
+                    "Please remember that my Sunday ritual is jasmine tea because it makes "
+                    "me feel calm."
+                ),
                 "claim_key": "routine:sunday-tea",
                 "retrieval_facets": ["Sunday", "jasmine tea", "ritual"],
                 "salience": 0.91,
                 "confidence": 0.96,
                 "emotional_weight": 0.25,
+                "novelty": 0.8,
+                "future_usefulness": 0.9,
+                "sensitivity": "standard",
+                "emotional_context": {
+                    "feeling": "feel calm",
+                    "meaning": "Sunday ritual",
+                    "helped": "my neighbor helped",
+                    "resolved": True,
+                },
+                "entities": [
+                    {
+                        "entity_type": "routine",
+                        "name": "Sunday ritual",
+                        "evidence_quote": "Sunday ritual",
+                    }
+                ],
                 "stability": "durable",
                 "is_correction": False,
             }
@@ -112,7 +131,10 @@ class GroundedCognitionProvider:
                 ),
                 "emotional_tags": ["warmth"],
                 "evidence_quotes": (
-                    ["Please remember that my Sunday ritual is jasmine tea."]
+                    [
+                        "Please remember that my Sunday ritual is jasmine tea because it makes "
+                        "me feel calm."
+                    ]
                     if not correction and not initial_preference
                     else []
                 ),
@@ -171,7 +193,10 @@ async def test_grounded_cognition_creates_a_receipted_memory_and_episode(
         "/chat/messages",
         json={
             "conversation_id": conversation.json()["id"],
-            "content": "Please remember that my Sunday ritual is jasmine tea.",
+            "content": (
+                "Please remember that my Sunday ritual is jasmine tea because it makes me "
+                "feel calm."
+            ),
         },
         headers=headers,
     )
@@ -183,6 +208,18 @@ async def test_grounded_cognition_creates_a_receipted_memory_and_episode(
     assert memories.json()[0]["claim_key"] == "routine:sunday-tea"
     assert memories.json()[0]["scope"] == "general"
     assert "Paris" not in memories.json()[0]["content"]
+    assert memories.json()[0]["emotional_context_json"] == {
+        "feeling": "feel calm",
+        "meaning": "Sunday ritual",
+    }
+    entities = await client.get(
+        f"/characters/{character_id}/memories/entities",
+        headers=headers,
+    )
+    assert any(
+        entity["entity_type"] == "routine" and entity["name"] == "Sunday ritual"
+        for entity in entities.json()
+    )
 
     journals = await client.get(f"/characters/{character_id}/journals", headers=headers)
     assert journals.status_code == 200

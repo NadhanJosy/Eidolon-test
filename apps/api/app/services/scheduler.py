@@ -19,6 +19,7 @@ from app.services.continuity import sync_continuity_from_message
 from app.services.conversation_privacy import conversation_is_private, message_is_private
 from app.services.jobs import (
     claim_due_jobs,
+    create_job,
     mark_job_deferred,
     mark_job_done,
     mark_job_failed,
@@ -27,6 +28,7 @@ from app.services.jobs import (
 from app.services.journal import maybe_create_journal_from_conversation
 from app.services.memory import (
     analyze_memory_candidate,
+    maintain_memories,
     maybe_extract_memory,
     memory_preferences_from_boundaries,
 )
@@ -148,6 +150,9 @@ async def _run_job(
         return
     if job.job_type == "memory_extract":
         await _run_memory_extract_job(session, job)
+        return
+    if job.job_type == "memory_maintenance":
+        await _run_memory_maintenance_job(session, job)
         return
     if job.job_type == "chat_postprocess":
         await _run_chat_postprocess_job(session, job, settings)
@@ -423,6 +428,12 @@ async def _run_chat_postprocess_job(
             user_id=user.id,
             character_id=character.id,
         )
+    if payload.get("memory_allowed") is True:
+        await ensure_memory_maintenance_job(
+            session,
+            user_id=user.id,
+            character_id=character.id,
+        )
     receipt_state = (
         "ready"
         if application is not None
@@ -462,6 +473,64 @@ async def _run_chat_postprocess_job(
             "cognition_usage": _safe_token_usage(analysis.usage if analysis is not None else None),
             "continuity_receipt": receipt,
         },
+    )
+
+
+async def _run_memory_maintenance_job(session: AsyncSession, job: ScheduledJob) -> None:
+    if job.user_id is None or job.character_id is None:
+        raise ValueError("Memory maintenance job is missing user or character.")
+    result = await maintain_memories(
+        session,
+        job.user_id,
+        job.character_id,
+    )
+    _merge_payload(
+        job,
+        {
+            "result": "memory_maintenance_complete",
+            "reviewed_count": result.reviewed,
+            "consolidated_count": result.consolidated,
+            "faded_count": result.faded,
+        },
+    )
+    await ensure_memory_maintenance_job(
+        session,
+        user_id=job.user_id,
+        character_id=job.character_id,
+        exclude_job_id=job.id,
+    )
+
+
+async def ensure_memory_maintenance_job(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    exclude_job_id: uuid.UUID | None = None,
+) -> ScheduledJob:
+    statement = (
+        select(ScheduledJob)
+        .where(
+            ScheduledJob.user_id == user_id,
+            ScheduledJob.character_id == character_id,
+            ScheduledJob.job_type == "memory_maintenance",
+            ScheduledJob.status.in_(("pending", "running")),
+        )
+        .order_by(ScheduledJob.run_at.asc(), ScheduledJob.id.asc())
+        .limit(1)
+    )
+    if exclude_job_id is not None:
+        statement = statement.where(ScheduledJob.id != exclude_job_id)
+    existing = (await session.execute(statement)).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    return await create_job(
+        session,
+        job_type="memory_maintenance",
+        run_at=utc_now() + timedelta(hours=24),
+        user_id=user_id,
+        character_id=character_id,
+        payload_json={"reason": "living_memory_lifecycle"},
     )
 
 

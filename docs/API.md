@@ -123,9 +123,13 @@ All memory routes are scoped below
 | GET | `/` | List `active`, `forgotten`, or `all` via `state`, separated by `scope` |
 | POST | `/` | Create manual general/adult memory; adult writes require all gates and storage opt-in |
 | GET | `/search?q=...` | Retrieve up to ten active relevant memories in one scope |
+| GET | `/entities` | List linked entities with evidence and memory counts |
+| GET | `/timeline` | List active memory chronologically, optionally by entity or query |
 | POST | `/forget` | Automatically forget eligible low-value memories |
 | DELETE | `/` | Permanently clear all companion memories |
+| DELETE | `/category/{category}` | Permanently clear one owned memory category and scope |
 | PATCH | `/{memory_id}` | Edit content/scoring/pin fields |
+| GET | `/{memory_id}/history` | List private evidence/lifecycle history for one owned memory |
 | POST | `/{memory_id}/forget` | Reversibly forget one memory |
 | POST | `/{memory_id}/restore` | Restore forgotten memory |
 | POST | `/{memory_id}/resolve` | Keep selected side of active conflict |
@@ -133,7 +137,10 @@ All memory routes are scoped below
 
 Raw embedding vectors are never returned. Scope defaults to `general`.
 Manual create and edit paths reject empty, credential-like, or hard-blocked
-durable text.
+durable text. Automatic capture also rejects explicit opt-out language and
+sensitive contact/address/financial identifiers without deliberate manual
+storage. Superseded correction rows appear in `forgotten`/`all` history but
+cannot be restored directly.
 
 ## Journals
 
@@ -185,7 +192,9 @@ Debug remains authenticated and owner-scoped. Production defaults to disabled.
 | DELETE | `/account` | Verify password, erase account, clear refresh cookie |
 
 The export contains the user profile, companions, conversations, messages,
-memories, journals, continuity threads, relationships, and scheduled jobs. It
+memories, memory evidence/entities/links, journals, continuity threads,
+relationships, and scheduled jobs. It
 excludes password and refresh-token hashes, auth throttles, raw embeddings,
 provider keys, and JWT secrets. Journal export includes scope and exact source
-message IDs; memory export includes scope and claim identity.
+message IDs; memory export includes scope, claim identity, lifecycle, retention,
+correction evidence, and linked-entity state.
