@@ -92,3 +92,7 @@ Validation:
 - Backend: 237 tests passed and the opt-in live-provider test was skipped.
 - Ruff lint and format checks passed.
 - Frontend ESLint, TypeScript, and static production build passed.
+- Disposable Chromium smoke checks passed at 390×844 and 1440×900 across
+  authentication, resumable onboarding, streaming chat, offline recovery,
+  confirmations, every primary view, responsive overflow, keyboard dismissal,
+  default-title continuity, and account erasure.

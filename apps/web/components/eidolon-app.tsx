@@ -222,9 +222,24 @@ export function EidolonApp() {
   }
 
   async function completeOnboarding(draft: CharacterDraft) {
+    const previousName = state.activeCharacter?.name.trim() || "Eidolon";
+    const currentTitle = state.activeConversation?.title?.trim() ?? "";
+    const shouldRefreshDefaultTitle =
+      !currentTitle ||
+      currentTitle === "Chat with Eidolon" ||
+      currentTitle === `Chat with ${previousName}`;
     const ok = await actions.saveCharacter(draft);
     if (!ok) {
       return { ok: false, error: "Those details could not be saved yet. Everything you wrote is still here." };
+    }
+    if (
+      shouldRefreshDefaultTitle &&
+      !(await actions.saveConversationTitle(`Chat with ${draft.name.trim()}`))
+    ) {
+      return {
+        ok: false,
+        error: `${draft.name.trim()} is saved, but the opening conversation title could not be refreshed. Try once more.`
+      };
     }
     if (onboardingKey) {
       window.localStorage.setItem(onboardingKey, "complete");

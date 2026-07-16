@@ -767,23 +767,23 @@ export function useNavigationController({
     }
   }
 
-  async function saveConversationTitle() {
-    const titleSnapshot = canonicalConversationTitle(conversationTitle);
+  async function saveConversationTitle(titleOverride?: string): Promise<boolean> {
+    const titleSnapshot = canonicalConversationTitle(titleOverride ?? conversationTitle);
     if (titleSnapshot === undefined) {
       setError(
         "Keep the conversation title to 200 characters or fewer."
       );
-      return;
+      return false;
     }
     if (activeConversation?.title === titleSnapshot) {
       setError(null);
       setConversationTitle(titleSnapshot ?? "");
       setNotice("Thread title is already saved.");
-      return;
+      return true;
     }
     const action = beginConversationMetadataMutation({ kind: "title", title: titleSnapshot });
     if (!action) {
-      return;
+      return false;
     }
     setBusy(true);
     setError(null);
@@ -792,19 +792,21 @@ export function useNavigationController({
         title: titleSnapshot
       });
       if (!updated || !conversationMetadataMutationStillApplies(action)) {
-        return;
+        return false;
       }
       const ownsActive = conversationMetadataMutationOwnsActive(action);
       mergeVerifiedMetadataSummary(action, updated, ownsActive);
       if (!ownsActive) {
-        return;
+        return true;
       }
       setConversationTitle(updated.title ?? "");
       setNotice("Thread title saved.");
+      return true;
     } catch (caught) {
       if (conversationMetadataMutationOwnsActive(action)) {
         setError(readError(caught));
       }
+      return false;
     } finally {
       finishConversationMetadataMutation(action);
     }
