@@ -14,6 +14,7 @@ from app.config import Settings, get_settings
 from app.db.session import AsyncSessionLocal
 from app.llm.factory import get_llm_provider
 from app.models import Character, Conversation, Message, ScheduledJob, User, utc_now
+from app.services.continuity import sync_continuity_from_message
 from app.services.conversation_privacy import conversation_is_private, message_is_private
 from app.services.jobs import (
     claim_due_jobs,
@@ -243,6 +244,7 @@ async def _run_proactive_job(
         force=_bool_payload(payload.get("force"), default=True),
         proactive_type=proactive_type,
         provider=get_llm_provider(settings),
+        continuity_thread_id=_optional_uuid(payload.get("continuity_thread_id")),
     )
     if message is None:
         _merge_payload(job, {"result": "skipped_by_cooldown_or_state"})
@@ -315,6 +317,7 @@ async def _run_chat_postprocess_job(session: AsyncSession, job: ScheduledJob) ->
     if character is None or user is None:
         raise ValueError("Post-chat job owner or character was not found.")
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+    source_message = await _message_from_job(session, job)
     if payload.get("memory_allowed") is True:
         await _run_memory_extract_job(session, job)
     else:
@@ -326,6 +329,13 @@ async def _run_chat_postprocess_job(session: AsyncSession, job: ScheduledJob) ->
                 "extracted_count": 0,
             },
         )
+    continuity_result = await sync_continuity_from_message(
+        session,
+        user_id=user.id,
+        character=character,
+        conversation=conversation,
+        message=source_message,
+    )
     journal = await maybe_create_journal_from_conversation(
         session,
         user=user,
@@ -343,6 +353,7 @@ async def _run_chat_postprocess_job(session: AsyncSession, job: ScheduledJob) ->
         {
             "result": "chat_postprocess_complete",
             "journal_id": str(journal.id) if journal is not None else None,
+            "continuity": continuity_result.safe_metadata(),
         },
     )
 
@@ -524,6 +535,15 @@ def _bool_payload(value: object, *, default: bool) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return default
+
+
+def _optional_uuid(value: object) -> uuid.UUID | None:
+    if value is None:
+        return None
+    try:
+        return uuid.UUID(str(value))
+    except ValueError:
+        return None
 
 
 def _increment_count(counts: dict[str, int], key: str | None) -> None:

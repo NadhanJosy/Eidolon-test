@@ -13,8 +13,8 @@ same high-level path:
 
 1. validate owner, thread, message, privacy, content mode, and hard boundaries,
 2. infer bounded intent, tone, subtext, time gap, and unresolved context,
-3. retrieve eligible memory, episodes, relationship state, Shared Scene, and
-   recent messages,
+3. retrieve eligible memory, episodes, living threads, relationship state,
+   Shared Scene, and recent messages,
 4. project qualitative emotional posture,
 5. choose a private response strategy, question policy, target length, rhythm,
    opening, callback posture, and optional initiative,
@@ -30,7 +30,7 @@ transcript. It must never be narrated in chat.
 ## Prompt assembly
 
 `apps/api/app/services/prompt.py` is the central renderer. Its current version is
-`modular_companion_intelligence_v7`.
+`modular_companion_intelligence_v8`.
 
 Modules are ordered from durable instructions toward the immediate request:
 
@@ -42,10 +42,11 @@ Modules are ordered from durable instructions toward the immediate request:
 6. current-turn perception,
 7. concise user facts,
 8. selected semantic memory,
-9. selected episodes, promises, callbacks, and open threads,
-10. private response direction,
-11. bounded recent history,
-12. current user message.
+9. selected episodes and callbacks,
+10. first-class living promises, plans, rituals, repairs, and follow-ups,
+11. private response direction,
+12. bounded recent history,
+13. current user message.
 
 The current message stays last. Context-budget trimming removes older or
 lower-priority context before safety, identity, or the current turn. Prompt
@@ -74,9 +75,9 @@ relationship/safety posture, provider, generation kind, prompt version/size, and
 bounded response-plan categories.
 
 It does not record prompt text, message prose, memory content, journal summaries,
-profile prose, credentials, or provider response bodies. Normal message schemas
-strip the private metadata; the owner-scoped conversation Debug endpoint validates
-it before display.
+profile prose, living-thread text, credentials, or provider response bodies.
+Normal message schemas strip the private metadata; the owner-scoped conversation
+Debug endpoint validates it before display.
 
 ## Memory layers
 
@@ -108,6 +109,21 @@ threads. Adult detail is redacted from durable episode prose.
 
 Manual notes have separate ownership metadata and are not overwritten by
 automatic conversation refresh.
+
+### Living threads
+
+`continuity_threads` separates unfinished intent from retrospective journal
+summaries. Automatic capture uses deterministic explicit markers for follow-up
+requests, promises, rituals, and grounded future plans; repair posture can label
+an explicit follow-up as repair. It rejects ordinary conversation, closures,
+credentials, blocked text, private turns, adult turns, and disabled learning.
+
+Retrieval ranks only open owned rows by relevance, conversation locality,
+salience, confidence, kind, and recency. Prompt items preserve the user's exact
+bounded wording while instructing the model not to invent completion or offline
+action. Explicit user closure can resolve a sufficiently matching thread;
+companion output cannot. Manual controls always provide resolve, reopen, and
+permanent deletion.
 
 ## Memory retrieval
 
@@ -187,6 +203,7 @@ Before queueing and delivery, proactive work checks:
 - configured IANA timezone, target local time, and quiet hours
 - current relationship posture
 - whether the referenced milestone/open thread is still valid
+- a per-thread follow-up cooldown for living threads
 
 Careful/repair posture suppresses pressure-prone milestone and delayed follow-up
 notes. Ordinary check-ins become more spacious. A note must not claim awareness
@@ -198,6 +215,11 @@ turns, relationship scores, adult detail, or debug state. Malformed, oversized,
 blocked, hidden-context, or unavailable provider output falls back to deterministic
 SFW copy. Only safe provenance labels are stored.
 
+An unresolved-thread nudge binds to an exact eligible living thread when one is
+queued. Delivery records its cooldown timestamp so repeated jobs cannot keep
+nudging the same promise. Legacy journal callbacks remain a compatibility
+fallback only for jobs without a bound living-thread ID.
+
 ## Testing invariants
 
 Automated coverage should preserve:
@@ -207,6 +229,8 @@ Automated coverage should preserve:
 - prompt order, budgets, privacy exclusion, and hidden-state non-disclosure
 - natural mock text without provider/prompt/score narration
 - selective memory, vector fallback, contradiction uncertainty, and forgetting
+- explicit living-thread extraction, owner isolation, lifecycle, source cleanup,
+  prompt selection, privacy exclusion, and proactive cooldown
 - gradual relationship progression and reversible source effects
 - job locking, retry caps, local-time deferral, cooldown, privacy, and anti-spam
 - safe proactive fallback and relationship-sensitive suppression

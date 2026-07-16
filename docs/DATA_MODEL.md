@@ -25,10 +25,12 @@ users
   |     |-- relationship_states (one per user + character)
   |     |-- memory_items
   |     |-- episodic_journals
+  |     |-- continuity_threads
   |     `-- scheduled_jobs
   `-- conversations
         |-- messages
         |-- episodic_journals
+        |-- continuity_threads
         `-- scheduled_jobs (conversation ID in bounded payload metadata)
 
 diagnostic_events belong to a user and may reference a character/conversation.
@@ -150,6 +152,22 @@ Durable episode summaries and manual notes:
 Generated rows record deterministic ownership/provenance and may be rebuilt from
 their conversation. Manual rows remain user-owned and are not overwritten by
 automatic journal refresh.
+
+## `continuity_threads`
+
+First-class unfinished future intent owned by a user and companion:
+
+- optional source conversation and source user message
+- kind: `follow_up`, `plan`, `promise`, `repair`, or `ritual`
+- bounded text, salience, confidence, and deterministic dedupe key
+- lifecycle status: `open` or `resolved`, with resolution time
+- last prompt reference, last proactive delivery, and bounded provenance metadata
+
+Automatic rows require explicit safe SFW user language. Private/adult turns and
+credential-like or blocked text are ineligible. Open rows can enter bounded
+prompt retrieval; resolved rows remain owner-visible but are excluded. A source
+message edit/delete removes the automatic row, conversation deletion cascades
+local rows, and account/companion deletion cascades all owned rows.
 
 ## `relationship_states`
 

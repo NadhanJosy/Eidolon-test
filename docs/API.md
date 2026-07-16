@@ -140,6 +140,21 @@ All routes are scoped below `/characters/{character_id}/journals`.
 
 Generated summaries cannot be mutated through manual-note endpoints.
 
+## Living continuity threads
+
+All routes are scoped below `/characters/{character_id}/threads`.
+
+| Method | Suffix | Purpose |
+| --- | --- | --- |
+| GET | `/?status=open|resolved|all` | List owned open/settled threads |
+| POST | `/` | Deliberately keep a safe thread in view |
+| PATCH | `/{thread_id}` | Edit kind/content/salience or open/resolve lifecycle |
+| DELETE | `/{thread_id}` | Permanently release one thread |
+
+Conversation-linked manual creation rejects private conversations. Automatic
+capture is backend post-chat work and is limited to explicit safe SFW user
+language. Owner-scoped missing resources return `404`.
+
 ## Debug
 
 Debug routes exist only when enabled by environment or in development/testing:
@@ -161,6 +176,6 @@ Debug remains authenticated and owner-scoped. Production defaults to disabled.
 | DELETE | `/account` | Verify password, erase account, clear refresh cookie |
 
 The export contains the user profile, companions, conversations, messages,
-memories, journals, relationships, and scheduled jobs. It excludes password and
-refresh-token hashes, auth throttles, raw embeddings, provider keys, and JWT
-secrets.
+memories, journals, continuity threads, relationships, and scheduled jobs. It
+excludes password and refresh-token hashes, auth throttles, raw embeddings,
+provider keys, and JWT secrets.

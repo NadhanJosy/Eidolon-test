@@ -24,3 +24,23 @@ Validation:
 - Frontend ESLint, TypeScript, and static production build passed.
 - All retained Markdown links resolved and all 50 FastAPI routes were represented
   in the API inventory.
+
+## 2026-07-16 — Living continuity threads
+
+Outcome:
+
+- Added first-class, owner-scoped plans, promises, rituals, repairs, and
+  follow-ups with conservative explicit-language capture and full user lifecycle
+  controls in chat and Relationship views.
+- Connected open threads to prompt planning, safe context manifests, export,
+  source-turn cleanup, and exact-thread proactive follow-ups with cooldown.
+- Kept private/adult turns, blocked text, and credential-like content outside
+  automatic capture, and made pull-request CI deterministic with explicit test
+  configuration and frontend type checking.
+
+Validation:
+
+- Alembic upgraded through `0010_living_threads`.
+- Backend: 230 tests passed and the opt-in live-provider test was skipped.
+- Ruff lint and format checks passed.
+- Frontend ESLint, TypeScript, and static production build passed.

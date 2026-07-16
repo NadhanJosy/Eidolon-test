@@ -2,6 +2,7 @@ import type {
   AdultStatus,
   AssembledContext,
   ConversationDebugPayload,
+  ContinuityThread,
   DebugPayload,
   Journal,
   MemoryItem,
@@ -94,6 +95,49 @@ export function isCompleteJournalList(
 ): value is Journal[] {
   return completeUniqueList<Journal>(value, 500, (item) =>
     isCompleteJournal(item, characterId)
+  );
+}
+
+export function isCompleteContinuityThread(
+  value: unknown,
+  characterId: string
+): value is ContinuityThread {
+  if (!record(value) || !boundedJson(value)) {
+    return false;
+  }
+  const status = value.status;
+  const resolvedAt = value.resolved_at;
+  return (
+    validUuid(value.id) &&
+    validUuid(value.user_id) &&
+    value.character_id === characterId &&
+    (value.conversation_id === null || validUuid(value.conversation_id)) &&
+    (value.source_message_id === null || validUuid(value.source_message_id)) &&
+    ["follow_up", "plan", "promise", "repair", "ritual"].includes(
+      String(value.thread_kind)
+    ) &&
+    boundedText(value.content, 600) &&
+    (status === "open" || status === "resolved") &&
+    finiteRange(value.salience, 0, 1) &&
+    finiteRange(value.confidence, 0, 1) &&
+    (value.last_referenced_at === null || validTimestamp(value.last_referenced_at)) &&
+    (value.last_proactive_at === null || validTimestamp(value.last_proactive_at)) &&
+    (resolvedAt === null || validTimestamp(resolvedAt)) &&
+    ((status === "open" && resolvedAt === null) ||
+      (status === "resolved" && validTimestamp(resolvedAt))) &&
+    record(value.metadata_json) &&
+    validTimestamp(value.created_at) &&
+    validTimestamp(value.updated_at) &&
+    Date.parse(value.updated_at) >= Date.parse(value.created_at)
+  );
+}
+
+export function isCompleteContinuityThreadList(
+  value: unknown,
+  characterId: string
+): value is ContinuityThread[] {
+  return completeUniqueList<ContinuityThread>(value, 100, (item) =>
+    isCompleteContinuityThread(item, characterId)
   );
 }
 
@@ -503,6 +547,8 @@ function validAssembledContext(value: unknown, characterId: string): value is As
     (manifest.scenario === undefined || validContextScenario(manifest.scenario)) &&
     completeUniqueList(manifest.memory_items, 12, validContextMemory) &&
     completeUniqueList(manifest.journal_items, 8, validContextJournal) &&
+    (manifest.continuity_threads === undefined ||
+      completeUniqueList(manifest.continuity_threads, 8, validContextContinuityThread)) &&
     completeUniqueList(manifest.recent_messages, 12, validRecentMessage) &&
     validContextSafety(manifest.safety) &&
     (manifest.orchestration === undefined || validOrchestration(manifest.orchestration)) &&
@@ -554,6 +600,17 @@ function validContextJournal(value: unknown): boolean {
     validUuid(value.id) &&
     boundedText(value.journal_type, 80) &&
     boundedStringList(value.continuity_signals, 8, 80)
+  );
+}
+
+function validContextContinuityThread(value: unknown): boolean {
+  return (
+    record(value) &&
+    validUuid(value.id) &&
+    ["follow_up", "plan", "promise", "repair", "ritual"].includes(
+      String(value.thread_kind)
+    ) &&
+    (value.status === "open" || value.status === "resolved")
   );
 }
 

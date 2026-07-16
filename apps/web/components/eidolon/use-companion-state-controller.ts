@@ -10,6 +10,7 @@ import {
   completeDebugPayload,
   completeRelationship,
   completeScheduledJobs,
+  isCompleteContinuityThreadList,
   isCompleteJournalList,
   isCompleteMemoryList
 } from "./companion-state-contract";
@@ -18,6 +19,7 @@ import type {
   AdultStatus,
   AdultReadinessState,
   ConversationDebugPayload,
+  ContinuityThread,
   DebugPayload,
   Journal,
   MemoryItem,
@@ -29,12 +31,14 @@ import type {
 type UseCompanionStateControllerArgs = {
   setMemories: (memories: MemoryItem[]) => void;
   setJournals: (journals: Journal[]) => void;
+  setContinuityThreads: (threads: ContinuityThread[]) => void;
   onAdultStatusChange: (characterId: string, status: AdultStatus | null) => void;
 };
 
 export function useCompanionStateController({
   setMemories,
   setJournals,
+  setContinuityThreads,
   onAdultStatusChange
 }: UseCompanionStateControllerArgs) {
   const refreshVersion = useRef(0);
@@ -64,6 +68,7 @@ export function useCompanionStateController({
       stateCharacterIdRef.current = characterId;
       setMemories([]);
       setJournals([]);
+      setContinuityThreads([]);
       setRelationship(emptyRelationship);
     }
     if (debugCharacterIdRef.current !== characterId) {
@@ -83,6 +88,7 @@ export function useCompanionStateController({
       debugResult,
       jobsResult,
       journalsResult,
+      threadsResult,
       adultResult,
       conversationDebugResult
     ] = await Promise.allSettled([
@@ -91,6 +97,9 @@ export function useCompanionStateController({
         apiJson<unknown>(`/debug/character/${characterId}`, { token: authToken }),
         apiJson<unknown>("/debug/jobs", { token: authToken }),
         apiJson<unknown>(`/characters/${characterId}/journals`, { token: authToken }),
+        apiJson<unknown>(`/characters/${characterId}/threads?status=all`, {
+          token: authToken
+        }),
         apiJson<unknown>(`/characters/${characterId}/adult-status`, { token: authToken }),
         conversationId
           ? apiJson<unknown>(`/debug/conversation/${conversationId}`, {
@@ -137,6 +146,12 @@ export function useCompanionStateController({
       isCompleteJournalList(journalsResult.value, characterId)
     ) {
       setJournals(journalsResult.value);
+    }
+    if (
+      threadsResult.status === "fulfilled" &&
+      isCompleteContinuityThreadList(threadsResult.value, characterId)
+    ) {
+      setContinuityThreads(threadsResult.value);
     }
     if (adultResult.status === "fulfilled") {
       const completeAdult = completeAdultStatus(adultResult.value);

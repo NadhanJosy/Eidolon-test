@@ -6,8 +6,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { characterOpeningGreeting } from "./controller-utils";
 import { CompanionPortrait, Feedback, IconButton, PrimaryButton, QuietButton, fieldClass } from "./experience-primitives";
 import { Icon } from "./icons";
+import { LivingThreadsPopover } from "./living-threads";
 import type {
   Character,
+  ContinuityThread,
   ContentMode,
   ConversationPrivacyMode,
   ConversationScenarioMode,
@@ -63,7 +65,15 @@ export function ChatSurface({
   onReroll,
   onRemember,
   onDelete,
-  onOpenMemories
+  onOpenMemories,
+  continuityThreads,
+  threadDraft,
+  threadActionId,
+  setThreadDraft,
+  onAddContinuityThread,
+  onResolveContinuityThread,
+  onReopenContinuityThread,
+  onDeleteContinuityThread
 }: {
   character: Character | null;
   editableTitle: string;
@@ -107,9 +117,18 @@ export function ChatSurface({
   onRemember: (message: Message) => void;
   onDelete: (message: Message) => void;
   onOpenMemories: () => void;
+  continuityThreads: ContinuityThread[];
+  threadDraft: string;
+  threadActionId: string | null;
+  setThreadDraft: (value: string) => void;
+  onAddContinuityThread: (event: FormEvent<HTMLFormElement>) => void;
+  onResolveContinuityThread: (thread: ContinuityThread) => void;
+  onReopenContinuityThread: (thread: ContinuityThread) => void;
+  onDeleteContinuityThread: (thread: ContinuityThread) => void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const [threadsOpen, setThreadsOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const rememberedIds = useMemo(() => new Set(rememberedMessageIds), [rememberedMessageIds]);
@@ -123,6 +142,7 @@ export function ChatSurface({
   );
   const name = character?.name ?? "Eidolon";
   const greeting = characterOpeningGreeting(character);
+  const openThreadCount = continuityThreads.filter((thread) => thread.status === "open").length;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -156,10 +176,13 @@ export function ChatSurface({
     <section className="relative flex h-full min-h-0 flex-col" aria-label={`Conversation with ${name}`}>
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-[#0b0a09] via-[#0b0a09]/70 to-transparent" />
 
-      <div className="relative z-20 flex justify-center px-4 pt-3">
+      <div className="relative z-20 flex justify-center gap-2 px-4 pt-3">
         <button
           className="group flex max-w-[min(92vw,32rem)] items-center gap-2 rounded-full border border-white/[0.07] bg-[#13110f]/75 px-3 py-1.5 text-xs text-[#8d847a] shadow-lg shadow-black/10 backdrop-blur-xl transition hover:border-white/[0.13] hover:text-[#bdb2a7]"
-          onClick={() => setContextOpen((current) => !current)}
+          onClick={() => {
+            setThreadsOpen(false);
+            setContextOpen((current) => !current);
+          }}
           type="button"
         >
           <Icon className="h-3.5 w-3.5 text-[#b98265]" name={privacyMode === "private" ? "lock" : "sparkles"} />
@@ -171,6 +194,22 @@ export function ChatSurface({
                 : characterScenario || "Your shared space"}
           </span>
           <Icon className={`h-3 w-3 transition ${contextOpen ? "rotate-180" : ""}`} name="chevron-down" />
+        </button>
+        <button
+          aria-expanded={threadsOpen}
+          className={`group flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg shadow-black/10 backdrop-blur-xl transition ${
+            threadsOpen
+              ? "border-[#b98265]/28 bg-[#b98265]/[0.09] text-[#c9a08a]"
+              : "border-white/[0.07] bg-[#13110f]/75 text-[#8d847a] hover:border-white/[0.13] hover:text-[#bdb2a7]"
+          }`}
+          onClick={() => {
+            setContextOpen(false);
+            setThreadsOpen((current) => !current);
+          }}
+          type="button"
+        >
+          <Icon className="h-3.5 w-3.5 text-[#b98265]" name="moon" />
+          <span>{openThreadCount > 0 ? `${openThreadCount} unfolding` : "Clear horizon"}</span>
         </button>
       </div>
 
@@ -189,6 +228,26 @@ export function ChatSurface({
           scenarioMode={scenarioMode}
           setEditableTitle={setEditableTitle}
           setScenarioDraft={setScenarioDraft}
+        />
+      ) : null}
+
+      {threadsOpen ? (
+        <LivingThreadsPopover
+          actionId={threadActionId}
+          draft={threadDraft}
+          privacyMode={privacyMode}
+          setDraft={setThreadDraft}
+          threads={continuityThreads}
+          onAdd={onAddContinuityThread}
+          onClose={() => setThreadsOpen(false)}
+          onDelete={onDeleteContinuityThread}
+          onReopen={onReopenContinuityThread}
+          onResolve={onResolveContinuityThread}
+          onReturn={(thread) => {
+            setDraft(`Can we come back to this: ${thread.content}`);
+            setThreadsOpen(false);
+            window.requestAnimationFrame(() => composerRef.current?.focus());
+          }}
         />
       ) : null}
 
@@ -279,18 +338,6 @@ export function ChatSurface({
                   icon="plus"
                   label="Conversation actions"
                   onClick={() => setToolsOpen((current) => !current)}
-                />
-                <IconButton
-                  className="h-9 w-9 border-transparent bg-transparent"
-                  disabled
-                  icon="attachment"
-                  label="Attachments are not available in this private text-only version"
-                />
-                <IconButton
-                  className="h-9 w-9 border-transparent bg-transparent"
-                  disabled
-                  icon="microphone"
-                  label="Voice is not recorded in this text-only version"
                 />
                 {contentMode === "adult" ? (
                   <span className="ml-1 rounded-full border border-[#b98265]/20 bg-[#b98265]/[0.06] px-2 py-1 text-[0.65rem] text-[#b9937f]">consent mode</span>

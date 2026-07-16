@@ -13,6 +13,7 @@ from app.companion.perception import infer_turn_perception
 from app.companion.soul import character_soul
 from app.models import (
     Character,
+    ContinuityThread,
     Conversation,
     EpisodicJournal,
     MemoryItem,
@@ -21,6 +22,7 @@ from app.models import (
     User,
     utc_now,
 )
+from app.services.continuity import retrieve_continuity_threads
 from app.services.conversation_privacy import ConversationPrivacyMode
 from app.services.conversation_scenario import (
     ConversationScenarioMode,
@@ -42,6 +44,7 @@ class ReasoningContext:
     relationship: RelationshipState
     memories: list[MemoryItem]
     journals: list[EpisodicJournal]
+    threads: list[ContinuityThread]
     recent_messages: list[Message]
     safety_status: dict
     time_context: str
@@ -96,6 +99,21 @@ async def build_reasoning_context(
     )
     journal_candidates = await list_journals(session, user.id, character.id, limit=50)
     journals = rank_relevant_journals(journal_candidates, query=current_message, limit=4)
+    threads = await retrieve_continuity_threads(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        query=current_message,
+        conversation_id=conversation.id,
+        limit=4,
+        mark_referenced=not is_private_turn,
+    )
+    perception = infer_turn_perception(
+        current_message,
+        recent_messages=recent_messages,
+        journals=journals,
+        threads=threads,
+    )
     pending_proactive_events = await list_pending_proactive_events(
         session,
         user_id=user.id,
@@ -120,6 +138,7 @@ async def build_reasoning_context(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         current_message=current_message,
         content_mode=safety_status["effective_mode"],
@@ -133,6 +152,7 @@ async def build_reasoning_context(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         current_message=current_message,
         content_mode=safety_status["effective_mode"],
@@ -146,6 +166,7 @@ async def build_reasoning_context(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         safety_status=safety_status,
         time_context=time_context,

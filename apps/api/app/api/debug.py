@@ -434,6 +434,7 @@ def _sanitize_context_manifest(value: object) -> dict[str, object] | None:
             limit=8,
             include_signals=True,
         ),
+        "continuity_threads": _sanitize_continuity_threads(value.get("continuity_threads")),
         "recent_messages": _sanitize_recent_messages(value.get("recent_messages")),
         "safety": {
             "effective_mode": "adult" if safety.get("effective_mode") == "adult" else "sfw",
@@ -514,6 +515,32 @@ def _sanitize_recent_messages(value: object) -> list[dict[str, str]]:
             }
         )
     return messages
+
+
+def _sanitize_continuity_threads(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    threads: list[dict[str, str]] = []
+    for raw_thread in value[:8]:
+        if not isinstance(raw_thread, dict):
+            continue
+        thread_id = _uuid_string(raw_thread.get("id"))
+        thread_kind = raw_thread.get("thread_kind")
+        status = raw_thread.get("status")
+        if (
+            thread_id is None
+            or thread_kind not in {"follow_up", "plan", "promise", "repair", "ritual"}
+            or status not in {"open", "resolved"}
+        ):
+            continue
+        threads.append(
+            {
+                "id": thread_id,
+                "thread_kind": thread_kind,
+                "status": status,
+            }
+        )
+    return threads
 
 
 def _valid_timestamp(value: object) -> str | None:

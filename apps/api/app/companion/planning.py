@@ -9,7 +9,7 @@ from app.companion.domain import (
     TurnPerception,
 )
 from app.companion.emotion import emotional_posture
-from app.models import EpisodicJournal, MemoryItem, Message, RelationshipState
+from app.models import ContinuityThread, EpisodicJournal, MemoryItem, Message, RelationshipState
 
 
 def plan_response(
@@ -23,6 +23,7 @@ def plan_response(
     recent_messages: Sequence[Message],
     content_mode: str,
     safety_status: dict,
+    threads: Sequence[ContinuityThread] = (),
 ) -> ResponsePlan:
     strategy, secondary = _strategies(
         soul=soul,
@@ -44,6 +45,7 @@ def plan_response(
         relationship=relationship,
         memories=memories,
         journals=journals,
+        threads=threads,
         recent_messages=recent_messages,
         strategy=strategy,
     )
@@ -66,7 +68,7 @@ def plan_response(
         initiative_anchor=anchor,
         memory_callback_id=memory_id,
         tone=emotional_posture(emotion, repair_needed=relationship.repair_needed),
-        continuity=_continuity(perception, relationship, journals),
+        continuity=_continuity(perception, relationship, journals, threads),
         boundary_posture=boundary_posture,
         avoid=_avoid_list(perception, question),
     )
@@ -195,6 +197,7 @@ def _initiative(
     relationship: RelationshipState,
     memories: Sequence[MemoryItem],
     journals: Sequence[EpisodicJournal],
+    threads: Sequence[ContinuityThread],
     recent_messages: Sequence[Message],
     strategy: str,
 ) -> tuple[str, str, str | None]:
@@ -215,6 +218,10 @@ def _initiative(
     if perception.callback_signal and memories:
         memory = memories[0]
         return "memory_callback", _compact(memory.content, 180), str(memory.id)
+
+    for thread in threads:
+        if thread.status == "open" and perception.intent == "connect":
+            return "unresolved_thread", _compact(thread.content, 180), None
 
     for journal in journals:
         if journal.unresolved_threads_json and perception.intent == "connect":
@@ -261,11 +268,14 @@ def _continuity(
     perception: TurnPerception,
     relationship: RelationshipState,
     journals: Sequence[EpisodicJournal],
+    threads: Sequence[ContinuityThread],
 ) -> str:
     if relationship.repair_needed:
         return "keep the repair arc visible and let trust recover through repeated evidence"
     if perception.unresolved_context and journals:
         return "keep the unresolved thread available without dragging it into every turn"
+    if perception.unresolved_context and threads:
+        return "keep the grounded living thread available without forcing a callback"
     if perception.callback_signal:
         return "use only selected memory evidence; acknowledge uncertainty rather than inventing"
     return "stay with the current moment and preserve the established relationship pace"

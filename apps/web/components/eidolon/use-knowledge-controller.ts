@@ -5,6 +5,8 @@ import { FormEvent, useLayoutEffect, useRef, useState } from "react";
 import { apiJson } from "@/lib/api";
 
 import {
+  isCompleteContinuityThread,
+  isCompleteContinuityThreadList,
   isCompleteJournal as isJournal,
   isCompleteJournalList as isJournalArray,
   isCompleteMemoryItem as isMemoryItem,
@@ -12,6 +14,7 @@ import {
 } from "./companion-state-contract";
 import { readError } from "./controller-utils";
 import type {
+  ContinuityThread,
   Conversation,
   Journal,
   MemoryItem,
@@ -53,6 +56,14 @@ type JournalAction = {
   title: string | null;
   summary: string | null;
   knownIds: ReadonlySet<string>;
+};
+
+type ThreadAction = {
+  kind: "add" | "delete" | "resolve" | "reopen";
+  key: string;
+  characterId: string;
+  conversationId: string | null;
+  targetId: string | null;
 };
 
 type UseKnowledgeControllerArgs = {
@@ -101,11 +112,15 @@ export function useKnowledgeController({
   const [journalEditTitle, setJournalEditTitle] = useState("");
   const [journalEditSummary, setJournalEditSummary] = useState("");
   const [journalActionId, setJournalActionId] = useState<string | null>(null);
+  const [continuityThreads, setContinuityThreads] = useState<ContinuityThread[]>([]);
+  const [threadDraft, setThreadDraft] = useState("");
+  const [threadActionId, setThreadActionId] = useState<string | null>(null);
   const activeCharacterIdRef = useRef(activeCharacterId);
   const activeConversationId = activeConversation?.id ?? null;
   const activeConversationIdRef = useRef(activeConversationId);
   const memoryActionInFlight = useRef<MemoryAction | null>(null);
   const journalActionInFlight = useRef<JournalAction | null>(null);
+  const threadActionInFlight = useRef<ThreadAction | null>(null);
   const forgottenMemoriesCharacterIdRef = useRef<string | null>(null);
   const forgottenRequestVersionRef = useRef(0);
 
@@ -127,6 +142,11 @@ export function useKnowledgeController({
       journalActionInFlight.current = null;
       setJournalActionId(null);
     }
+    const threadAction = threadActionInFlight.current;
+    if (threadAction && threadAction.characterId !== activeCharacterId) {
+      threadActionInFlight.current = null;
+      setThreadActionId(null);
+    }
     setMemories([]);
     setMemoryContent("");
     setMemoryPinned(false);
@@ -144,6 +164,8 @@ export function useKnowledgeController({
     setEditingJournalId(null);
     setJournalEditTitle("");
     setJournalEditSummary("");
+    setContinuityThreads([]);
+    setThreadDraft("");
   }, [activeCharacterId]);
 
   useLayoutEffect(() => {
@@ -227,6 +249,51 @@ export function useKnowledgeController({
     }
     journalActionInFlight.current = null;
     setJournalActionId(null);
+  }
+
+  function beginThreadAction(action: ThreadAction): boolean {
+    if (threadActionInFlight.current !== null) {
+      return false;
+    }
+    threadActionInFlight.current = action;
+    setThreadActionId(action.key);
+    return true;
+  }
+
+  function threadActionStillApplies(action: ThreadAction): boolean {
+    return (
+      threadActionInFlight.current === action &&
+      activeCharacterIdRef.current === action.characterId
+    );
+  }
+
+  function finishThreadAction(action: ThreadAction) {
+    if (threadActionInFlight.current !== action) {
+      return;
+    }
+    threadActionInFlight.current = null;
+    setThreadActionId(null);
+  }
+
+  async function recoverCanonicalThreads(
+    authToken: string,
+    action: ThreadAction
+  ): Promise<ContinuityThread[] | null> {
+    if (!threadActionStillApplies(action)) {
+      return null;
+    }
+    const value = await apiJson<unknown>(
+      `/characters/${action.characterId}/threads?status=all`,
+      { token: authToken }
+    );
+    if (!isCompleteContinuityThreadList(value, action.characterId)) {
+      throw new Error("The living threads returned in an unexpected shape.");
+    }
+    if (!threadActionStillApplies(action)) {
+      return null;
+    }
+    setContinuityThreads(value);
+    return value;
   }
 
   async function recoverCanonicalJournals(
@@ -1264,9 +1331,215 @@ export function useKnowledgeController({
     }
   }
 
+  async function addContinuityThread(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const content = threadDraft.trim().replace(/\s+/g, " ");
+    if (
+      !token ||
+      !activeCharacterId ||
+      !content ||
+      threadActionInFlight.current
+    ) {
+      return;
+    }
+    if (content.length > 600) {
+      setError("Keep living threads to 600 characters or fewer.");
+      return;
+    }
+    const authToken = token;
+    const requestCharacterId = activeCharacterId;
+    const requestConversationId = activeConversation?.id ?? null;
+    const action: ThreadAction = {
+      kind: "add",
+      key: "thread:add",
+      characterId: requestCharacterId,
+      conversationId: requestConversationId,
+      targetId: null
+    };
+    if (!beginThreadAction(action)) {
+      return;
+    }
+    let persisted = false;
+    setError(null);
+    setNotice(null);
+    try {
+      const value = await apiJson<unknown>(
+        `/characters/${requestCharacterId}/threads`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            conversation_id: requestConversationId,
+            thread_kind: "follow_up",
+            content,
+            salience: 0.75
+          }),
+          token: authToken
+        }
+      );
+      persisted = true;
+      if (isCompleteContinuityThread(value, requestCharacterId)) {
+        if (threadActionStillApplies(action)) {
+          setContinuityThreads((current) => upsertContinuityThread(current, value));
+        }
+      } else {
+        const recovered = await recoverCanonicalThreads(authToken, action);
+        if (recovered !== null && !recovered.some((thread) => thread.content === content)) {
+          throw new Error("The new living thread could not be found again.");
+        }
+      }
+      if (threadActionStillApplies(action)) {
+        setThreadDraft("");
+        setNotice("That thread will stay in view until you close it.");
+      }
+    } catch (caught) {
+      if (threadActionStillApplies(action)) {
+        setError(
+          persisted
+            ? "The thread was kept, but continuity could not refresh. Reload Eidolon before changing it again."
+            : readError(caught)
+        );
+      }
+    } finally {
+      finishThreadAction(action);
+    }
+  }
+
+  async function setContinuityThreadStatus(
+    thread: ContinuityThread,
+    status: "open" | "resolved"
+  ) {
+    if (
+      !token ||
+      !activeCharacterId ||
+      thread.character_id !== activeCharacterId ||
+      threadActionInFlight.current
+    ) {
+      return;
+    }
+    const authToken = token;
+    const requestCharacterId = activeCharacterId;
+    const action: ThreadAction = {
+      kind: status === "resolved" ? "resolve" : "reopen",
+      key: `thread:${status}:${thread.id}`,
+      characterId: requestCharacterId,
+      conversationId: thread.conversation_id,
+      targetId: thread.id
+    };
+    if (!beginThreadAction(action)) {
+      return;
+    }
+    let persisted = false;
+    setError(null);
+    setNotice(null);
+    try {
+      const value = await apiJson<unknown>(
+        `/characters/${requestCharacterId}/threads/${thread.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status }),
+          token: authToken
+        }
+      );
+      persisted = true;
+      if (
+        isCompleteContinuityThread(value, requestCharacterId) &&
+        value.id === thread.id &&
+        value.status === status
+      ) {
+        if (threadActionStillApplies(action)) {
+          setContinuityThreads((current) => upsertContinuityThread(current, value));
+        }
+      } else {
+        const recovered = await recoverCanonicalThreads(authToken, action);
+        if (
+          recovered !== null &&
+          !recovered.some((item) => item.id === thread.id && item.status === status)
+        ) {
+          throw new Error("The living thread status could not be confirmed.");
+        }
+      }
+      if (threadActionStillApplies(action)) {
+        setNotice(
+          status === "resolved"
+            ? "That loop is now part of your settled history."
+            : "That thread is open again."
+        );
+      }
+    } catch (caught) {
+      if (threadActionStillApplies(action)) {
+        setError(
+          persisted
+            ? "The thread changed, but continuity could not refresh. Reload Eidolon before changing it again."
+            : readError(caught)
+        );
+      }
+    } finally {
+      finishThreadAction(action);
+    }
+  }
+
+  async function deleteContinuityThread(thread: ContinuityThread) {
+    if (
+      !token ||
+      !activeCharacterId ||
+      thread.character_id !== activeCharacterId ||
+      threadActionInFlight.current
+    ) {
+      return;
+    }
+    const authToken = token;
+    const requestCharacterId = activeCharacterId;
+    const action: ThreadAction = {
+      kind: "delete",
+      key: `thread:delete:${thread.id}`,
+      characterId: requestCharacterId,
+      conversationId: thread.conversation_id,
+      targetId: thread.id
+    };
+    if (!beginThreadAction(action)) {
+      return;
+    }
+    let persisted = false;
+    setError(null);
+    setNotice(null);
+    try {
+      const value = await apiJson<unknown>(
+        `/characters/${requestCharacterId}/threads/${thread.id}`,
+        { method: "DELETE", token: authToken }
+      );
+      persisted = true;
+      if (isDeleteCountResponse(value) && value.deleted >= 1) {
+        if (threadActionStillApplies(action)) {
+          setContinuityThreads((current) =>
+            current.filter((item) => item.id !== thread.id)
+          );
+        }
+      } else {
+        const recovered = await recoverCanonicalThreads(authToken, action);
+        if (recovered !== null && recovered.some((item) => item.id === thread.id)) {
+          throw new Error("The living thread could not be confirmed as deleted.");
+        }
+      }
+      if (threadActionStillApplies(action)) {
+        setNotice("That thread was permanently released.");
+      }
+    } catch (caught) {
+      if (threadActionStillApplies(action)) {
+        setError(
+          persisted
+            ? "The thread was released, but continuity could not refresh. Reload Eidolon before changing another."
+            : readError(caught)
+        );
+      }
+    } finally {
+      finishThreadAction(action);
+    }
+  }
+
   function resetKnowledge() {
     memoryActionInFlight.current = null;
     journalActionInFlight.current = null;
+    threadActionInFlight.current = null;
     setMemories([]);
     setMemoryContent("");
     setMemoryPinned(false);
@@ -1288,6 +1561,9 @@ export function useKnowledgeController({
     setJournalEditTitle("");
     setJournalEditSummary("");
     setJournalActionId(null);
+    setContinuityThreads([]);
+    setThreadDraft("");
+    setThreadActionId(null);
   }
 
   return {
@@ -1313,7 +1589,11 @@ export function useKnowledgeController({
       journalEditTitle,
       journalEditSummary,
       journalActionId,
-      journalMutating: journalActionId !== null
+      journalMutating: journalActionId !== null,
+      continuityThreads,
+      threadDraft,
+      threadActionId,
+      threadMutating: threadActionId !== null
     },
     actions: {
       setMemories,
@@ -1325,10 +1605,12 @@ export function useKnowledgeController({
       setMemoryEditContent,
       changeMemoryView,
       setJournals,
+      setContinuityThreads,
       setJournalTitle,
       setJournalSummary,
       setJournalEditTitle,
       setJournalEditSummary,
+      setThreadDraft,
       addMemory,
       saveMemoryEdit,
       toggleMemoryPinned,
@@ -1344,6 +1626,12 @@ export function useKnowledgeController({
       cancelJournalEdit,
       saveJournalEdit,
       deleteJournal,
+      addContinuityThread,
+      resolveContinuityThread: (thread: ContinuityThread) =>
+        setContinuityThreadStatus(thread, "resolved"),
+      reopenContinuityThread: (thread: ContinuityThread) =>
+        setContinuityThreadStatus(thread, "open"),
+      deleteContinuityThread,
       resetKnowledge
     }
   };
@@ -1363,6 +1651,16 @@ function upsertJournal(journals: Journal[], journal: Journal): Journal[] {
     return [journal, ...journals];
   }
   return journals.map((item) => (item.id === journal.id ? journal : item));
+}
+
+function upsertContinuityThread(
+  threads: ContinuityThread[],
+  thread: ContinuityThread
+): ContinuityThread[] {
+  if (!threads.some((item) => item.id === thread.id)) {
+    return [thread, ...threads];
+  }
+  return threads.map((item) => (item.id === thread.id ? thread : item));
 }
 
 function isJournalForAction(value: unknown, action: JournalAction): value is Journal {
