@@ -47,7 +47,8 @@ Users can create and edit multiple companions. An authored profile covers:
 - greeting, setting, shared scenario, interests, backstory, and relationship path
 - consent and hard-limit posture
 - memory and privacy preferences
-- proactive-message preferences, local times, quiet hours, and cooldown
+- proactive frequency/category controls, local time, quiet hours, pause, caps,
+  cooldown, and muted feedback categories
 - explicit age, adult eligibility, and bounded intensity settings
 
 The API validates and canonicalizes the complete profile. The frontend is not a
@@ -176,21 +177,37 @@ pressure to return.
 ### Scheduled presence
 
 PostgreSQL-backed jobs can extract and maintain memory, decay relationship
-state, refresh continuity, and create optional proactive notes. Memory
+state, refresh continuity, and deliver optional proactive notes. Memory
 maintenance consolidates exact duplicate claims and applies tier-aware decay;
-its payload records counts rather than private prose. Supported note categories
-include quiet check-ins, morning or goodnight notes, a restrained
-thinking-of-you note, a milestone note, an intentional open-thread follow-up,
-and a delayed follow-up.
+its payload records counts rather than private prose.
 
-Quiet hours, local time, cooldown, privacy, staleness, preferences, and
-relationship-repair posture are checked before delivery. These messages are
-best-effort on a scale-to-zero Cloud Run deployment; they are not guaranteed at
-an exact wall-clock instant.
+Proactive presence begins with one durable, evidence-backed candidate model for
+explicit follow-ups, user reminders, callbacks, milestones, routines,
+contextual suggestions, queued thoughts, and returns after an absence. Each
+candidate records its categorical source and rationale, confidence, urgency,
+expiry, sensitivity, delivery constraints, score factors, and lifecycle. A
+timer can make a supported candidate eligible, but elapsed time by itself never
+creates a note.
 
-Thinking-of-you notes require an eligible general-scope shared moment; open-thread
-and milestone notes require their exact durable anchor. Generic availability is
-not enough reason to contact the user.
+The send decision runs before prose generation. It combines recency,
+importance, emotional weight, unresolved intent, explicit preferences, routine
+fit, local time, relationship posture, and recent delivery frequency. Quiet
+hours, pause, cooldown, daily caps, expiry, stale/deleted sources, a newer user
+turn, privacy, sensitive automatic anchors, and safety may defer or suppress
+the candidate. A sensitive explicit reminder remains eligible only for the
+authenticated in-app inbox.
+
+Delivered notes appear in a dedicated in-app inbox with unread/opened state,
+human origin labels, return-to-chat, dismiss, “not relevant,” and “mute similar”
+actions. Reminders requested by the user are distinct from companion-initiated
+notes. External/browser notification delivery is not implemented; the stored
+notification preview is separately generated and contains only “New companion
+note,” never profile, conversation, memory, adult, or private detail.
+
+Delivery is best-effort on a scale-to-zero Cloud Run deployment and is not
+guaranteed at an exact wall-clock instant. The product never claims the
+companion was awake, watching, waiting, thinking, or taking actions outside an
+active application process.
 
 ### Diagnostics and data control
 
@@ -198,9 +215,8 @@ Authenticated diagnostic routes expose bounded operational state for the
 current owner, including provider readiness, scheduler status, selected context
 IDs and types, recent safe diagnostic events, memory decisions, relationship
 state, and jobs. The normal consumer client does not fetch or present these
-diagnostic payloads; its deliberate “invite a check-in” action retains the
-existing guarded proactive POST route. Export and erasure controls remain in
-Settings.
+diagnostic payloads. Export includes proactive candidates and lifecycle events;
+erasure controls remain in Settings.
 
 They must not expose raw prompts, secrets, provider response bodies, stack
 traces, or another user's data.
@@ -217,6 +233,8 @@ traces, or another user's data.
 - visible but restrained composing and streaming states
 - safe rich-text replies, copyable code, and touch targets sized for mobile use
 - human continuity receipts that settle independently of reply streaming
+- a companion-note inbox with unread/origin state, return-to-chat, and immediate
+  dismiss, relevance, mute, pause, and opt-out controls
 - understandable empty, switching, offline, loading, retry, and failure states
 - deliberate confirmation for irreversible actions and explicit typed phrases
   for bulk or account erasure

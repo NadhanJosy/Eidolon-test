@@ -7,9 +7,10 @@ multi-thread chat, SSE streaming, persona prompts, semantic/episodic memory,
 evidence-grounded Living Memory with reinforcement/correction history, linked
 entities, retention-aware consolidation/decay, subtle bounded recall, and turn receipts,
 first-class living plans/promises/follow-ups, relationship continuity,
-PostgreSQL-backed jobs, earned proactive notes, separately scoped adult
-continuity, privacy gates, debug visibility, export/erasure, migrations, CI, and
-managed production builds.
+PostgreSQL-backed jobs, evidence-scored proactive candidates, restart-safe
+delivery lifecycles, a controlled in-app notes inbox, separately scoped adult
+continuity, privacy gates, debug visibility, export/erasure, migrations, CI,
+and managed production builds.
 
 The roadmap now prioritizes reliability and operational confidence over adding
 more surface area.
@@ -45,8 +46,8 @@ more surface area.
    - tune prompt budgets and repetitive-response checks from real SFW evidence
    - tune living-thread extraction precision and closure language from real SFW
      usage evidence without widening automatic capture speculatively
-   - review earned proactive timing, callback phrasing, and cooldown behaviour
-     under Cloud Run wake-up limitations
+   - review proactive score calibration, callback phrasing, dismiss/mute
+     feedback, and timing under Cloud Run wake-up limitations
 
 ## Later, only with evidence
 
@@ -57,8 +58,8 @@ more surface area.
 - a dedicated worker or always-on host only if proactive delivery needs become
   stricter than Cloud Run catch-up behaviour
 - alternate inference or PostgreSQL hosting through the existing interfaces
-- browser notifications after consent, privacy, and proactive anti-spam behaviour
-  are proven
+- browser notifications after separate channel consent, preview privacy, and
+  proactive anti-spam behaviour are proven
 
 ## Explicitly deferred
 

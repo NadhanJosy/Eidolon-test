@@ -73,6 +73,8 @@ export function emptyCharacterDraft(): CharacterDraft {
     proactive_enabled: true,
     proactive_snoozed_until: "",
     proactive_cooldown_hours: "24",
+    proactive_frequency: "balanced",
+    proactive_daily_cap: "2",
     proactive_timezone: "UTC",
     quiet_hours_start: "22:00",
     quiet_hours_end: "08:00",
@@ -86,6 +88,7 @@ export function emptyCharacterDraft(): CharacterDraft {
     allow_unresolved_thread_nudges: true,
     allow_delayed_double_texts: true,
     allow_manual_notes: true,
+    muted_proactive_categories: [],
     explicit_age: "",
     adult_mode_allowed: false,
     content_intensity: "0"
@@ -137,6 +140,8 @@ export function toCharacterDraft(character: Character): CharacterDraft {
     proactive_enabled: booleanValue(proactivePreferences.enabled, true),
     proactive_snoozed_until: stringValue(proactivePreferences.snoozed_until),
     proactive_cooldown_hours: proactiveCooldownValue(proactivePreferences.cooldown_hours),
+    proactive_frequency: proactiveFrequency(proactivePreferences.frequency),
+    proactive_daily_cap: proactiveDailyCap(proactivePreferences.daily_cap),
     proactive_timezone: stringValue(proactivePreferences.timezone) || "UTC",
     quiet_hours_start: stringValue(proactivePreferences.quiet_hours_start) || "22:00",
     quiet_hours_end: stringValue(proactivePreferences.quiet_hours_end) || "08:00",
@@ -159,6 +164,7 @@ export function toCharacterDraft(character: Character): CharacterDraft {
       true
     ),
     allow_manual_notes: booleanValue(proactivePreferences.allow_manual_notes, true),
+    muted_proactive_categories: stringListValue(proactivePreferences.muted_categories),
     explicit_age: character.explicit_age?.toString() ?? "",
     adult_mode_allowed: character.adult_mode_allowed,
     content_intensity: character.content_intensity.toString()
@@ -203,6 +209,9 @@ export function toBoundariesJson(
       enabled: draft.proactive_enabled,
       snoozed_until: compactProfileText(draft.proactive_snoozed_until) || null,
       cooldown_hours: parseProactiveCooldownHours(draft.proactive_cooldown_hours) ?? 24,
+      frequency: draft.proactive_frequency,
+      daily_cap: parseProactiveDailyCap(draft.proactive_daily_cap) ?? 2,
+      channels: ["in_app"],
       timezone: compactProfileText(draft.proactive_timezone) || "UTC",
       quiet_hours_start: draft.quiet_hours_start,
       quiet_hours_end: draft.quiet_hours_end,
@@ -215,7 +224,8 @@ export function toBoundariesJson(
       allow_milestone_notes: draft.allow_milestone_notes,
       allow_unresolved_thread_nudges: draft.allow_unresolved_thread_nudges,
       allow_delayed_double_texts: draft.allow_delayed_double_texts,
-      allow_manual_notes: draft.allow_manual_notes
+      allow_manual_notes: draft.allow_manual_notes,
+      muted_categories: draft.muted_proactive_categories
     }
   };
 }
@@ -325,6 +335,10 @@ export function defaultCharacterProfile(name: string): Pick<
       proactive_preferences: {
         enabled: true,
         snoozed_until: null,
+        frequency: "balanced",
+        daily_cap: 2,
+        channels: ["in_app"],
+        muted_categories: [],
         timezone: "UTC",
         quiet_hours_start: "22:00",
         quiet_hours_end: "08:00",
@@ -450,6 +464,29 @@ function proactiveCooldownValue(value: unknown): string {
     return Math.min(Math.max(parsed, 1), 168).toString();
   }
   return "24";
+}
+
+function proactiveFrequency(
+  value: unknown
+): "minimal" | "balanced" | "frequent" {
+  return value === "minimal" || value === "frequent" ? value : "balanced";
+}
+
+function proactiveDailyCap(value: unknown): string {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 3
+    ? value.toString()
+    : "2";
+}
+
+function parseProactiveDailyCap(value: string): number | null {
+  const parsed = Number.parseInt(value, 10);
+  return /^[1-3]$/.test(value.trim()) && Number.isInteger(parsed) ? parsed : null;
+}
+
+function stringListValue(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function parseProactiveCooldownHours(value: string): number | null {

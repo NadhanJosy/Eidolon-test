@@ -63,7 +63,6 @@ export function ChatSurface({
   onSetPrivacyMode,
   onSaveScenario,
   onResetScenario,
-  onQueueProactive,
   onCancelEdit,
   onEdit,
   onReroll,
@@ -117,7 +116,6 @@ export function ChatSurface({
   onSetPrivacyMode: (privacyMode: ConversationPrivacyMode) => void;
   onSaveScenario: () => void;
   onResetScenario: () => void;
-  onQueueProactive: () => void;
   onCancelEdit: () => void;
   onEdit: (message: Message) => void;
   onReroll: (message: Message) => void;
@@ -523,15 +521,6 @@ export function ChatSurface({
                         setToolsOpen(false);
                       }}
                     />
-                    <ComposerAction
-                      detail="Ask now; quiet hours, privacy, and cooldown still decide"
-                      icon="moon"
-                      label={`Invite a check-in from ${name}`}
-                      onClick={() => {
-                        onQueueProactive();
-                        setToolsOpen(false);
-                      }}
-                    />
                   </div>
                 ) : null}
               </div>
@@ -673,7 +662,7 @@ function MessageTurn({
         <p className="mb-8 text-center text-[0.65rem] uppercase tracking-[0.16em] text-[#625d57]">{formatDay(message.created_at)}</p>
       ) : null}
       {proactive ? (
-        <p className="mb-2 flex items-center gap-2 text-[0.67rem] uppercase tracking-[0.14em] text-[#9b7968]"><Icon className="h-3.5 w-3.5" name="moon" /> A note that found you</p>
+        <p className="mb-2 flex items-center gap-2 text-[0.67rem] uppercase tracking-[0.14em] text-[#9b7968]"><Icon className="h-3.5 w-3.5" name="moon" /> {message.metadata_json.initiative_kind === "reminder" ? "A reminder you asked for" : `Companion note${message.metadata_json.proactive_origin ? ` · ${message.metadata_json.proactive_origin.replaceAll("_", " ")}` : ""}`}</p>
       ) : null}
       <div className={fromUser ? "rounded-[1.35rem] rounded-br-md bg-[#28231f] px-4 py-3 text-[0.96rem] leading-7 text-[#e7ded4] shadow-sm shadow-black/20 sm:px-5" : "pr-2 font-eidolon-display text-[1.12rem] leading-8 text-[#e4dbd1] sm:text-[1.18rem]"}>
         <MessageContent content={message.content} />

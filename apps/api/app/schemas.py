@@ -263,6 +263,62 @@ def _validate_proactive_preferences(value: dict[str, Any]) -> None:
     cooldown_hours = preferences.get("cooldown_hours")
     if cooldown_hours is not None and not _valid_proactive_cooldown_hours(cooldown_hours):
         raise ValueError("Proactive cooldown hours must be a whole number from 1 to 168.")
+    for key in (
+        "enabled",
+        "allow_inactivity_checkins",
+        "allow_morning_notes",
+        "allow_goodnight_notes",
+        "allow_thinking_of_you",
+        "allow_milestone_notes",
+        "allow_unresolved_thread_nudges",
+        "allow_delayed_double_texts",
+        "allow_manual_notes",
+    ):
+        if key in preferences and not isinstance(preferences[key], bool):
+            raise ValueError(f"proactive_preferences.{key} must be true or false.")
+    frequency = preferences.get("frequency")
+    if frequency not in {None, "minimal", "balanced", "frequent"}:
+        raise ValueError("proactive_preferences.frequency must be minimal, balanced, or frequent.")
+    daily_cap = preferences.get("daily_cap")
+    if daily_cap is not None and (
+        isinstance(daily_cap, bool) or not isinstance(daily_cap, int) or not 1 <= daily_cap <= 3
+    ):
+        raise ValueError("proactive_preferences.daily_cap must be a whole number from 1 to 3.")
+    channels = preferences.get("channels")
+    if channels is not None and channels != ["in_app"]:
+        raise ValueError("The in-app inbox is the only supported proactive channel.")
+    muted_categories = preferences.get("muted_categories")
+    allowed_categories = {
+        "follow_up",
+        "check_in",
+        "reminder",
+        "callback",
+        "milestone",
+        "routine",
+        "return",
+        "suggestion",
+        "queued_thought",
+    }
+    if muted_categories is not None and (
+        not isinstance(muted_categories, list)
+        or len(muted_categories) > len(allowed_categories)
+        or any(
+            not isinstance(item, str) or item not in allowed_categories for item in muted_categories
+        )
+    ):
+        raise ValueError("proactive_preferences.muted_categories contains an unknown category.")
+    snoozed_until = preferences.get("snoozed_until")
+    if snoozed_until is not None:
+        if not isinstance(snoozed_until, str):
+            raise ValueError("proactive_preferences.snoozed_until must be an ISO timestamp.")
+        try:
+            parsed_snooze = datetime.fromisoformat(snoozed_until.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                "proactive_preferences.snoozed_until must be an ISO timestamp."
+            ) from exc
+        if parsed_snooze.tzinfo is None:
+            raise ValueError("proactive_preferences.snoozed_until must include a timezone.")
 
 
 def _valid_clock_time(value: Any) -> bool:
@@ -732,6 +788,9 @@ class ScheduledJobOut(BaseModel):
     status: str
     locked_at: datetime | None
     locked_by: str | None
+    dedupe_key: str | None
+    expires_at: datetime | None
+    cancelled_at: datetime | None
     payload_json: dict[str, Any]
     retry_count: int
     last_error: str | None
@@ -739,6 +798,51 @@ class ScheduledJobOut(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProactiveCandidateOut(BaseModel):
+    id: uuid.UUID
+    character_id: uuid.UUID
+    conversation_id: uuid.UUID | None
+    message_id: uuid.UUID | None
+    candidate_type: Literal[
+        "follow_up",
+        "check_in",
+        "reminder",
+        "callback",
+        "milestone",
+        "routine",
+        "return",
+        "suggestion",
+        "queued_thought",
+    ]
+    initiative_kind: Literal["companion", "reminder"]
+    rationale: str
+    state: Literal[
+        "candidate",
+        "scheduled",
+        "generated",
+        "delivered",
+        "opened",
+        "dismissed",
+        "replied",
+        "cancelled",
+        "failed",
+        "expired",
+    ]
+    scheduled_for: datetime | None
+    expires_at: datetime
+    delivered_at: datetime | None
+    opened_at: datetime | None
+    notification_preview: str
+    message_preview: str | None
+    dismissal_feedback: Literal["irrelevant", "mute_similar"] | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProactiveDismissRequest(BaseModel):
+    feedback: Literal["irrelevant", "mute_similar"] | None = None
 
 
 class EpisodicJournalOut(BaseModel):
@@ -832,4 +936,6 @@ class ExportOut(BaseModel):
     continuity_threads: list[dict[str, Any]]
     relationship_states: list[dict[str, Any]]
     relationship_events: list[dict[str, Any]]
+    proactive_candidates: list[dict[str, Any]]
+    proactive_candidate_events: list[dict[str, Any]]
     scheduled_jobs: list[dict[str, Any]]

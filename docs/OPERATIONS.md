@@ -271,6 +271,16 @@ Job state and locks are durable, but APScheduler runs inside an active API
 instance. Request-based Cloud Run CPU and scale-to-zero can delay ticks. Jobs
 catch up when an instance is active.
 
+Proactive presence uses `proactive_candidates` as the evidence/lifecycle source
+of truth and one deduplicated `proactive_delivery` job as its execution
+envelope. A worker reclaims a `running` row whose lock has been abandoned for 15
+minutes, increments its retry count, and reruns the candidate under a row lock.
+Generation and message delivery remain transactional, so restart recovery
+cannot intentionally create a second note. Capped retries use exponential
+backoff; exhaustion leaves both a failed job and a `failed` candidate lifecycle
+event with safe reason codes. Expired, cancelled, dismissed, replied, or already
+delivered candidates are no-ops if an old envelope wakes later.
+
 Eligible chat responses also request best-effort immediate processing through a
 durable `chat_postprocess` row. If immediate work is interrupted, the normal
 scheduler retries it; the chat receipt remains pending and then becomes ready or

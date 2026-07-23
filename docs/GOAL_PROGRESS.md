@@ -144,3 +144,26 @@ Validation:
 - Ruff lint and format checks passed.
 - Frontend ESLint, TypeScript, and static production build passed through
   `make verify`.
+
+## 2026-07-23 — Proactive presence and asynchronous behaviour
+
+Outcome:
+
+- Replaced fragmented timer-led outreach with evidence-backed proactive
+  candidates for living-thread follow-ups, reminders, callbacks, milestones,
+  routines, queued thoughts, contextual suggestions, and user returns.
+- Added relevance scoring, quiet hours, local-time scheduling, cooldowns, daily
+  caps, expiry, semantic source revalidation, adult/private isolation, generic
+  notification previews, safe generation, and immediate opt-out/cancellation.
+- Added restart-safe deduplicated delivery jobs, lifecycle history, retry and
+  dead-letter handling, owner inbox/feedback APIs, and a polished in-app Inbox
+  with origins, unread state, return-to-chat, frequency/category, pause, and
+  notification controls.
+
+Validation:
+
+- Alembic upgraded through `0014_proactive_presence` successfully.
+- Backend: 280 tests passed and the opt-in live-provider test was skipped.
+- Ruff lint and format checks passed.
+- Frontend ESLint, TypeScript, and static production build passed through
+  `make verify`.

@@ -119,13 +119,40 @@ async def test_database_is_at_head_with_level2_columns() -> None:
             )
         }
 
+        proactive_candidate_columns = {
+            row[0]
+            for row in (
+                await connection.execute(
+                    text(
+                        "select column_name from information_schema.columns "
+                        "where table_name = 'proactive_candidates'"
+                    )
+                )
+            )
+        }
+        proactive_candidate_events_exists = (
+            await connection.execute(
+                text("select to_regclass('public.proactive_candidate_events') is not null")
+            )
+        ).scalar_one()
+        scheduled_job_columns = {
+            row[0]
+            for row in (
+                await connection.execute(
+                    text(
+                        "select column_name from information_schema.columns "
+                        "where table_name = 'scheduled_jobs'"
+                    )
+                )
+            )
+        }
         legacy_login_throttle_exists = (
             await connection.execute(
                 text("select to_regclass('public.login_throttles') is not null")
             )
         ).scalar_one()
 
-    assert revision == "0013_relationship_intelligence"
+    assert revision == "0014_proactive_presence"
     assert {
         "importance",
         "pinned",
@@ -163,6 +190,21 @@ async def test_database_is_at_head_with_level2_columns() -> None:
         "affects_current_state",
         "occurred_at",
     }.issubset(relationship_event_columns)
+    assert {
+        "candidate_type",
+        "confidence",
+        "delivery_constraints_json",
+        "expires_at",
+        "idempotency_key",
+        "message_id",
+        "notification_preview",
+        "relevance_score",
+        "score_factors_json",
+        "state",
+        "urgency",
+    }.issubset(proactive_candidate_columns)
+    assert proactive_candidate_events_exists is True
+    assert {"cancelled_at", "dedupe_key", "expires_at"}.issubset(scheduled_job_columns)
     assert {
         "mood",
         "conflict_state",

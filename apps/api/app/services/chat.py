@@ -34,6 +34,10 @@ from app.services.memory import (
     memory_preferences_from_boundaries,
     remove_message_source_memories,
 )
+from app.services.proactive_presence import (
+    cancel_pending_for_character,
+    mark_delivered_candidates_replied,
+)
 from app.services.prompt import PRIVATE_PROMPT_CONTEXT_KEY, PromptBundle, assemble_prompt
 from app.services.reasoning import build_reasoning_context
 from app.services.relationship import (
@@ -156,6 +160,10 @@ async def ensure_default_character(session: AsyncSession, user: User) -> Charact
             "proactive_preferences": {
                 "enabled": True,
                 "snoozed_until": None,
+                "frequency": "balanced",
+                "daily_cap": 2,
+                "channels": ["in_app"],
+                "muted_categories": [],
                 "timezone": "UTC",
                 "quiet_hours_start": "22:00",
                 "quiet_hours_end": "08:00",
@@ -246,6 +254,21 @@ async def prepare_user_message(
     conversation.updated_at = utc_now()
     session.add(user_message)
     await session.flush()
+    if privacy_mode == "normal" and content_mode == "sfw":
+        await mark_delivered_candidates_replied(
+            session,
+            conversation=conversation,
+            user_message=user_message,
+        )
+    else:
+        # A private/adult return must still prevent stale outbound work, but it
+        # must not become normal-scope return context or candidate evidence.
+        await cancel_pending_for_character(
+            session,
+            character_id=conversation.character_id,
+            conversation_id=conversation.id,
+            reason_code="ineligible_user_return",
+        )
 
     prompt = await _assemble_prompt_for_user_turn(
         session,
@@ -642,6 +665,12 @@ async def edit_latest_user_turn(
     stale_assistant_ids = [message.id for message in later_messages]
     if stale_assistant_ids:
         await session.execute(delete(Message).where(Message.id.in_(stale_assistant_ids)))
+    await cancel_pending_for_character(
+        session,
+        character_id=character.id,
+        conversation_id=conversation.id,
+        reason_code="conversation_context_rebuilt",
+    )
     await _delete_conversation_jobs(session, conversation.id)
     await _delete_conversation_journals(session, conversation.id)
     removed_memories = await remove_message_source_memories(

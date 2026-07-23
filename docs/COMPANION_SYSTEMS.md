@@ -35,7 +35,7 @@ transcript. It must never be narrated in chat.
 ## Prompt assembly
 
 `apps/api/app/services/prompt.py` is the central renderer. Its current version is
-`modular_companion_intelligence_v8`.
+`relationship_intelligence_v10`.
 
 Modules are ordered from durable instructions toward the immediate request:
 
@@ -252,19 +252,15 @@ APScheduler periodically calls the PostgreSQL worker. Supported work includes:
 - `memory_maintenance`
 - `chat_postprocess`
 - `relationship_decay`
-- `proactive_inactivity_check`
-- `proactive_morning_check`
-- `proactive_goodnight_check`
-- `proactive_thinking_of_you`
-- `proactive_milestone_check`
-- `proactive_unresolved_thread_nudge`
-- `proactive_delayed_double_text`
-- `proactive_message_create`
+- `proactive_delivery`
 
 Workers claim due rows with database locking. A transaction advisory lock also
 prevents overlapping batches. Transient failures return to pending with capped
-backoff; invalid/unsupported jobs fail terminally. Every transition releases
-worker lock fields, and stored errors use safe bounded text.
+backoff; invalid/unsupported jobs fail terminally. Locks abandoned for 15
+minutes are reclaimed after a process restart. Candidate and job idempotency
+keys prevent a second envelope or message under concurrent scheduling. Exhausted
+retries become a safe failed candidate/dead-letter state. Every transition
+releases worker lock fields, and stored errors use safe bounded text.
 
 Each eligible post-chat run ensures one future memory-maintenance row per
 companion. Maintenance consolidates exact non-conflicting claims, reinforces the
@@ -275,40 +271,68 @@ copied into job results.
 
 ## Proactive notes
 
-Before queueing and delivery, proactive work checks:
+Post-chat work creates candidates only from exact eligible general-scope
+evidence. Living threads cover follow-ups, promises, user reminders, routines,
+and contextual suggestions; grounded journals cover callbacks and queued
+thoughts; relationship timelines cover linked milestones. Returns after an
+absence cancel superseded outbound work immediately and create a non-outbound
+return lifecycle record. A timer alone creates nothing.
+
+Each candidate stores:
+
+- source class and stable source link, categorical rationale, and idempotency key
+- candidate type, companion/reminder origin, confidence, urgency, and expiry
+- sensitivity and delivery constraints
+- relevance factors and score
+- current lifecycle plus append-only transition events
+
+The relevance decision runs before generation. It combines recency,
+importance, emotional weight, unresolved status, user frequency preference,
+routine fit, eligible local time, relationship posture, urgency, and recent
+delivery frequency. It then enforces:
 
 - companion and per-type preferences
-- snooze state
+- pause and muted feedback categories
 - thread/message privacy
-- whether the user has returned since the job was queued
-- per-conversation cooldown
+- sensitive automatic anchors, while retaining explicit user reminders only in
+  the authenticated inbox behind a fixed generic preview
+- whether the user returned or added newer context
+- per-companion cooldown and local-day cap
 - configured IANA timezone, target local time, and quiet hours
 - current relationship posture
 - active general-scope boundaries, with no-contact boundaries suppressing
   scheduling and delivery
-- whether the referenced milestone/open thread is still valid
-- whether a thinking-of-you note has a non-manual, general-scope shared moment
+- whether the exact source still exists, remains open/general, and is not stale
+- candidate expiry
 - a per-thread follow-up cooldown for living threads
 
 Careful/repair posture suppresses pressure-prone milestone and delayed follow-up
-notes. Active boundaries constrain generated wording; a boundary against
-proactive contact suppresses every proactive note. Ordinary check-ins become
-more spacious. A note must not claim awareness or activity while offline.
+notes. Active boundaries constrain generated wording; opt-out or a boundary
+against proactive contact cancels every pending note immediately. A candidate
+below its frequency-mode threshold is cancelled before a provider call.
+Generic check-ins have no eligible evidence source and therefore never reach
+generation.
 
 After all guards pass, the provider receives a minimal SFW prompt containing
-screened authored fragments and qualitative posture, not raw history, private
-turns, relationship scores, adult detail, or debug state. Malformed, oversized,
-blocked, hidden-context, or unavailable provider output falls back to deterministic
-SFW copy. Only safe provenance labels are stored.
+one screened anchor and qualitative posture, not raw history, private turns,
+relationship scores, adult detail, or debug state. The prompt and output forbid
+guilt, jealousy, dependency, urgency, or claims of waiting, watching, thinking,
+working, or acting while the app was inactive. Malformed, oversized, blocked,
+hidden-context, or unavailable provider output falls back to deterministic SFW
+copy. Only safe provenance labels are stored.
 
-An unresolved-thread nudge binds to an exact eligible living thread when one is
-queued. Delivery records its cooldown timestamp so repeated jobs cannot keep
-nudging the same promise. Legacy journal callbacks remain a compatibility
-fallback only for jobs without a bound living-thread ID.
+Generation, message persistence, and candidate `generated`/`delivered`
+transitions share one transaction. Conversation/inbox reads mark `opened`; the
+next user turn marks `replied`; feedback marks `dismissed`; stale sources,
+opt-out, new context, and policy decisions mark `cancelled`; expiry and terminal
+worker failures remain distinct. This makes retries and process restarts
+idempotent.
 
-Thinking-of-you notes likewise require an exact generated shared-moment anchor;
-generic availability is not sufficient. Contextual fallback copy preserves that
-anchor while still becoming more spacious under careful/repair posture.
+The in-app inbox exposes reminder versus companion origin, unread state, return
+to chat, dismiss, irrelevant, and mute-similar controls. External notification
+channels remain off. The separately stored preview is always generic companion
+copy and never contains message, memory, adult, private, vulnerable, or
+sensitive detail.
 
 ## Testing invariants
 

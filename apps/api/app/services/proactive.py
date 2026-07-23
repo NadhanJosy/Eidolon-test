@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -26,7 +27,6 @@ from app.services.continuity import (
     select_proactive_thread,
 )
 from app.services.conversation_privacy import conversation_is_private, message_is_private
-from app.services.jobs import create_job
 from app.services.relationship import active_relationship_boundaries
 from app.services.safety import is_blocked_content
 
@@ -41,8 +41,8 @@ DEFAULT_GOODNIGHT_TIME = "22:30"
 LOCAL_NOTE_MINIMUM_LEAD = timedelta(hours=4)
 LOCAL_NOTE_DELIVERY_WINDOW = timedelta(hours=3)
 PROACTIVE_FALLBACK = (
-    "I had a small thought and wanted to check in. No pressure to answer quickly; "
-    "I am here when you feel like talking."
+    "A thread from our conversation is still open. We can return to it whenever it is useful; "
+    "no reply is expected."
 )
 PROACTIVE_BOUNDARY_BLOCK_MARKERS = (
     "don't message me",
@@ -83,10 +83,10 @@ PROACTIVE_VARIANTS = {
         "away_state": "goodnight_note",
     },
     "proactive_thinking_of_you": {
-        "label": "thinking-of-you note",
+        "label": "remembered callback",
         "content": (
-            "I found myself thinking about our conversation and wanted to leave a small hello. "
-            "No pressure to reply."
+            "I remembered a specific thread from our conversation. "
+            "We can return to it whenever it is useful; no pressure."
         ),
         "away_state": "thinking_of_you",
     },
@@ -196,6 +196,14 @@ MANIPULATIVE_PROACTIVE_MARKERS = (
     "i need you",
     "i'm jealous",
     "i am jealous",
+    "i'm lonely",
+    "i am lonely",
+    "i felt lonely",
+    "i miss you",
+    "i missed you",
+    "i was worried",
+    "i've been worried",
+    "i have been worried",
     "prove you care",
     "reply now",
     "you abandoned me",
@@ -204,6 +212,60 @@ MANIPULATIVE_PROACTIVE_MARKERS = (
     "why haven't you",
     "why have you not",
 )
+OFFLINE_ACTIVITY_MARKERS = (
+    "i couldn't sleep",
+    "i could not sleep",
+    "i couldn't stop thinking",
+    "i could not stop thinking",
+    "i found myself thinking",
+    "i have been thinking",
+    "i've been thinking",
+    "i have been working",
+    "i've been working",
+    "i have been watching",
+    "i stayed awake",
+    "i waited for",
+    "i was waiting",
+    "i was watching",
+    "i was working",
+    "i kept thinking while",
+    "i've been waiting",
+    "i have been waiting",
+    "i was awake",
+    "while you were away i",
+    "while you were gone i",
+    "while you slept i",
+)
+PROACTIVE_SPECIFICITY_STOP_WORDS = {
+    "about",
+    "again",
+    "answer",
+    "companion",
+    "conversation",
+    "could",
+    "check",
+    "checking",
+    "hello",
+    "gentle",
+    "later",
+    "leave",
+    "note",
+    "open",
+    "pace",
+    "pressure",
+    "quiet",
+    "remembered",
+    "reply",
+    "return",
+    "small",
+    "still",
+    "thread",
+    "thought",
+    "useful",
+    "wanted",
+    "whenever",
+    "would",
+}
 PROACTIVE_OUTPUT_MAX_CHARS = 600
 LOCAL_NOTE_TIME_KEYS = {
     "proactive_morning_check": "morning_time",
@@ -325,6 +387,7 @@ async def create_inactivity_proactive_message(
     proactive_type: str = "proactive_inactivity_check",
     provider: LLMProvider | None = None,
     continuity_thread_id: uuid.UUID | None = None,
+    reject_user_returns_after: datetime | None = None,
 ) -> Message | None:
     if conversation_is_private(conversation):
         return None
@@ -410,6 +473,22 @@ async def create_inactivity_proactive_message(
             "proactive_context": "relationship_milestone",
             "milestone_id": str(milestone["milestone_id"]),
         }
+    elif proactive_type in {
+        "proactive_inactivity_check",
+        "proactive_morning_check",
+        "proactive_goodnight_check",
+        DELAYED_DOUBLE_TEXT_TYPE,
+        "proactive_message_create",
+    }:
+        contextual_content, context_metadata, continuity_thread = await _unresolved_thread_content(
+            session,
+            conversation,
+            fallback=content,
+            requested_thread_id=continuity_thread_id,
+        )
+        if not context_metadata:
+            return None
+        content = contextual_content
     if context_metadata:
         content = _relationship_aware_contextual_fallback(
             proactive_type,
@@ -424,6 +503,20 @@ async def create_inactivity_proactive_message(
         relationship_posture=relationship_posture,
         active_boundary=_proactive_boundary_prompt(active_boundaries),
     )
+    if reject_user_returns_after is not None:
+        newer_user_message = (
+            await session.execute(
+                select(Message.id)
+                .where(
+                    Message.conversation_id == conversation.id,
+                    Message.role == "user",
+                    Message.created_at > reject_user_returns_after,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if newer_user_message is not None:
+            return None
     message = Message(
         conversation_id=conversation.id,
         role="assistant",
@@ -487,7 +580,7 @@ async def _generate_proactive_content(
         return _fallback_generation(fallback, "provider_error")
 
     content = " ".join(generated.content.strip().split())
-    if not _valid_proactive_output(content):
+    if not _valid_proactive_output(content, anchor=fallback):
         return _fallback_generation(fallback, "invalid_output")
     return ProactiveGeneration(
         content=content,
@@ -516,6 +609,10 @@ def _proactive_generation_prompt(
         (
             "Never use guilt, jealousy, exclusivity, dependency, urgency, punishment, "
             "obligation, or pressure to answer."
+        ),
+        (
+            "Do not claim you were awake, watching, waiting, thinking, working, or taking "
+            "actions while the user was away. This is a scheduled in-app note."
         ),
         f"Character name: {_safe_proactive_prompt_fragment(character.name, limit=80)}",
         f"Speech style: {speech_style}",
@@ -550,12 +647,14 @@ def _safe_proactive_prompt_fragment(value: str | None, *, limit: int) -> str:
         return ""
     if any(marker in normalized for marker in MANIPULATIVE_PROACTIVE_MARKERS):
         return ""
+    if any(marker in normalized for marker in OFFLINE_ACTIVITY_MARKERS):
+        return ""
     if is_blocked_content(compact):
         return ""
     return compact[:limit].strip()
 
 
-def _valid_proactive_output(content: str) -> bool:
+def _valid_proactive_output(content: str, *, anchor: str) -> bool:
     if not content or len(content) > PROACTIVE_OUTPUT_MAX_CHARS:
         return False
     normalized = content.lower()
@@ -567,7 +666,20 @@ def _valid_proactive_output(content: str) -> bool:
         return False
     if any(marker in normalized for marker in MANIPULATIVE_PROACTIVE_MARKERS):
         return False
-    return not is_blocked_content(content)
+    if any(marker in normalized for marker in OFFLINE_ACTIVITY_MARKERS):
+        return False
+    if is_blocked_content(content):
+        return False
+    anchor_terms = _specificity_terms(anchor)
+    return not anchor_terms or bool(anchor_terms.intersection(_specificity_terms(content)))
+
+
+def _specificity_terms(value: str) -> set[str]:
+    return {
+        term
+        for term in re.findall(r"[a-z0-9']+", value.casefold())
+        if len(term) >= 4 and term not in PROACTIVE_SPECIFICITY_STOP_WORDS
+    }
 
 
 def _fallback_generation(fallback: str, reason: str) -> ProactiveGeneration:
@@ -667,76 +779,25 @@ async def ensure_proactive_jobs(
     user_id: uuid.UUID,
     character_id: uuid.UUID,
 ) -> list[ScheduledJob]:
-    if conversation_is_private(conversation):
-        return []
+    # Import lazily because the unified presence service uses the bounded
+    # generation helpers in this module.
+    from app.services.proactive_presence import ensure_proactive_candidates
 
-    character = await session.get(Character, character_id)
-    if character is None:
+    candidates = await ensure_proactive_candidates(
+        session,
+        conversation=conversation,
+        user_id=user_id,
+        character_id=character_id,
+    )
+    if not candidates:
         return []
-
-    relationship = await _relationship_for_conversation(session, conversation)
-    relationship_posture = proactive_relationship_posture(relationship)
-    active_boundaries = await _active_proactive_boundaries(session, conversation)
-    if _boundaries_suppress_proactive(active_boundaries):
-        return []
-
-    created: list[ScheduledJob] = []
-    now = utc_now()
-    cooldown_hours = proactive_cooldown_hours(character)
-    for job_type, delay in PROACTIVE_JOB_SCHEDULES.items():
-        if proactive_block_reason(character, job_type, now=now) is not None:
-            continue
-        if _relationship_suppresses_proactive(relationship_posture, job_type):
-            continue
-        if (
-            job_type == "proactive_milestone_check"
-            and await _latest_unnoted_relationship_milestone(session, conversation) is None
-        ):
-            continue
-        if (
-            job_type == "proactive_thinking_of_you"
-            and await _latest_grounded_journal(session, conversation) is None
-        ):
-            continue
-        continuity_thread = None
-        if job_type == "proactive_unresolved_thread_nudge":
-            continuity_thread = await select_proactive_thread(
-                session,
-                conversation=conversation,
-                now=now,
-            )
-            if continuity_thread is None:
-                continue
-        if await _pending_job_exists(session, conversation.id, job_type):
-            continue
-        run_at = proactive_initial_run_at(
-            character,
-            job_type,
-            now=now,
-            fallback_delay=delay,
+    candidate_ids = {str(candidate.id) for candidate in candidates}
+    result = await session.execute(
+        select(ScheduledJob).where(
+            ScheduledJob.payload_json["candidate_id"].as_string().in_(candidate_ids)
         )
-        created.append(
-            await create_job(
-                session,
-                job_type=job_type,
-                run_at=run_at,
-                user_id=user_id,
-                character_id=character_id,
-                payload_json={
-                    "conversation_id": str(conversation.id),
-                    "cooldown_hours": cooldown_hours,
-                    "proactive_type": job_type,
-                    **(
-                        {"continuity_thread_id": str(continuity_thread.id)}
-                        if continuity_thread is not None
-                        else {}
-                    ),
-                    **proactive_schedule_metadata(character, run_at),
-                    "source": "chat_completion_hook",
-                },
-            )
-        )
-    return created
+    )
+    return list(result.scalars().all())
 
 
 async def _active_proactive_boundaries(
@@ -868,22 +929,80 @@ async def reschedule_pending_proactive_jobs(
     *,
     now: datetime | None = None,
 ) -> int:
+    from app.services.proactive_presence import cancel_pending_for_character
+
     current_time = _as_utc(now or utc_now())
+    preferences = proactive_preferences(character)
+    if preferences.get("enabled", True) is not True:
+        await cancel_pending_for_character(
+            session,
+            character_id=character.id,
+            reason_code="proactive_disabled",
+        )
+        return 0
     result = await session.execute(
         select(ScheduledJob).where(
             ScheduledJob.character_id == character.id,
             ScheduledJob.status == "pending",
-            ScheduledJob.job_type.in_(tuple(PROACTIVE_JOB_SCHEDULES)),
+            ScheduledJob.job_type.in_((*tuple(PROACTIVE_JOB_SCHEDULES), "proactive_delivery")),
         )
     )
     jobs = list(result.scalars().all())
     cooldown_hours = proactive_cooldown_hours(character)
     for job in jobs:
-        block_reason = proactive_block_reason(character, job.job_type, now=current_time)
         payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+        proactive_type = str(payload.get("proactive_type") or job.job_type)
+        candidate_id = None
+        raw_candidate_id = payload.get("candidate_id")
+        if isinstance(raw_candidate_id, str):
+            try:
+                candidate_id = uuid.UUID(raw_candidate_id)
+            except ValueError:
+                pass
+        candidate = None
+        if candidate_id is not None:
+            from app.models import ProactiveCandidate
+
+            candidate = await session.get(ProactiveCandidate, candidate_id)
+            if candidate is not None and candidate.state in {
+                "candidate",
+                "scheduled",
+                "generated",
+            }:
+                muted = preferences.get("muted_categories")
+                if isinstance(muted, list) and candidate.candidate_type in muted:
+                    await cancel_pending_for_character(
+                        session,
+                        character_id=character.id,
+                        candidate_type=candidate.candidate_type,
+                        reason_code="category_muted",
+                    )
+                    continue
+        block_reason = proactive_block_reason(character, proactive_type, now=current_time)
+        if block_reason == "proactive_snoozed":
+            snoozed_until = _parse_snoozed_until(preferences.get("snoozed_until"))
+            if snoozed_until is not None:
+                pre_pause_run_at = payload.get("pre_pause_run_at")
+                if not isinstance(pre_pause_run_at, str):
+                    pre_pause_run_at = job.run_at.isoformat()
+                job.run_at = snoozed_until
+                if candidate is not None:
+                    candidate.scheduled_for = snoozed_until
+                job.payload_json = {
+                    **payload,
+                    "pre_pause_run_at": pre_pause_run_at,
+                    "rescheduled_for_pause": True,
+                    "scheduled_local_time": snoozed_until.isoformat(timespec="minutes"),
+                }
+                continue
         if block_reason is not None:
-            job.status = "done"
-            job.last_error = None
+            if candidate is not None:
+                from app.services.proactive_presence import cancel_candidate
+
+                await cancel_candidate(session, candidate, block_reason)
+            job.status = "cancelled"
+            job.cancelled_at = current_time
+            job.last_error = block_reason
             job.locked_at = None
             job.locked_by = None
             job.payload_json = {
@@ -892,19 +1011,44 @@ async def reschedule_pending_proactive_jobs(
                 "skip_reason": block_reason,
             }
             continue
-        run_at = proactive_initial_run_at(
-            character,
-            job.job_type,
-            now=current_time,
-            fallback_delay=PROACTIVE_JOB_SCHEDULES[job.job_type],
+        resumed_run_at = (
+            _parse_snoozed_until(payload.get("pre_pause_run_at"))
+            if payload.get("rescheduled_for_pause") is True
+            else None
         )
+        if (
+            resumed_run_at is not None
+            and candidate is not None
+            and candidate.candidate_type != "routine"
+        ):
+            run_at = max(resumed_run_at, current_time)
+        elif candidate is not None and candidate.candidate_type != "routine":
+            # Changing preferences must not silently move an explicit reminder
+            # or context-specific follow-up. Delivery still re-evaluates current
+            # quiet-hours and cooldown policy atomically when the job is due.
+            run_at = candidate.scheduled_for or job.run_at
+        else:
+            run_at = proactive_initial_run_at(
+                character,
+                proactive_type,
+                now=current_time,
+                fallback_delay=PROACTIVE_JOB_SCHEDULES.get(
+                    proactive_type,
+                    timedelta(hours=24),
+                ),
+            )
         job.run_at = run_at
-        job.payload_json = {
+        if candidate_id is not None and candidate is not None:
+            candidate.scheduled_for = run_at
+        next_payload = {
             **payload,
             **proactive_schedule_metadata(character, run_at),
             "cooldown_hours": cooldown_hours,
             "rescheduled_for_preferences": True,
         }
+        next_payload.pop("pre_pause_run_at", None)
+        next_payload.pop("rescheduled_for_pause", None)
+        job.payload_json = next_payload
     await session.flush()
     return len(jobs)
 
@@ -1144,8 +1288,8 @@ async def _thinking_of_you_content(
         return "", {}
     return (
         (
-            f"I found myself thinking about {anchor.rstrip('.')}. "
-            "I wanted to leave a quiet hello; no pressure to reply."
+            f"I remembered {anchor.rstrip('.')}. "
+            "We can return to it whenever it is useful; no pressure to reply."
         ),
         {
             "proactive_context": "shared_moment",
