@@ -97,6 +97,10 @@ export type Message = {
     proactive?: boolean;
     proactive_type?: string;
     proactive_label?: string;
+    proactive_candidate_id?: string;
+    proactive_origin?: string;
+    proactive_rationale?: string;
+    initiative_kind?: "companion" | "reminder";
     provider?: string;
     model?: string;
     prompt_version?: string;
@@ -113,6 +117,35 @@ export type Message = {
     event_label?: string;
   } & Record<string, unknown>;
   created_at: string;
+};
+
+export type ProactiveInboxItem = {
+  id: string;
+  character_id: string;
+  conversation_id: string | null;
+  message_id: string | null;
+  candidate_type:
+    | "follow_up"
+    | "check_in"
+    | "reminder"
+    | "callback"
+    | "milestone"
+    | "routine"
+    | "return"
+    | "suggestion"
+    | "queued_thought";
+  initiative_kind: "companion" | "reminder";
+  rationale: string;
+  state: "delivered" | "opened" | "replied";
+  scheduled_for: string | null;
+  expires_at: string;
+  delivered_at: string | null;
+  opened_at: string | null;
+  notification_preview: string;
+  message_preview: string | null;
+  dismissal_feedback: "irrelevant" | "mute_similar" | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type SearchStatus = "idle" | "loading" | "ready" | "error";
@@ -337,6 +370,8 @@ export type CharacterDraft = {
   proactive_enabled: boolean;
   proactive_snoozed_until: string;
   proactive_cooldown_hours: string;
+  proactive_frequency: "minimal" | "balanced" | "frequent";
+  proactive_daily_cap: string;
   proactive_timezone: string;
   quiet_hours_start: string;
   quiet_hours_end: string;
@@ -350,6 +385,7 @@ export type CharacterDraft = {
   allow_unresolved_thread_nudges: boolean;
   allow_delayed_double_texts: boolean;
   allow_manual_notes: boolean;
+  muted_proactive_categories: string[];
   explicit_age: string;
   adult_mode_allowed: boolean;
   content_intensity: string;

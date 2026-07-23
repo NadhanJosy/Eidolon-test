@@ -183,6 +183,22 @@ Conversation-linked manual creation rejects private conversations. Automatic
 capture is backend post-chat work and is limited to explicit safe SFW user
 language. Owner-scoped missing resources return `404`.
 
+## Proactive inbox
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/proactive?view=inbox|history|pending&character_id=...` | List bounded owned candidate views |
+| POST | `/proactive/{candidate_id}/open` | Mark a delivered inbox note opened |
+| POST | `/proactive/{candidate_id}/dismiss` | Dismiss with optional `irrelevant` or `mute_similar` feedback |
+| POST | `/proactive/{candidate_id}/cancel` | Cancel owned pending work |
+
+Inbox responses include the in-app message preview only for a delivered,
+owner-visible note. `notification_preview` is a separate generic field and
+never contains source evidence. Candidate scores, source prose, internal
+constraints, and lifecycle event metadata are not exposed by these routes.
+“Mute similar” updates the companion preference and cancels pending candidates
+of that category in the same transaction.
+
 ## Debug
 
 Debug routes exist only when enabled by environment or in development/testing:
@@ -205,7 +221,8 @@ Debug remains authenticated and owner-scoped. Production defaults to disabled.
 
 The export contains the user profile, companions, conversations, messages,
 memories, memory evidence/entities/links, journals, continuity threads,
-relationships, relationship evidence events, and scheduled jobs. It
+relationships, relationship evidence events, proactive candidates and
+lifecycle events, and scheduled jobs. It
 excludes password and refresh-token hashes, auth throttles, raw embeddings,
 provider keys, and JWT secrets. Journal export includes scope and exact source
 message IDs; memory export includes scope, claim identity, lifecycle, retention,

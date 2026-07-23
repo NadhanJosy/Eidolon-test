@@ -24,6 +24,7 @@ from app.services.continuity import (
     update_continuity_thread,
 )
 from app.services.conversation_privacy import conversation_is_private
+from app.services.proactive_presence import cancel_pending_for_character
 
 router = APIRouter(prefix="/characters/{character_id}/threads", tags=["continuity"])
 
@@ -90,6 +91,13 @@ async def patch_continuity_thread(
 ) -> ContinuityThread:
     character = await require_character(character_id, user, session)
     thread = await _require_thread(session, user.id, character.id, thread_id)
+    if payload.model_fields_set:
+        await cancel_pending_for_character(
+            session,
+            character_id=character.id,
+            continuity_thread_id=thread.id,
+            reason_code="continuity_source_changed",
+        )
     try:
         await update_continuity_thread(
             session,
@@ -112,6 +120,12 @@ async def remove_continuity_thread(
 ) -> DeleteResponse:
     character = await require_character(character_id, user, session)
     thread = await _require_thread(session, user.id, character.id, thread_id)
+    await cancel_pending_for_character(
+        session,
+        character_id=character.id,
+        continuity_thread_id=thread.id,
+        reason_code="continuity_source_deleted",
+    )
     await delete_continuity_thread(session, thread)
     await session.commit()
     return DeleteResponse(deleted=1)

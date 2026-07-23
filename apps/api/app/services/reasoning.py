@@ -152,6 +152,7 @@ async def build_reasoning_context(
         user_id=user.id,
         character_id=character.id,
         conversation_id=conversation.id,
+        current_message_id=current_message_id,
     )
     now = utc_now()
     # Stage 3: resolve structural boundaries and the companion's decayed mood.

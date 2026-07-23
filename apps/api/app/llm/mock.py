@@ -283,14 +283,11 @@ def _compose_response(context: MockPromptContext) -> str:
     return _join_response(parts)
 
 
-def _compose_proactive_note(label: str, anchor: str, posture: str) -> str:
+def _compose_proactive_note(label: str, anchor: str, _posture: str) -> str:
     normalized_label = label.strip().lower()
-    if normalized_label in {"open-thread nudge", "milestone note"} or not posture.startswith(
-        "new and respectful"
-    ):
-        compact_anchor = " ".join(anchor.strip().split())
-        if _is_safe_context_fragment(compact_anchor):
-            return compact_anchor
+    compact_anchor = " ".join(anchor.strip().split())
+    if _is_safe_context_fragment(compact_anchor):
+        return compact_anchor
     notes = {
         "quiet check-in": (
             "It has been quiet for a little while, so I wanted to leave the door open. "

@@ -4,8 +4,8 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import { apiErrorFromResponse, apiFetch, apiJson } from "@/lib/api";
 
-import { conversationPrivacyMode, readError } from "./controller-utils";
-import { completeMessage, completeMessageList } from "./message-contract";
+import { readError } from "./controller-utils";
+import { completeMessageList } from "./message-contract";
 import type { Conversation, Message } from "./types";
 
 type UsePrivacyControllerArgs = {
@@ -14,9 +14,7 @@ type UsePrivacyControllerArgs = {
   activeConversation: Conversation | null;
   activeCharacterId: string | null;
   messages: Message[];
-  chatSending: boolean;
   interactionBusy: boolean;
-  appendMessage: (message: Message) => void;
   cancelActiveStream: () => void;
   resetChat: () => void;
   setError: (value: string | null) => void;
@@ -30,8 +28,6 @@ type UsePrivacyControllerArgs = {
 };
 
 type ConversationAction = {
-  id: number;
-  kind: "proactive" | "clear";
   ownerUserId: string;
   token: string;
   sessionGeneration: number;
@@ -46,9 +42,7 @@ export function usePrivacyController({
   activeConversation,
   activeCharacterId,
   messages,
-  chatSending,
   interactionBusy,
-  appendMessage,
   cancelActiveStream,
   resetChat,
   setError,
@@ -59,7 +53,6 @@ export function usePrivacyController({
   const actionInFlight = useRef<ConversationAction | null>(null);
   const sessionGeneration = useRef(0);
   const sessionOwnerIdRef = useRef(sessionOwnerId);
-  const nextActionId = useRef(0);
   const activeConversationId = activeConversation?.id ?? null;
   const activeConversationIdRef = useRef(activeConversationId);
 
@@ -93,95 +86,6 @@ export function usePrivacyController({
     }
   }, [activeConversationId]);
 
-  async function queueProactive() {
-    if (
-      !token ||
-      !sessionOwnerId ||
-      !activeConversation ||
-      !activeCharacterId ||
-      chatSending ||
-      interactionBusy ||
-      actionInFlight.current
-    ) {
-      return;
-    }
-    setError(null);
-    if (conversationPrivacyMode(activeConversation) === "private") {
-      setNotice("This conversation is private, so companion notes stay paused here.");
-      return;
-    }
-    const authToken = token;
-    const conversationId = activeConversation.id;
-    const characterId = activeCharacterId;
-    const action: ConversationAction = {
-      id: ++nextActionId.current,
-      kind: "proactive",
-      ownerUserId: sessionOwnerId,
-      token: authToken,
-      sessionGeneration: sessionGeneration.current,
-      conversationId,
-      characterId,
-      knownMessageIds: new Set(messages.map((message) => message.id))
-    };
-    const shouldApply = () =>
-      actionStillApplies(action) &&
-      activeConversationIdRef.current === conversationId;
-    let requestAccepted = false;
-    let messagePersisted = false;
-    actionInFlight.current = action;
-    setConversationMutating(true);
-    setNotice(null);
-    try {
-      const response = await acceptedJsonMutation(
-        `/debug/conversation/${conversationId}/proactive`,
-        "POST",
-        action.token
-      );
-      requestAccepted = true;
-      if (!shouldApply()) {
-        return;
-      }
-      if (response.readable && response.value === null) {
-        setNotice("Presence is paused, snoozed, or cooling down.");
-        return;
-      }
-      let message = expectedProactiveMessage(response.value, action);
-      if (!message) {
-        const canonical = await readCanonicalTranscript(action);
-        message = recoveredProactiveMessage(canonical, action);
-        if (!message) {
-          throw new Error(
-            "The note was requested, but it could not be confirmed in your history. Reload Eidolon before requesting another."
-          );
-        }
-      }
-      if (!shouldApply()) {
-        return;
-      }
-      messagePersisted = true;
-      appendMessage(message);
-      await refreshSideState(authToken, characterId, conversationId, shouldApply);
-      if (shouldApply()) {
-        setNotice("A check-in arrived.");
-      }
-    } catch (caught) {
-      if (shouldApply()) {
-        setError(
-          messagePersisted
-            ? "A check-in was saved, but the conversation could not refresh. Reload Eidolon before continuing this conversation."
-            : requestAccepted
-              ? "The note may have been prepared, but it could not be confirmed. Reload Eidolon before requesting another."
-              : readError(caught)
-        );
-      }
-    } finally {
-      if (actionStillApplies(action)) {
-        actionInFlight.current = null;
-        setConversationMutating(false);
-      }
-    }
-  }
-
   async function clearConversationMessages(): Promise<boolean> {
     if (
       !token ||
@@ -197,8 +101,6 @@ export function usePrivacyController({
     const conversationId = activeConversation.id;
     const characterId = activeCharacterId;
     const action: ConversationAction = {
-      id: ++nextActionId.current,
-      kind: "clear",
       ownerUserId: sessionOwnerId,
       token: authToken,
       sessionGeneration: sessionGeneration.current,
@@ -219,7 +121,6 @@ export function usePrivacyController({
       cancelActiveStream();
       const response = await acceptedJsonMutation(
         `/conversations/${conversationId}/messages`,
-        "DELETE",
         action.token
       );
       accepted = true;
@@ -276,7 +177,6 @@ export function usePrivacyController({
 
   return {
     conversationMutating,
-    queueProactive,
     clearConversationMessages
   };
 }
@@ -293,33 +193,6 @@ async function readCanonicalTranscript(action: ConversationAction): Promise<Mess
   return messages;
 }
 
-function expectedProactiveMessage(
-  value: unknown,
-  action: ConversationAction
-): Message | null {
-  const message = completeMessage(value, action.conversationId);
-  return message?.role === "assistant" &&
-    message.metadata_json.proactive === true &&
-    message.content.length <= 600 &&
-    !action.knownMessageIds.has(message.id)
-    ? message
-    : null;
-}
-
-function recoveredProactiveMessage(
-  messages: Message[],
-  action: ConversationAction
-): Message | null {
-  const candidates = messages.filter(
-    (message) =>
-      message.role === "assistant" &&
-      message.metadata_json.proactive === true &&
-      message.content.length <= 600 &&
-      !action.knownMessageIds.has(message.id)
-  );
-  return candidates.length === 1 ? candidates[0] : null;
-}
-
 function isDeleteCountResponse(value: unknown): value is { deleted: number } {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -334,15 +207,12 @@ function isDeleteCountResponse(value: unknown): value is { deleted: number } {
 
 async function acceptedJsonMutation(
   path: string,
-  method: "POST" | "DELETE",
   token: string
 ): Promise<{ readable: boolean; value: unknown }> {
   const response = await apiFetch(path, {
-    method,
-    body: method === "POST" ? JSON.stringify({}) : undefined,
+    method: "DELETE",
     headers: {
-      Authorization: `Bearer ${token}`,
-      ...(method === "POST" ? { "Content-Type": "application/json" } : {})
+      Authorization: `Bearer ${token}`
     }
   });
   if (!response.ok) {

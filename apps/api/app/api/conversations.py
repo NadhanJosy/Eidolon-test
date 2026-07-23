@@ -62,6 +62,10 @@ from app.services.memory import (
     remove_message_source_memories,
 )
 from app.services.proactive import ensure_proactive_jobs
+from app.services.proactive_presence import (
+    cancel_pending_for_character,
+    mark_candidates_opened_through,
+)
 from app.services.relationship import reverse_relationship_message_effect
 from app.services.scheduler import run_post_chat_job
 
@@ -115,6 +119,12 @@ async def update_conversation(
             set_conversation_privacy_mode(conversation, payload.privacy_mode)
             session.add(build_privacy_mode_event(conversation, payload.privacy_mode))
         if payload.privacy_mode == "private":
+            await cancel_pending_for_character(
+                session,
+                character_id=conversation.character_id,
+                conversation_id=conversation.id,
+                reason_code="conversation_became_private",
+            )
             await _delete_conversation_jobs(session, conversation.id)
     if payload.scenario is not None:
         try:
@@ -151,6 +161,7 @@ async def mark_conversation_read(
             status_code=404,
             detail="Readable companion message was not found in this thread.",
         )
+    await mark_candidates_opened_through(session, conversation=conversation)
     await session.commit()
     await session.refresh(conversation)
     return await get_conversation_summary(session, conversation)
@@ -394,6 +405,12 @@ async def clear_conversation_messages(
         for_update=True,
     )
     await delete_conversation_threads(session, conversation.id)
+    await cancel_pending_for_character(
+        session,
+        character_id=conversation.character_id,
+        conversation_id=conversation.id,
+        reason_code="conversation_cleared",
+    )
     result = await session.execute(
         delete(Message).where(Message.conversation_id == conversation.id)
     )
@@ -430,6 +447,12 @@ async def _delete_assistant_message(
         user_id=user.id,
         character_id=conversation.character_id,
         message_id=assistant_message.id,
+    )
+    await cancel_pending_for_character(
+        session,
+        character_id=conversation.character_id,
+        conversation_id=conversation.id,
+        reason_code="conversation_context_rebuilt",
     )
     await _delete_conversation_jobs(session, conversation.id)
     await _delete_conversation_journals(session, conversation.id)
@@ -494,6 +517,12 @@ async def _delete_latest_user_turn(
             character_id=conversation.character_id,
             message_id=dependent_message.id,
         )
+    await cancel_pending_for_character(
+        session,
+        character_id=conversation.character_id,
+        conversation_id=conversation.id,
+        reason_code="conversation_context_rebuilt",
+    )
     await _delete_conversation_jobs(session, conversation.id)
     await _delete_conversation_journals(session, conversation.id)
 

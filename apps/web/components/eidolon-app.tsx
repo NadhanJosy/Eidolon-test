@@ -27,6 +27,7 @@ import { Icon, type IconName } from "./eidolon/icons";
 import { MemoryArchive } from "./eidolon/memory-archive";
 import { MomentsJournal } from "./eidolon/moments-journal";
 import { OnboardingExperience } from "./eidolon/onboarding-experience";
+import { fetchProactiveInbox, ProactiveInbox } from "./eidolon/proactive-inbox";
 import { RelationshipExperience } from "./eidolon/relationship-experience";
 import { SettingsExperience } from "./eidolon/settings-experience";
 import type {
@@ -38,14 +39,16 @@ import type {
   Journal,
   MemoryItem,
   Message,
+  ProactiveInboxItem,
   RelationshipMetric
 } from "./eidolon/types";
 import { useEidolonController } from "./eidolon/use-eidolon-controller";
 
-type AppView = "chat" | "memories" | "relationship" | "moments" | "settings";
+type AppView = "chat" | "inbox" | "memories" | "relationship" | "moments" | "settings";
 
 const destinations: Array<{ id: AppView; icon: IconName; label: string }> = [
   { id: "chat", icon: "message", label: "Chat" },
+  { id: "inbox", icon: "moon", label: "Inbox" },
   { id: "memories", icon: "bookmark", label: "Memories" },
   { id: "relationship", icon: "heart", label: "Relationship" },
   { id: "moments", icon: "book", label: "Moments" },
@@ -54,12 +57,17 @@ const destinations: Array<{ id: AppView; icon: IconName; label: string }> = [
 
 export function EidolonApp() {
   const { state, actions } = useEidolonController();
+  const activeCharacterId = state.activeCharacter?.id;
   const [view, setView] = useState<AppView>("chat");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [librarySelectionBusy, setLibrarySelectionBusy] = useState(false);
   const [completedOnboardingKey, setCompletedOnboardingKey] = useState<string | null>(null);
   const [creatingCompanion, setCreatingCompanion] = useState(false);
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
+  const [inboxUnread, setInboxUnread] = useState<{
+    characterId: string;
+    count: number;
+  } | null>(null);
   const [unreadEntry, setUnreadEntry] = useState<{
     conversationId: string;
     after: string;
@@ -82,6 +90,9 @@ export function EidolonApp() {
       : null;
 
   const closeLibrary = useCallback(() => setLibraryOpen(false), []);
+  const updateInboxUnread = useCallback((count: number) => {
+    if (activeCharacterId) setInboxUnread({ characterId: activeCharacterId, count });
+  }, [activeCharacterId]);
 
   useEffect(() => {
     if (view === "chat") return;
@@ -91,6 +102,28 @@ export function EidolonApp() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [view]);
+
+  useEffect(() => {
+    if (!state.token || !activeCharacterId) {
+      return;
+    }
+    let active = true;
+    void fetchProactiveInbox(state.token, activeCharacterId)
+      .then((items) => {
+        if (active) {
+          setInboxUnread({
+            characterId: activeCharacterId,
+            count: items.filter((item) => item.state === "delivered").length
+          });
+        }
+      })
+      .catch(() => {
+        // Conversation unread state remains available if this secondary inbox refresh fails.
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeCharacterId, state.token]);
 
   if (!state.sessionReady) {
     return <SessionOpening />;
@@ -118,6 +151,8 @@ export function EidolonApp() {
 
   const currentUser = state.user;
   const characterName = state.activeCharacter?.name ?? "Eidolon";
+  const currentInboxUnread =
+    inboxUnread && inboxUnread.characterId === activeCharacterId ? inboxUnread.count : 0;
   const rememberedMessageIds = state.memories.flatMap(memorySourceMessageIds);
   const experienceError = state.error ?? state.sideStateError;
   const activeUnreadAfter =
@@ -193,6 +228,26 @@ export function EidolonApp() {
       }
     } finally {
       setLibrarySelectionBusy(false);
+    }
+  }
+
+  async function returnToProactiveNote(item: ProactiveInboxItem) {
+    if (!item.conversation_id) return;
+    const conversation = state.conversations.find(
+      (candidate) => candidate.id === item.conversation_id
+    );
+    if (!conversation || !(await actions.selectConversation(conversation))) return;
+    setUnreadEntry(null);
+    setView("chat");
+    if (item.message_id) {
+      window.setTimeout(() => {
+        document.getElementById(`message-${item.message_id}`)?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+          block: "center"
+        });
+      }, 120);
     }
   }
 
@@ -347,6 +402,7 @@ export function EidolonApp() {
         <DesktopNavigation
           active={view}
           characterName={characterName}
+          inboxUnread={currentInboxUnread}
           theme={state.characterDraft.visual_theme}
           onNavigate={navigate}
           onOpenLibrary={() => setLibraryOpen(true)}
@@ -405,7 +461,6 @@ export function EidolonApp() {
                 onDelete={confirmMessageDeletion}
                 onEdit={actions.startEditMessage}
                 onOpenMemories={() => navigate("memories")}
-                onQueueProactive={actions.queueProactive}
                 onDeleteContinuityThread={confirmThreadDeletion}
                 onReopenContinuityThread={actions.reopenContinuityThread}
                 onRemember={actions.rememberMessage}
@@ -454,6 +509,16 @@ export function EidolonApp() {
                     onRestoreMemory={actions.restoreMemory}
                     onSaveEdit={actions.saveMemoryEdit}
                     onTogglePinned={actions.toggleMemoryPinned}
+                  />
+                ) : null}
+                {view === "inbox" ? (
+                  <ProactiveInbox
+                    characterId={state.activeCharacter?.id ?? null}
+                    characterName={characterName}
+                    key={state.activeCharacter?.id ?? "no-companion"}
+                    token={state.token}
+                    onReturnToChat={(item) => void returnToProactiveNote(item)}
+                    onUnreadChange={updateInboxUnread}
                   />
                 ) : null}
                 {view === "relationship" ? (
@@ -542,7 +607,7 @@ export function EidolonApp() {
           </div>
         </div>
 
-        <MobileNavigation active={view} onNavigate={navigate} />
+        <MobileNavigation active={view} inboxUnread={currentInboxUnread} onNavigate={navigate} />
       </div>
 
       <ConversationLibrary
@@ -604,12 +669,12 @@ function CompanionHeader({ characterName, conversationTitle, privacyMode, theme,
   );
 }
 
-function DesktopNavigation({ active, characterName, theme, onNavigate, onOpenLibrary }: { active: AppView; characterName: string; theme: string; onNavigate: (view: AppView) => void; onOpenLibrary: () => void }) {
+function DesktopNavigation({ active, characterName, theme, inboxUnread, onNavigate, onOpenLibrary }: { active: AppView; characterName: string; theme: string; inboxUnread: number; onNavigate: (view: AppView) => void; onOpenLibrary: () => void }) {
   return (
     <aside className="hidden w-[5.5rem] shrink-0 flex-col border-r border-white/[0.07] bg-[#0b0a09]/78 px-3 py-5 backdrop-blur-xl lg:flex xl:w-[16rem] xl:px-4">
       <div className="w-10 overflow-hidden xl:w-full"><EidolonWordmark compact /></div>
       <nav aria-label="Primary" className="my-auto space-y-2">
-        {destinations.map((item) => <NavigationButton active={active === item.id} icon={item.icon} key={item.id} label={item.label} onClick={() => onNavigate(item.id)} />)}
+        {destinations.map((item) => <NavigationButton active={active === item.id} badge={item.id === "inbox" ? inboxUnread : 0} icon={item.icon} key={item.id} label={item.label} onClick={() => onNavigate(item.id)} />)}
       </nav>
       <button className="flex min-h-12 items-center justify-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-1.5 text-left transition hover:border-white/[0.14] hover:bg-white/[0.04] xl:justify-start xl:p-2" onClick={onOpenLibrary} type="button">
         <CompanionPortrait name={characterName} quiet size="small" theme={theme} />
@@ -619,12 +684,12 @@ function DesktopNavigation({ active, characterName, theme, onNavigate, onOpenLib
   );
 }
 
-function NavigationButton({ active, icon, label, onClick }: { active: boolean; icon: IconName; label: string; onClick: () => void }) {
-  return <button aria-current={active ? "page" : undefined} aria-label={label} className={`group relative flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl px-3 transition xl:justify-start ${active ? "bg-[color:var(--color-accent)]/[0.11] text-[color:var(--color-accent-soft)]" : "text-[#817970] hover:bg-white/[0.04] hover:text-[#c1b6ab]"}`} onClick={onClick} title={label} type="button"><Icon className="h-[1.1rem] w-[1.1rem] shrink-0" name={icon} /><span className="hidden text-sm xl:block">{label}</span>{active ? <span className="absolute -left-3 h-6 w-0.5 rounded-full bg-[color:var(--color-accent)] xl:-left-4" /> : null}<span className="pointer-events-none absolute left-14 z-50 hidden whitespace-nowrap rounded-xl border border-white/[0.08] bg-[#171512] px-2.5 py-1.5 text-[0.68rem] text-[#c4b9ae] shadow-xl group-hover:block xl:hidden">{label}</span></button>;
+function NavigationButton({ active, badge, icon, label, onClick }: { active: boolean; badge: number; icon: IconName; label: string; onClick: () => void }) {
+  return <button aria-current={active ? "page" : undefined} aria-label={badge > 0 ? `${label}, ${badge} unread` : label} className={`group relative flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl px-3 transition xl:justify-start ${active ? "bg-[color:var(--color-accent)]/[0.11] text-[color:var(--color-accent-soft)]" : "text-[#817970] hover:bg-white/[0.04] hover:text-[#c1b6ab]"}`} onClick={onClick} title={label} type="button"><Icon className="h-[1.1rem] w-[1.1rem] shrink-0" name={icon} /><span className="hidden text-sm xl:block">{label}</span>{badge > 0 ? <span aria-hidden="true" className="absolute right-2 top-2 grid h-4 min-w-4 place-items-center rounded-full bg-[#bd8163] px-1 text-[0.56rem] font-semibold text-[#190f0b]">{badge > 9 ? "9+" : badge}</span> : null}{active ? <span className="absolute -left-3 h-6 w-0.5 rounded-full bg-[color:var(--color-accent)] xl:-left-4" /> : null}<span className="pointer-events-none absolute left-14 z-50 hidden whitespace-nowrap rounded-xl border border-white/[0.08] bg-[#171512] px-2.5 py-1.5 text-[0.68rem] text-[#c4b9ae] shadow-xl group-hover:block xl:hidden">{label}</span></button>;
 }
 
-function MobileNavigation({ active, onNavigate }: { active: AppView; onNavigate: (view: AppView) => void }) {
-  return <nav aria-label="Primary" className="safe-area-nav fixed inset-x-2 bottom-1 z-50 grid grid-cols-5 rounded-[1.35rem] border border-white/[0.1] bg-[#11100e]/95 px-1 pt-1 shadow-[0_16px_55px_rgba(0,0,0,0.5)] backdrop-blur-2xl lg:hidden">{destinations.map((item) => <button aria-current={active === item.id ? "page" : undefined} className={`relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl text-[0.6rem] transition ${active === item.id ? "bg-white/[0.045] text-[color:var(--color-accent-soft)]" : "text-[#807870]"}`} key={item.id} onClick={() => onNavigate(item.id)} type="button"><Icon className="h-[1.05rem] w-[1.05rem]" name={item.icon} /><span className="truncate">{item.label}</span>{active === item.id ? <span className="absolute bottom-1 h-0.5 w-4 rounded-full bg-[color:var(--color-accent)]" /> : null}</button>)}</nav>;
+function MobileNavigation({ active, inboxUnread, onNavigate }: { active: AppView; inboxUnread: number; onNavigate: (view: AppView) => void }) {
+  return <nav aria-label="Primary" className="safe-area-nav fixed inset-x-2 bottom-1 z-50 grid grid-cols-6 rounded-[1.35rem] border border-white/[0.1] bg-[#11100e]/95 px-1 pt-1 shadow-[0_16px_55px_rgba(0,0,0,0.5)] backdrop-blur-2xl lg:hidden">{destinations.map((item) => { const unread = item.id === "inbox" ? inboxUnread : 0; return <button aria-current={active === item.id ? "page" : undefined} aria-label={unread > 0 ? `${item.label}, ${unread} unread` : item.label} className={`relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl text-[0.6rem] transition ${active === item.id ? "bg-white/[0.045] text-[color:var(--color-accent-soft)]" : "text-[#807870]"}`} key={item.id} onClick={() => onNavigate(item.id)} type="button"><Icon className="h-[1.05rem] w-[1.05rem]" name={item.icon} />{unread > 0 ? <span aria-hidden="true" className="absolute right-[22%] top-2 h-2 w-2 rounded-full bg-[#bd8163]" /> : null}<span className="truncate">{item.label}</span>{active === item.id ? <span className="absolute bottom-1 h-0.5 w-4 rounded-full bg-[color:var(--color-accent)]" /> : null}</button>; })}</nav>;
 }
 
 function SessionOpening() {

@@ -18,6 +18,7 @@ from app.api import (
     health,
     journal,
     memory,
+    proactive,
 )
 from app.config import get_settings
 from app.services.scheduler import start_background_scheduler
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(memory.router)
     app.include_router(journal.router)
     app.include_router(continuity.router)
+    app.include_router(proactive.router)
     app.include_router(debug.router)
     app.include_router(export.router)
 

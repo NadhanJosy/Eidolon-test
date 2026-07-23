@@ -584,6 +584,7 @@ class RelationshipEvent(TimestampMixin, Base):
 
 class ScheduledJob(TimestampMixin, Base):
     __tablename__ = "scheduled_jobs"
+    __table_args__ = (UniqueConstraint("dedupe_key", name="uq_scheduled_jobs_dedupe_key"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -601,9 +602,176 @@ class ScheduledJob(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(24), index=True, default="pending", nullable=False)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     locked_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    dedupe_key: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+        nullable=True,
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ProactiveCandidate(TimestampMixin, Base):
+    __tablename__ = "proactive_candidates"
+    __table_args__ = (
+        CheckConstraint(
+            "candidate_type IN ('follow_up', 'check_in', 'reminder', 'callback', "
+            "'milestone', 'routine', 'return', 'suggestion', 'queued_thought')",
+            name="ck_proactive_candidates_type",
+        ),
+        CheckConstraint(
+            "initiative_kind IN ('companion', 'reminder')",
+            name="ck_proactive_candidates_initiative",
+        ),
+        CheckConstraint(
+            "state IN ('candidate', 'scheduled', 'generated', 'delivered', 'opened', "
+            "'dismissed', 'replied', 'cancelled', 'failed', 'expired')",
+            name="ck_proactive_candidates_state",
+        ),
+        CheckConstraint(
+            "sensitivity IN ('standard', 'sensitive', 'adult', 'private')",
+            name="ck_proactive_candidates_sensitivity",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_proactive_candidates_confidence",
+        ),
+        CheckConstraint(
+            "urgency >= 0 AND urgency <= 1",
+            name="ck_proactive_candidates_urgency",
+        ),
+        CheckConstraint(
+            "relevance_score >= 0 AND relevance_score <= 1",
+            name="ck_proactive_candidates_relevance",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_proactive_candidates_owner_idempotency",
+        ),
+        UniqueConstraint("message_id", name="uq_proactive_candidates_message"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
+    )
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    memory_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("memory_items.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    journal_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("episodic_journals.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    continuity_thread_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("continuity_threads.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    relationship_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("relationship_events.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    candidate_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    initiative_kind: Mapped[str] = mapped_column(
+        String(16),
+        default="companion",
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(String(80), nullable=False)
+    rationale: Mapped[str] = mapped_column(String(240), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    urgency: Mapped[float] = mapped_column(Float, nullable=False)
+    relevance_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    sensitivity: Mapped[str] = mapped_column(String(16), default="standard", nullable=False)
+    state: Mapped[str] = mapped_column(String(24), default="candidate", index=True, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    scheduled_for: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+        nullable=True,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+        nullable=False,
+    )
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notification_preview: Mapped[str] = mapped_column(String(180), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    dismissal_feedback: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    delivery_constraints_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+    score_factors_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+
+
+class ProactiveCandidateEvent(Base):
+    __tablename__ = "proactive_candidate_events"
+    __table_args__ = (
+        CheckConstraint(
+            "to_state IN ('candidate', 'scheduled', 'generated', 'delivered', 'opened', "
+            "'dismissed', 'replied', 'cancelled', 'failed', 'expired')",
+            name="ck_proactive_candidate_events_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("proactive_candidates.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    from_state: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    to_state: Mapped[str] = mapped_column(String(24), index=True, nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        index=True,
+        nullable=False,
+    )
 
 
 class DiagnosticEvent(Base):

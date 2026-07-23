@@ -20,6 +20,8 @@ from app.models import (
     MemoryEvidence,
     MemoryItem,
     Message,
+    ProactiveCandidate,
+    ProactiveCandidateEvent,
     RelationshipEvent,
     RelationshipState,
     ScheduledJob,
@@ -112,6 +114,30 @@ async def export_account(
     relationship_events = (
         await session.execute(select(RelationshipEvent).where(RelationshipEvent.user_id == user.id))
     ).scalars()
+    proactive_candidates = list(
+        (
+            await session.execute(
+                select(ProactiveCandidate).where(ProactiveCandidate.user_id == user.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    proactive_candidate_events: list[ProactiveCandidateEvent] = []
+    if proactive_candidates:
+        proactive_candidate_events = list(
+            (
+                await session.execute(
+                    select(ProactiveCandidateEvent).where(
+                        ProactiveCandidateEvent.candidate_id.in_(
+                            [candidate.id for candidate in proactive_candidates]
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     jobs = (
         await session.execute(select(ScheduledJob).where(ScheduledJob.user_id == user.id))
     ).scalars()
@@ -147,6 +173,12 @@ async def export_account(
         continuity_threads=[continuity_thread_to_dict(thread) for thread in continuity_threads],
         relationship_states=[relationship_to_dict(relationship) for relationship in relationships],
         relationship_events=[relationship_event_to_dict(event) for event in relationship_events],
+        proactive_candidates=[
+            proactive_candidate_to_dict(candidate) for candidate in proactive_candidates
+        ],
+        proactive_candidate_events=[
+            proactive_candidate_event_to_dict(event) for event in proactive_candidate_events
+        ],
         scheduled_jobs=[job_to_dict(job) for job in jobs],
     )
 
@@ -375,11 +407,72 @@ def job_to_dict(job: ScheduledJob) -> dict:
         "status": job.status,
         "locked_at": isoformat_or_none(job.locked_at),
         "locked_by": job.locked_by,
+        "dedupe_key": job.dedupe_key,
+        "expires_at": isoformat_or_none(job.expires_at),
+        "cancelled_at": isoformat_or_none(job.cancelled_at),
         "payload_json": job.payload_json,
         "retry_count": job.retry_count,
         "last_error": job.last_error,
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
+    }
+
+
+def proactive_candidate_to_dict(candidate: ProactiveCandidate) -> dict:
+    return {
+        "id": str(candidate.id),
+        "user_id": str(candidate.user_id),
+        "character_id": str(candidate.character_id),
+        "conversation_id": (str(candidate.conversation_id) if candidate.conversation_id else None),
+        "source_message_id": (
+            str(candidate.source_message_id) if candidate.source_message_id else None
+        ),
+        "memory_id": str(candidate.memory_id) if candidate.memory_id else None,
+        "journal_id": str(candidate.journal_id) if candidate.journal_id else None,
+        "continuity_thread_id": (
+            str(candidate.continuity_thread_id) if candidate.continuity_thread_id else None
+        ),
+        "relationship_event_id": (
+            str(candidate.relationship_event_id) if candidate.relationship_event_id else None
+        ),
+        "message_id": str(candidate.message_id) if candidate.message_id else None,
+        "candidate_type": candidate.candidate_type,
+        "initiative_kind": candidate.initiative_kind,
+        "source": candidate.source,
+        "rationale": candidate.rationale,
+        "confidence": candidate.confidence,
+        "urgency": candidate.urgency,
+        "relevance_score": candidate.relevance_score,
+        "sensitivity": candidate.sensitivity,
+        "state": candidate.state,
+        "scheduled_for": isoformat_or_none(candidate.scheduled_for),
+        "expires_at": candidate.expires_at.isoformat(),
+        "generated_at": isoformat_or_none(candidate.generated_at),
+        "delivered_at": isoformat_or_none(candidate.delivered_at),
+        "opened_at": isoformat_or_none(candidate.opened_at),
+        "dismissed_at": isoformat_or_none(candidate.dismissed_at),
+        "replied_at": isoformat_or_none(candidate.replied_at),
+        "cancelled_at": isoformat_or_none(candidate.cancelled_at),
+        "failed_at": isoformat_or_none(candidate.failed_at),
+        "notification_preview": candidate.notification_preview,
+        "failure_code": candidate.failure_code,
+        "dismissal_feedback": candidate.dismissal_feedback,
+        "delivery_constraints_json": candidate.delivery_constraints_json,
+        "score_factors_json": candidate.score_factors_json,
+        "created_at": candidate.created_at.isoformat(),
+        "updated_at": candidate.updated_at.isoformat(),
+    }
+
+
+def proactive_candidate_event_to_dict(event: ProactiveCandidateEvent) -> dict:
+    return {
+        "id": str(event.id),
+        "candidate_id": str(event.candidate_id),
+        "from_state": event.from_state,
+        "to_state": event.to_state,
+        "reason_code": event.reason_code,
+        "metadata_json": event.metadata_json,
+        "created_at": event.created_at.isoformat(),
     }
 
 

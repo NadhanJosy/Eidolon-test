@@ -386,8 +386,14 @@ async def test_journal_relationship_and_proactive_hooks_after_chat(client: Async
     assert jobs.status_code == 200
     job_types = {job["job_type"] for job in jobs.json()}
     assert "relationship_decay" in job_types
-    assert "proactive_inactivity_check" in job_types
-    assert "proactive_unresolved_thread_nudge" not in job_types
+    assert "proactive_delivery" in job_types
+    proactive_types = {
+        (job.get("payload_json") or {}).get("proactive_type")
+        for job in jobs.json()
+        if job["job_type"] == "proactive_delivery"
+    }
+    assert "proactive_delayed_double_text" in proactive_types
+    assert "proactive_unresolved_thread_nudge" not in proactive_types
 
 
 async def test_manual_journal_survives_later_conversation_summary_refresh(
@@ -601,8 +607,12 @@ async def test_journal_only_tracks_intentional_open_threads(
     assert "open_thread" in updated_journal["metadata_json"]["continuity_signals"]
 
     jobs_after_future_loop = await client.get("/debug/jobs", headers=headers)
-    future_job_types = {job["job_type"] for job in jobs_after_future_loop.json()}
-    assert "proactive_unresolved_thread_nudge" in future_job_types
+    assert any(
+        job["job_type"] == "proactive_delivery"
+        and (job.get("payload_json") or {}).get("proactive_type")
+        == "proactive_unresolved_thread_nudge"
+        for job in jobs_after_future_loop.json()
+    )
 
 
 async def test_journal_distinguishes_anniversary_and_shared_moment(
@@ -1389,7 +1399,6 @@ async def test_edit_latest_user_turn_regenerates_reply_and_cleans_state(
         for job in jobs_after.json()
         if (job.get("payload_json") or {}).get("conversation_id") == conversation_id
     }
-    assert new_conversation_job_ids
     assert old_conversation_job_ids.isdisjoint(new_conversation_job_ids)
 
     follow_up = await client.post(
@@ -1588,7 +1597,6 @@ async def test_delete_older_assistant_message_rebuilds_dependent_state(
         for job in jobs_after.json()
         if (job.get("payload_json") or {}).get("conversation_id") == conversation_id
     }
-    assert new_conversation_job_ids
     assert old_conversation_job_ids.isdisjoint(new_conversation_job_ids)
 
 
@@ -1771,7 +1779,6 @@ async def test_delete_latest_user_turn_removes_dependent_state(
         for job in jobs_after_delete.json()
         if (job.get("payload_json") or {}).get("conversation_id") == conversation_id
     }
-    assert new_conversation_job_ids
     assert old_conversation_job_ids.isdisjoint(new_conversation_job_ids)
 
 

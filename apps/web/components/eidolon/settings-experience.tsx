@@ -140,25 +140,69 @@ function CompanionSettings({ draft, saving, update, onSave }: SettingsFormProps)
 }
 
 function PresenceSettings({ draft, saving, update, onSave }: SettingsFormProps) {
+  const muted = draft.muted_proactive_categories;
   return (
-    <SettingsPanel eyebrow="Presence" title="When they may reach out" description="Allow occasional text notes that respect your quiet hours. Everything here is optional, and you can silence it at any time.">
+    <SettingsPanel eyebrow="Presence" title="When they may reach out" description="Contextual in-app notes can follow a promise, reminder, routine, or meaningful open thread. A timer by itself is never enough.">
       <SettingGroup>
-        <Toggle checked={draft.proactive_enabled} detail="Thoughtful check-ins can arrive after quiet periods or meaningful moments." label="Allow notes from your companion" onChange={(checked) => update("proactive_enabled", checked)} />
-        <Toggle checked={draft.allow_inactivity_checkins} disabled={!draft.proactive_enabled} detail="A gentle message after you have been away." label="Quiet check-ins" onChange={(checked) => update("allow_inactivity_checkins", checked)} />
+        <Toggle checked={draft.proactive_enabled} detail="Opting out cancels every pending note immediately." label="Allow companion-initiated notes" onChange={(checked) => update("proactive_enabled", checked)} />
+        <div className="py-4">
+          <p className="text-sm text-[#d2c7bc]">Delivery channel</p>
+          <p className="mt-1 text-xs leading-5 text-[#777068]">In-app inbox only. No browser or lock-screen notification receives conversation details.</p>
+        </div>
+        <Toggle checked={draft.allow_inactivity_checkins} disabled={!draft.proactive_enabled} detail="Only when a meaningful saved thread supports the check-in." label="Contextual check-ins" onChange={(checked) => update("allow_inactivity_checkins", checked)} />
+        <Toggle checked={draft.allow_thinking_of_you} disabled={!draft.proactive_enabled} detail="Use a grounded shared moment as a specific callback." label="Remembered callbacks" onChange={(checked) => update("allow_thinking_of_you", checked)} />
         <Toggle checked={draft.allow_milestone_notes} disabled={!draft.proactive_enabled} detail="Acknowledge dates and landmarks in your shared story." label="Milestone notes" onChange={(checked) => update("allow_milestone_notes", checked)} />
-        <Toggle checked={draft.allow_unresolved_thread_nudges} disabled={!draft.proactive_enabled} detail="Return gently to something left unfinished." label="Follow up on open moments" onChange={(checked) => update("allow_unresolved_thread_nudges", checked)} />
+        <Toggle checked={draft.allow_unresolved_thread_nudges} disabled={!draft.proactive_enabled} detail="Includes explicit follow-ups, reminders, and contextual suggestions." label="Open threads and reminders" onChange={(checked) => update("allow_unresolved_thread_nudges", checked)} />
+        <Toggle checked={draft.allow_delayed_double_texts} disabled={!draft.proactive_enabled} detail="At most one compact queued thought, still subject to context and caps." label="Delayed follow-up thoughts" onChange={(checked) => update("allow_delayed_double_texts", checked)} />
       </SettingGroup>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="Frequency">
+          <select className={fieldClass} onChange={(event) => update("proactive_frequency", event.target.value as CharacterDraft["proactive_frequency"])} value={draft.proactive_frequency}>
+            <option value="minimal">Minimal</option><option value="balanced">Balanced</option><option value="frequent">More often</option>
+          </select>
+        </Field>
+        <Field label="Maximum notes per local day">
+          <select className={fieldClass} onChange={(event) => update("proactive_daily_cap", event.target.value)} value={draft.proactive_daily_cap}>
+            <option value="1">One</option><option value="2">Two</option><option value="3">Three</option>
+          </select>
+        </Field>
+      </div>
       <div className="grid gap-5 sm:grid-cols-2"><Field hint="IANA name" label="Your timezone"><div className="flex gap-2"><input className={fieldClass} maxLength={80} onChange={(event) => update("proactive_timezone", event.target.value)} value={draft.proactive_timezone} /><QuietButton onClick={() => update("proactive_timezone", resolvedDeviceTimeZone())}>Use device</QuietButton></div></Field><Field label="Minimum time between notes"><select className={fieldClass} onChange={(event) => update("proactive_cooldown_hours", event.target.value)} value={draft.proactive_cooldown_hours}><option value="8">8 hours</option><option value="12">12 hours</option><option value="24">A day</option><option value="48">Two days</option><option value="72">Three days</option><option value="168">A week</option></select></Field></div>
       <div className="grid gap-5 sm:grid-cols-2"><Field label="Quiet hours begin"><input className={fieldClass} onChange={(event) => update("quiet_hours_start", event.target.value)} type="time" value={draft.quiet_hours_start} /></Field><Field label="Quiet hours end"><input className={fieldClass} onChange={(event) => update("quiet_hours_end", event.target.value)} type="time" value={draft.quiet_hours_end} /></Field></div>
+      <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+        <p className="text-sm text-[#d2c7bc]">Pause all notes</p>
+        <p className="mt-1 text-xs text-[#777068]">{draft.proactive_snoozed_until ? `Paused until ${formatPresencePause(draft.proactive_snoozed_until)}.` : "No pause is active."}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <QuietButton onClick={() => update("proactive_snoozed_until", presencePauseFromNow(24))}>Pause 24 hours</QuietButton>
+          <QuietButton onClick={() => update("proactive_snoozed_until", presencePauseFromNow(168))}>Pause a week</QuietButton>
+          {draft.proactive_snoozed_until ? <QuietButton onClick={() => update("proactive_snoozed_until", "")}>Resume</QuietButton> : null}
+        </div>
+      </div>
       <SettingGroup>
         <Toggle checked={draft.allow_morning_notes} disabled={!draft.proactive_enabled} label="Morning notes" onChange={(checked) => update("allow_morning_notes", checked)} />
         {draft.allow_morning_notes ? <Field label="Around"><input className={fieldClass} onChange={(event) => update("morning_time", event.target.value)} type="time" value={draft.morning_time} /></Field> : null}
         <Toggle checked={draft.allow_goodnight_notes} disabled={!draft.proactive_enabled} label="Goodnight notes" onChange={(checked) => update("allow_goodnight_notes", checked)} />
         {draft.allow_goodnight_notes ? <Field label="Around"><input className={fieldClass} onChange={(event) => update("goodnight_time", event.target.value)} type="time" value={draft.goodnight_time} /></Field> : null}
       </SettingGroup>
+      {muted.length > 0 ? (
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+          <p className="text-sm text-[#d2c7bc]">Muted from inbox feedback</p>
+          <p className="mt-1 text-xs text-[#777068]">{muted.map((item) => item.replaceAll("_", " ")).join(", ")}</p>
+          <div className="mt-3"><QuietButton onClick={() => update("muted_proactive_categories", [])}>Unmute all</QuietButton></div>
+        </div>
+      ) : null}
       <SaveRow saving={saving} onSave={onSave} />
     </SettingsPanel>
   );
+}
+
+function presencePauseFromNow(hours: number): string {
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+}
+
+function formatPresencePause(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "the saved time" : parsed.toLocaleString();
 }
 
 function PrivacySettings({ user, characterName, draft, saving, contentMode, privacyMode, adultStatus, adultReadinessState, adultModeAvailable, update, replaceDraft, onToggleAgeGate, onChangeContentMode, onSetPrivacyMode, onClearAdultContinuity, onSave }: SettingsFormProps & { user: User; characterName: string; contentMode: ContentMode; privacyMode: ConversationPrivacyMode; adultStatus: AdultStatus | null; adultReadinessState: AdultReadinessState; adultModeAvailable: boolean; replaceDraft: (draft: CharacterDraft) => void; onToggleAgeGate: () => void; onChangeContentMode: (mode: ContentMode) => void; onSetPrivacyMode: (mode: ConversationPrivacyMode) => void; onClearAdultContinuity: () => void }) {

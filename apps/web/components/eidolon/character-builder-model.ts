@@ -97,6 +97,7 @@ export const CHARACTER_FIELD_LIMITS: Partial<Record<keyof CharacterDraft, number
   hard_limits: 4000,
   aftercare_style: 4000,
   proactive_cooldown_hours: 3,
+  proactive_daily_cap: 1,
   proactive_timezone: 80,
   quiet_hours_start: 5,
   quiet_hours_end: 5,
@@ -134,6 +135,7 @@ const STEP_FIELDS: Record<CharacterBuilderStep, Array<keyof CharacterDraft>> = {
     "content_intensity",
     "adult_memory_storage",
     "proactive_cooldown_hours",
+    "proactive_daily_cap",
     "proactive_timezone",
     "quiet_hours_start",
     "quiet_hours_end",
@@ -235,6 +237,9 @@ export function validateCharacterDraft(
   }
   if (parseProactiveCooldownHours(draft.proactive_cooldown_hours) === null) {
     errors.proactive_cooldown_hours = "Choose a cooldown from 1 to 168 hours.";
+  }
+  if (!/^[1-3]$/.test(draft.proactive_daily_cap)) {
+    errors.proactive_daily_cap = "Choose a daily cap from 1 to 3 notes.";
   }
   for (const field of [
     "quiet_hours_start",

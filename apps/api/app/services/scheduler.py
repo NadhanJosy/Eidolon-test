@@ -41,6 +41,11 @@ from app.services.proactive import (
     proactive_deferred_until,
     proactive_relationship_delivery_block,
 )
+from app.services.proactive_presence import (
+    PROACTIVE_DELIVERY_JOB,
+    deliver_proactive_candidate,
+    fail_candidate,
+)
 from app.services.relationship import (
     ensure_relationship_decay_job,
     get_current_relationship,
@@ -49,7 +54,10 @@ from app.services.relationship import (
 
 logger = logging.getLogger(__name__)
 
-PROACTIVE_JOB_TYPES = set(PROACTIVE_JOB_SCHEDULES) | {"proactive_message_create"}
+PROACTIVE_JOB_TYPES = set(PROACTIVE_JOB_SCHEDULES) | {
+    "proactive_message_create",
+    PROACTIVE_DELIVERY_JOB,
+}
 SCHEDULER_ADVISORY_LOCK_KEY = 0x4549444F4C4F4E
 
 
@@ -171,6 +179,30 @@ async def _run_proactive_job(
     job: ScheduledJob,
     settings: Settings,
 ) -> None:
+    candidate_id = _optional_uuid((job.payload_json or {}).get("candidate_id"))
+    if candidate_id is not None:
+        result = await deliver_proactive_candidate(
+            session,
+            candidate_id=candidate_id,
+            provider=get_llm_provider(settings),
+        )
+        if result.status == "deferred" and result.deferred_until is not None:
+            raise ScheduledJobDeferred(
+                run_at=result.deferred_until,
+                reason=result.reason or "candidate_deferred",
+            )
+        _merge_payload(
+            job,
+            {
+                "result": ("message_created" if result.status == "delivered" else result.status),
+                "candidate_id": str(result.candidate.id),
+                "candidate_state": result.candidate.state,
+                "skip_reason": result.reason,
+                "message_id": str(result.message.id) if result.message else None,
+            },
+        )
+        return
+
     conversation = await _conversation_from_job(session, job)
     if conversation_is_private(conversation):
         _merge_payload(
@@ -558,6 +590,7 @@ async def _process_claimed_job(
         await mark_job_deferred(session, job, run_at=exc.run_at)
     except ValueError as exc:
         await _mark_post_chat_receipt_degraded(session, job)
+        await _mark_proactive_candidate_failed(session, job, "invalid_delivery_state")
         await mark_job_failed(session, job, str(exc))
     except Exception:  # noqa: BLE001 - failed job rows need safe, deterministic state
         logger.warning("Scheduled job %s failed unexpectedly.", job.id)
@@ -571,7 +604,24 @@ async def _process_claimed_job(
             )
         else:
             await _mark_post_chat_receipt_degraded(session, job)
+            await _mark_proactive_candidate_failed(session, job, "delivery_dead_lettered")
             await mark_job_failed(session, job, "Job failed during execution.")
+
+
+async def _mark_proactive_candidate_failed(
+    session: AsyncSession,
+    job: ScheduledJob,
+    reason_code: str,
+) -> None:
+    candidate_id = _optional_uuid((job.payload_json or {}).get("candidate_id"))
+    if candidate_id is None:
+        return
+    from app.models import ProactiveCandidate
+
+    candidate = await session.get(ProactiveCandidate, candidate_id)
+    if candidate is None or candidate.state not in {"candidate", "scheduled", "generated"}:
+        return
+    await fail_candidate(session, candidate, reason_code)
 
 
 async def _mark_post_chat_receipt_degraded(

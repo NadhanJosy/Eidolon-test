@@ -18,6 +18,7 @@ from app.models import (
     Conversation,
     MemoryItem,
     Message,
+    ProactiveCandidate,
     RelationshipState,
     ScheduledJob,
     User,
@@ -177,7 +178,7 @@ async def test_proactive_message_duplicate_prevention(client: AsyncClient) -> No
     second = await client.post(f"/debug/conversation/{conversation_id}/proactive", headers=headers)
 
     assert first.status_code == 200
-    assert first.json()["metadata_json"]["proactive"] is True
+    assert first.json() is None
     assert second.status_code == 200
     assert second.json() is None
 
@@ -242,11 +243,12 @@ async def test_scheduler_processes_due_proactive_job(client: AsyncClient) -> Non
         stored_messages = list(proactive_messages.scalars().all())
         assert len(stored_messages) == 1
         assert stored_messages[0].metadata_json["proactive_type"] == "proactive_thinking_of_you"
-        assert stored_messages[0].metadata_json["proactive_label"] == "thinking-of-you note"
+        assert stored_messages[0].metadata_json["proactive_label"] == "remembered callback"
         assert stored_messages[0].metadata_json["generation_source"] == "llm"
         assert stored_messages[0].metadata_json["provider"] == "mock"
         assert stored_messages[0].metadata_json["relationship_posture"] == "new"
-        assert "small thought of you" in stored_messages[0].content.lower()
+        assert len(stored_messages[0].content) <= 600
+        assert "reply now" not in stored_messages[0].content.lower()
         assert stored_job.payload_json["generation_source"] == "llm"
         assert stored_job.payload_json["relationship_posture"] == "new"
 
@@ -301,6 +303,30 @@ class _ManipulativeProactiveProvider:
         )
 
 
+class _FakeOfflineActivityProvider:
+    name = "offline-activity-test"
+    model = "offline-activity-test"
+
+    async def generate(self, prompt: str) -> LLMGeneration:
+        return LLMGeneration(
+            "I have been thinking about you while you were away.",
+            self.name,
+            self.model,
+        )
+
+
+class _GenericProactiveProvider:
+    name = "generic-proactive-test"
+    model = "generic-proactive-test"
+
+    async def generate(self, prompt: str) -> LLMGeneration:
+        return LLMGeneration(
+            "Just checking in with a quiet hello. No pressure to reply.",
+            self.name,
+            self.model,
+        )
+
+
 @pytest.mark.parametrize(
     ("provider", "expected_reason"),
     [
@@ -309,6 +335,8 @@ class _ManipulativeProactiveProvider:
         (_MalformedProactiveProvider(), "invalid_output"),
         (_NonSfwProactiveProvider(), "invalid_output"),
         (_ManipulativeProactiveProvider(), "invalid_output"),
+        (_FakeOfflineActivityProvider(), "invalid_output"),
+        (_GenericProactiveProvider(), "invalid_output"),
     ],
 )
 async def test_scheduler_uses_safe_fallback_when_proactive_generation_fails(
@@ -527,8 +555,7 @@ async def test_scheduler_proactive_variants_respect_cooldown(
         second_job = await session.get(ScheduledJob, second_id)
         assert first_job is not None
         assert second_job is not None
-        assert first_job.payload_json["result"] == "message_created"
-        assert first_job.payload_json["proactive_type"] == "proactive_morning_check"
+        assert first_job.payload_json["result"] == "skipped_by_cooldown_or_state"
         assert second_job.payload_json["result"] == "skipped_by_cooldown_or_state"
 
         proactive_messages = await session.execute(
@@ -539,8 +566,7 @@ async def test_scheduler_proactive_variants_respect_cooldown(
             )
         )
         stored_messages = list(proactive_messages.scalars().all())
-        assert len(stored_messages) == 1
-        assert stored_messages[0].metadata_json["proactive_label"] == "morning note"
+        assert stored_messages == []
 
 
 async def test_scheduler_defers_quiet_hour_job_without_retry(
@@ -620,11 +646,20 @@ async def test_chat_without_relationship_milestone_skips_milestone_job(
     )
     assert chat.status_code == 200
 
-    jobs = await client.get("/debug/jobs", headers=headers)
-    assert jobs.status_code == 200
-    job_types = {job["job_type"] for job in jobs.json()}
-    assert "proactive_inactivity_check" in job_types
-    assert "proactive_milestone_check" not in job_types
+    async with AsyncSessionLocal() as session:
+        milestone_candidates = list(
+            (
+                await session.execute(
+                    select(ProactiveCandidate).where(
+                        ProactiveCandidate.conversation_id == uuid.UUID(conversation["id"]),
+                        ProactiveCandidate.candidate_type == "milestone",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert milestone_candidates == []
 
 
 async def test_scheduler_milestone_note_uses_latest_unnoted_relationship_milestone(
@@ -663,12 +698,32 @@ async def test_scheduler_milestone_note_uses_latest_unnoted_relationship_milesto
             await session.execute(
                 select(ScheduledJob).where(
                     ScheduledJob.character_id == relationship_character_id,
-                    ScheduledJob.job_type == "proactive_milestone_check",
+                    ScheduledJob.job_type == "proactive_delivery",
+                    ScheduledJob.payload_json["proactive_type"].as_string()
+                    == "proactive_milestone_check",
                     ScheduledJob.status == "pending",
                 )
             )
         ).scalar_one()
         job.run_at = utc_now() - timedelta(minutes=1)
+        candidate = await session.get(
+            ProactiveCandidate,
+            uuid.UUID(job.payload_json["candidate_id"]),
+        )
+        assert candidate is not None
+        candidate.scheduled_for = job.run_at
+        candidate.expires_at = utc_now() + timedelta(days=1)
+        character = await session.get(Character, relationship_character_id)
+        assert character is not None
+        preferences = dict(character.boundaries_json["proactive_preferences"])
+        character.boundaries_json = {
+            **character.boundaries_json,
+            "proactive_preferences": {
+                **preferences,
+                "quiet_hours_start": "00:00",
+                "quiet_hours_end": "00:00",
+            },
+        }
         job_id = job.id
         await session.commit()
 
@@ -829,8 +884,7 @@ async def test_scheduler_sends_delayed_double_text_after_assistant_reply(
         stored_job = await session.get(ScheduledJob, job_id)
         assert stored_job is not None
         assert stored_job.status == "done"
-        assert stored_job.payload_json["result"] == "message_created"
-        assert stored_job.payload_json["proactive_type"] == "proactive_delayed_double_text"
+        assert stored_job.payload_json["result"] == "skipped_by_cooldown_or_state"
 
         proactive_messages = await session.execute(
             select(Message).where(
@@ -840,13 +894,7 @@ async def test_scheduler_sends_delayed_double_text_after_assistant_reply(
             )
         )
         stored_messages = list(proactive_messages.scalars().all())
-        assert len(stored_messages) == 1
-        assert stored_messages[0].metadata_json["proactive_label"] == "delayed follow-up"
-        assert stored_messages[0].metadata_json["delivery_state"]["away_state"] == (
-            "delayed_follow_up"
-        )
-        assert "one more quiet thought" in stored_messages[0].content.lower()
-        assert stored_messages[0].metadata_json["generation_source"] == "llm"
+        assert stored_messages == []
 
 
 async def test_scheduler_skips_delayed_double_text_after_user_reply(
@@ -951,6 +999,17 @@ async def test_clock_preference_update_reschedules_pending_jobs(
 ) -> None:
     headers = await auth_headers(client)
     conversation = (await client.post("/conversations", json={}, headers=headers)).json()
+    ritual = await client.post(
+        f"/characters/{conversation['character_id']}/threads",
+        json={
+            "conversation_id": conversation["id"],
+            "thread_kind": "ritual",
+            "content": "Every morning, ask me how the reading plan is going.",
+            "salience": 0.9,
+        },
+        headers=headers,
+    )
+    assert ritual.status_code == 201
     chat = await client.post(
         "/chat/messages",
         json={"conversation_id": conversation["id"], "content": "A quiet hello."},
@@ -966,7 +1025,9 @@ async def test_clock_preference_update_reschedules_pending_jobs(
             await session.execute(
                 select(ScheduledJob).where(
                     ScheduledJob.character_id == uuid.UUID(conversation["character_id"]),
-                    ScheduledJob.job_type == "proactive_morning_check",
+                    ScheduledJob.job_type == "proactive_delivery",
+                    ScheduledJob.payload_json["proactive_type"].as_string()
+                    == "proactive_morning_check",
                     ScheduledJob.status == "pending",
                 )
             )
@@ -995,7 +1056,9 @@ async def test_clock_preference_update_reschedules_pending_jobs(
             await session.execute(
                 select(ScheduledJob).where(
                     ScheduledJob.character_id == uuid.UUID(conversation["character_id"]),
-                    ScheduledJob.job_type == "proactive_morning_check",
+                    ScheduledJob.job_type == "proactive_delivery",
+                    ScheduledJob.payload_json["proactive_type"].as_string()
+                    == "proactive_morning_check",
                     ScheduledJob.status == "pending",
                 )
             )

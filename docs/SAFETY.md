@@ -123,6 +123,23 @@ where the job supports one.
 Thinking-of-you work additionally requires a generated general-scope shared
 moment. User-authored manual notes and adult moments are never proactive anchors.
 
+Every proactive candidate is general-scope and classified as standard or
+sensitive. Adult/private turns and blocked content cannot become candidates.
+Automatic companion outreach from health, trauma, crisis, location, identifier,
+or similarly vulnerable source detail is suppressed before generation. An
+explicit user-authored reminder may use its sensitive anchor only inside the
+authenticated inbox, behind the fixed generic preview. Source rows are
+revalidated after waiting; deletion, resolution, scope changes, or newer user
+context suppress delivery before generation.
+
+In-app note content is distinct from any notification preview. The only
+implemented channel is the authenticated in-app inbox. Its separately stored
+preview is the fixed text “New companion note” and contains no profile,
+conversation, memory, reminder, adult, private, health, crisis, location,
+credential, or vulnerability detail.
+Browser/lock-screen notifications remain disabled until separate explicit
+consent and privacy controls exist.
+
 ## Relationship safety
 
 The companion may be warm, hesitant, amused, concerned, guarded, or open to
@@ -133,6 +150,7 @@ repair. It must not:
 - threaten abandonment or simulate a crisis,
 - pressure the user to reply,
 - claim awareness, observation, or actions while offline,
+- claim it was awake, waiting, thinking, or working while the app was inactive,
 - use jealousy, coercion, or punishment as an engagement mechanic.
 
 ## Authentication and ownership

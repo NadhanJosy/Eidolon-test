@@ -27,11 +27,13 @@ users
   |     |-- memory_items
   |     |-- episodic_journals
   |     |-- continuity_threads
+  |     |-- proactive_candidates -- proactive_candidate_events
   |     `-- scheduled_jobs
   `-- conversations
         |-- messages
         |-- episodic_journals -- episodic_journal_sources -- messages
         |-- continuity_threads
+        |-- proactive_candidates
         `-- scheduled_jobs (conversation ID in bounded payload metadata)
 
 diagnostic_events belong to a user and may reference a character/conversation.
@@ -212,8 +214,9 @@ owner/companion scoped and contains an idempotency key, allowlisted event type,
 general/adult scope, optional exact source message, bounded confidence and
 significance, backend-calculated dimension deltas, whether it still affects the
 current read model, and optional linked milestone memory/journal. Normal APIs
-translate confidence/significance to human labels and do not expose evidence
-quotes or raw deltas; account export includes the owner's complete ledger.
+translate confidence/significance to human labels and expose only a bounded
+owner-only evidence excerpt, never raw deltas; account export includes the
+owner's complete ledger.
 
 Source turns store event IDs and exact reversible effects in message metadata so
 edit/delete can remove the right evidence without guessing. User correction
@@ -222,6 +225,30 @@ effects detached; restart removes general non-boundary history while retaining
 the boundary ledger. Adult-scoped events are separately retrievable/erasable and
 never affect normal dimensions, prompts, proactive work, or UI lists.
 
+## `proactive_candidates`
+
+The durable source of truth for asynchronous companion presence:
+
+- direct user/companion/conversation ownership plus optional exact source
+  message, memory, journal, living thread, relationship event, and delivered
+  message
+- allowlisted candidate type and `companion`/`reminder` initiative kind
+- categorical source and human rationale without copied private evidence prose
+- bounded confidence, urgency, relevance score, sensitivity, expiry, and
+  delivery/score metadata
+- owner-scoped idempotency key and optional eligible delivery time
+- current lifecycle plus timestamps for generation, delivery, open, dismiss,
+  reply, cancellation, and failure
+- a separately safe notification preview that never contains source content
+
+Lifecycle is `candidate`, `scheduled`, `generated`, `delivered`, `opened`,
+`dismissed`, `replied`, `cancelled`, `failed`, or `expired`.
+`proactive_candidate_events` appends each transition with a safe reason code and
+bounded non-prose metadata. Source deletion uses `SET NULL`; delivery
+constraints preserve which source class must still exist, so the worker cancels
+rather than guessing from stale context. Conversation/account/companion
+deletion cascades the owned candidate history.
+
 ## `scheduled_jobs`
 
 Durable asynchronous work:
@@ -229,11 +256,15 @@ Durable asynchronous work:
 - optional user and companion ownership
 - type and due time
 - status: `pending`, `running`, `done`, `failed`, or `cancelled`
-- lock owner/time, retry count, safe last error, and bounded payload
+- lock owner/time, retry count, safe last error, unique optional dedupe key,
+  optional expiry/cancellation time, and bounded payload
 
 Current work includes maintenance, `memory_extract`, `memory_maintenance`,
-`chat_postprocess`, `relationship_decay`, and `proactive_*` jobs. Internal exception text and
-rejected generated prose do not belong in job metadata.
+`chat_postprocess`, `relationship_decay`, and unified `proactive_delivery`
+envelopes. Legacy `proactive_*` execution remains readable for old rows and
+debug compatibility but normal post-chat work does not create those fragmented
+timer jobs. Internal exception text and rejected generated prose do not belong
+in job metadata.
 
 Post-chat payloads may retain safe cognition source/failure labels, bounded token
 counts, and the continuity receipt. They never retain the structured prompt,

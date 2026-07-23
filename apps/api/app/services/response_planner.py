@@ -18,6 +18,7 @@ from app.models import (
     EpisodicJournal,
     MemoryItem,
     Message,
+    ProactiveCandidate,
     RelationshipState,
     ScheduledJob,
 )
@@ -34,6 +35,17 @@ PROACTIVE_LABELS = {
     "proactive_delayed_double_text": "delayed follow-up",
     "proactive_message_create": "manual check-in",
 }
+PROACTIVE_CANDIDATE_LABELS = {
+    "callback": "remembered callback",
+    "check_in": "contextual check-in",
+    "follow_up": "open-thread follow-up",
+    "milestone": "milestone note",
+    "queued_thought": "queued follow-up",
+    "reminder": "user reminder",
+    "return": "return after a pending note",
+    "routine": "shared routine",
+    "suggestion": "contextual suggestion",
+}
 
 
 async def list_pending_proactive_events(
@@ -42,8 +54,44 @@ async def list_pending_proactive_events(
     user_id: uuid.UUID,
     character_id: uuid.UUID,
     conversation_id: uuid.UUID | None = None,
+    current_message_id: uuid.UUID | None = None,
     limit: int = 8,
 ) -> list[str]:
+    candidate_state_filter = ProactiveCandidate.state.in_(("candidate", "scheduled", "generated"))
+    if current_message_id is not None:
+        candidate_state_filter |= (
+            (ProactiveCandidate.candidate_type == "return")
+            & (ProactiveCandidate.state == "replied")
+            & (ProactiveCandidate.source_message_id == current_message_id)
+        )
+    candidate_statement = (
+        select(ProactiveCandidate)
+        .where(
+            ProactiveCandidate.user_id == user_id,
+            ProactiveCandidate.character_id == character_id,
+            candidate_state_filter,
+        )
+        .order_by(ProactiveCandidate.scheduled_for, ProactiveCandidate.created_at.desc())
+        .limit(max(1, min(limit * 3, 24)))
+    )
+    if conversation_id is not None:
+        candidate_statement = candidate_statement.where(
+            ProactiveCandidate.conversation_id == conversation_id
+        )
+    candidates = list((await session.execute(candidate_statement)).scalars().all())
+    labels: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        label = PROACTIVE_CANDIDATE_LABELS.get(
+            candidate.candidate_type,
+            candidate.candidate_type.replace("_", " "),
+        )
+        if label not in seen:
+            labels.append(label)
+            seen.add(label)
+        if len(labels) >= limit:
+            return labels
+
     statement = (
         select(ScheduledJob)
         .where(
@@ -60,9 +108,9 @@ async def list_pending_proactive_events(
             ScheduledJob.payload_json["conversation_id"].as_string() == str(conversation_id)
         )
     result = await session.execute(statement)
-    labels: list[str] = []
-    seen: set[str] = set()
     for job in result.scalars().all():
+        if (job.payload_json or {}).get("candidate_id"):
+            continue
         label = PROACTIVE_LABELS.get(job.job_type, job.job_type.replace("_", " "))
         if label in seen:
             continue

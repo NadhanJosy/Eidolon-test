@@ -79,8 +79,8 @@ the app writes only a non-sensitive onboarding-completion marker to local
 storage, while startup compatibility code removes legacy auth keys from earlier
 deployments. Access tokens, transcripts, memories, relationship state, and
 diagnostic payloads are not newly persisted by the client. The normal consumer
-shell does not fetch diagnostic payloads; the explicit guarded “invite a
-check-in” action retains its existing owner-scoped proactive POST route.
+shell does not fetch diagnostic payloads. Proactive notes use the normal
+owner-scoped inbox API; debug-only forced delivery is not a consumer control.
 
 ## Backend boundary
 
@@ -194,9 +194,28 @@ system-event prose as instructions.
 
 ## Background work
 
-APScheduler is a wake-up mechanism. `scheduled_jobs` rows, claims, retry counts,
-and results live in PostgreSQL. Workers use row locking and a transaction-scoped
-advisory lock to avoid overlapping batches.
+APScheduler is a wake-up mechanism. `scheduled_jobs` rows are execution
+envelopes; proactive evidence, scoring, and lifecycle live in
+`proactive_candidates` and `proactive_candidate_events`. Job claims, retry
+counts, unique dedupe keys, expiry, cancellation, and results live in
+PostgreSQL. Workers use row locking and a transaction-scoped advisory lock to
+avoid overlapping batches, and locks abandoned for 15 minutes are reclaimed.
+
+The proactive flow is:
+
+1. post-chat work identifies an exact general-scope journal, living thread, or
+   relationship milestone;
+2. an owner-scoped idempotency key creates at most one candidate for that source
+   version;
+3. a single `proactive_delivery` envelope stores only IDs and safe scheduling
+   metadata;
+4. the worker locks and revalidates the candidate, source, current
+   conversation, controls, timing, relationship posture, cooldown/cap, and
+   relevance score before requesting prose;
+5. generation and message persistence occur in the same transaction, followed
+   by `generated` and `delivered` lifecycle events;
+6. inbox/conversation reads, dismissals, replies, deletion, expiry, opt-out, and
+   terminal failures append their own lifecycle transition.
 
 `memory_maintenance` is a bounded per-companion lifecycle pass. It consolidates
 exact non-conflicting duplicates, backfills conservative entity links, and

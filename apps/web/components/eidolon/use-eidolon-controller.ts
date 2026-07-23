@@ -155,7 +155,6 @@ export function useEidolonController() {
     activeConversation,
     activeCharacterId,
     messages: chat.state.messages,
-    chatSending: chat.state.sending,
     interactionBusy:
       chat.state.messageMutating ||
       navigation.state.characterMutating ||
@@ -165,7 +164,6 @@ export function useEidolonController() {
       knowledge.state.memoryMutating ||
       knowledge.state.journalMutating ||
       knowledge.state.threadMutating,
-    appendMessage: chat.actions.appendMessage,
     cancelActiveStream: chat.actions.cancelActiveStream,
     resetChat: chat.actions.resetChat,
     setError,
@@ -1084,7 +1082,6 @@ export function useEidolonController() {
       setActiveConversationPrivacyMode: navigation.actions.setActiveConversationPrivacyMode,
       saveActiveConversationScenario: navigation.actions.saveActiveConversationScenario,
       resetActiveConversationScenario: navigation.actions.resetActiveConversationScenario,
-      queueProactive: privacy.queueProactive,
       cancelEditMessage: chat.actions.cancelEditMessage,
       startEditMessage: chat.actions.startEditMessage,
       rerollMessage: chat.actions.rerollMessage,
