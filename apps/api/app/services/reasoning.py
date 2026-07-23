@@ -233,7 +233,9 @@ def rank_relevant_journals(
 ) -> list[EpisodicJournal]:
     query_terms = _ranking_terms(query)
 
-    def ranking_key(journal: EpisodicJournal) -> tuple[float, float, float, str]:
+    def ranking_key(
+        journal: EpisodicJournal,
+    ) -> tuple[float, float, float, str] | None:
         journal_text = " ".join(
             (
                 journal.title,
@@ -246,15 +248,56 @@ def rank_relevant_journals(
         relevance = (
             len(query_terms & journal_terms) / max(len(query_terms), 1) if query_terms else 0.0
         )
+        if relevance <= 0:
+            return None
         emotional_importance = min(len(journal.emotional_tags_json), 3) * 0.08
         timestamp = (journal.updated_at or journal.created_at).timestamp()
         return relevance, journal.importance + emotional_importance, timestamp, str(journal.id)
 
-    return sorted(journals, key=ranking_key, reverse=True)[: max(0, limit)]
+    ranked = [(key, journal) for journal in journals if (key := ranking_key(journal)) is not None]
+    return [
+        journal
+        for _key, journal in sorted(ranked, key=lambda item: item[0], reverse=True)[: max(0, limit)]
+    ]
 
 
 def _ranking_terms(value: str) -> set[str]:
-    return {term for term in re.findall(r"[a-z0-9']+", value.casefold()) if len(term) > 2}
+    stopwords = {
+        "about",
+        "again",
+        "also",
+        "been",
+        "brought",
+        "character",
+        "could",
+        "does",
+        "from",
+        "have",
+        "here",
+        "just",
+        "like",
+        "more",
+        "said",
+        "that",
+        "their",
+        "there",
+        "they",
+        "this",
+        "user",
+        "want",
+        "what",
+        "when",
+        "where",
+        "which",
+        "with",
+        "would",
+        "your",
+    }
+    return {
+        term
+        for term in re.findall(r"[a-z0-9']+", value.casefold())
+        if len(term) > 3 and term not in stopwords
+    }
 
 
 async def _list_recent_messages(

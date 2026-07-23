@@ -98,6 +98,25 @@ class UnexpectedFailureProvider(PromiseProvider):
         raise RuntimeError("private unexpected provider detail")
 
 
+class StreamRepairProvider(PromiseProvider):
+    async def generate(self, prompt: str) -> LLMGeneration:
+        assert "Quality retry:" in prompt
+        return LLMGeneration(
+            "Friday is the pressure point; cutting the scope is the clean next move.",
+            self.name,
+            self.model,
+            "stop",
+        )
+
+    async def stream(self, _: str) -> AsyncIterator[LLMStreamEvent]:
+        yield LLMStreamEvent(
+            "It sounds like you are saying deadlines are difficult.",
+            self.name,
+            self.model,
+            "stop",
+        )
+
+
 async def test_failed_stream_preserves_one_user_message_and_retry_completes_once(
     client: AsyncClient,
     monkeypatch: MonkeyPatch,
@@ -224,6 +243,35 @@ async def test_stream_cancellation_saves_no_partial_assistant(
     assert messages[0].role == "user"
     assert messages[0].metadata_json["generation_state"] == "cancelled"
     assert messages[0].metadata_json["generation_failure_type"] == "cancelled"
+
+
+async def test_stream_repairs_bad_prelude_before_emitting_it(
+    client: AsyncClient,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    headers = await auth_headers(client)
+    conversation = await client.post("/conversations", json={}, headers=headers)
+    conversation_id = conversation.json()["id"]
+    monkeypatch.setattr(chat_api, "get_llm_provider", lambda: StreamRepairProvider())
+
+    streamed = await _stream_request(
+        client,
+        headers=headers,
+        payload={
+            "conversation_id": conversation_id,
+            "content": "The deadline moved to Friday and I need a plan.",
+        },
+    )
+
+    assert "It sounds like" not in streamed
+    assert "Friday is the pressure point" in streamed
+    assert "event: message_done" in streamed
+    history = (
+        await client.get(f"/conversations/{conversation_id}/messages", headers=headers)
+    ).json()
+    quality = history[-1]["metadata_json"]["response_quality"]
+    assert quality["repair_attempted"] is True
+    assert "assistant_cliche" in quality["initial_violations"]
 
 
 async def test_post_chat_memory_failure_never_erases_completed_chat(

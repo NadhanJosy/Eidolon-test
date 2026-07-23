@@ -109,6 +109,29 @@ def test_episode_selection_prioritizes_relevance_and_emotional_importance() -> N
     assert ranked == [relevant]
 
 
+def test_episode_selection_omits_unrelated_high_importance_history() -> None:
+    unrelated = EpisodicJournal(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        character_id=uuid.uuid4(),
+        journal_type="summary",
+        title="Lantern route",
+        summary="They planned a lantern walk through the old park.",
+        importance=1.0,
+        emotional_tags_json=["warm", "important"],
+        callbacks_json=["Return to the lantern route."],
+        unresolved_threads_json=["Choose the park entrance."],
+    )
+
+    ranked = rank_relevant_journals(
+        [unrelated],
+        query="I need to focus on tomorrow's tax deadline.",
+        limit=4,
+    )
+
+    assert ranked == []
+
+
 def test_prompt_canonicalizes_controlled_system_events() -> None:
     user = User(
         email="prompt-event@example.com",
@@ -330,6 +353,42 @@ async def test_private_turn_does_not_mark_selected_memory_recalled(
     assert memories.status_code == 200
     assert len(memories.json()) == 1
     assert memories.json()[0]["last_recalled_at"] is None
+
+
+async def test_chat_prompt_omits_an_unrelated_pinned_memory(
+    client: AsyncClient,
+) -> None:
+    headers = await auth_headers(client)
+    conversation = await client.post("/conversations", json={}, headers=headers)
+    character_id = conversation.json()["character_id"]
+    created = await client.post(
+        f"/characters/{character_id}/memories",
+        json={
+            "memory_type": "preference",
+            "content": "User prefers lantern walks through the old park.",
+            "importance": 1.0,
+            "pinned": True,
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201
+
+    chat = await client.post(
+        "/chat/messages",
+        json={
+            "conversation_id": conversation.json()["id"],
+            "content": "The tax deadline moved to Friday.",
+        },
+        headers=headers,
+    )
+    assert chat.status_code == 200
+    debug = await client.get(
+        f"/debug/conversation/{conversation.json()['id']}",
+        headers=headers,
+    )
+    manifest = debug.json()["last_assembled_context"]["context_manifest"]
+
+    assert manifest["memory_items"] == []
 
 
 async def test_manual_memory_retrieval_and_debug_prompt(client: AsyncClient) -> None:

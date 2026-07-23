@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 
 from app.config import Settings
-from app.llm.base import LLMProviderUnavailable
+from app.llm.base import LLMProviderUnavailable, provider_capabilities
 from app.llm.factory import get_llm_provider
 from app.llm.fallback import FallbackLLMProvider
 from app.llm.groq import GroqProvider
@@ -330,6 +330,28 @@ def test_provider_selection_can_choose_ollama() -> None:
 
     assert provider.name == "ollama"
     assert isinstance(provider, OllamaProvider)
+
+
+def test_provider_capabilities_select_full_and_compact_prompt_profiles() -> None:
+    groq = get_llm_provider(
+        Settings(
+            llm_provider="groq",
+            groq_api_key="gsk_private_test_value",
+        )
+    )
+    ollama = get_llm_provider(
+        Settings(
+            llm_provider="ollama",
+            ollama_base_url="http://ollama.test",
+        )
+    )
+    fallback = FallbackLLMProvider(groq, ollama)
+
+    assert provider_capabilities(groq).prompt_variant == "full"
+    assert provider_capabilities(ollama).prompt_variant == "compact"
+    assert provider_capabilities(fallback).prompt_variant == "compact"
+    assert provider_capabilities(fallback).context_window_tokens == 8192
+    assert provider_capabilities(fallback).structured_output is False
 
 
 async def test_ollama_generate_unavailable_raises_controlled_error() -> None:

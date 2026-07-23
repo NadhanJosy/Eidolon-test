@@ -151,15 +151,12 @@ def build_response_plan(
         relationship_context=relationship_context,
     )
     continuity = _continuity(recent_messages, pending_proactive_events)
-    memory_focus = _memory_focus(memories)
-    episode_focus = _episode_focus(journals)
-    thread_focus = _thread_focus(threads)
     scene = _scene_focus(scenario_mode, scenario_text)
     summary = structured.private_summary()
     return _compact(
         f"Continuity: {continuity}; Relationship-aware plan: {summary}; "
-        f"Memory focus: {memory_focus}; "
-        f"Episode focus: {episode_focus}; Living thread: {thread_focus}; "
+        f"Selected evidence: {len(memories)} memories, {len(journals)} episodes, "
+        f"{len(threads)} living threads; "
         f"Scene: {scene}; Timing: {time_context}",
         1800,
     )

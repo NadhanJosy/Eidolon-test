@@ -12,7 +12,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.companion.quality import enforce_stream_chunk
+from app.companion.quality import (
+    checked_response,
+    enforce_stream_chunk,
+    evaluate_response,
+    quality_requires_repair,
+)
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_conversation
 from app.llm.base import (
@@ -41,6 +46,11 @@ from app.services.chat import (
     run_chat,
 )
 from app.services.diagnostics import record_generation_error
+from app.services.generation import (
+    StreamContextState,
+    repair_checked_reply,
+    stream_with_context_retry,
+)
 from app.services.scheduler import run_post_chat_job
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -211,6 +221,7 @@ async def chat_stream(
                     conversation=conversation,
                     user_message_id=payload.retry_user_message_id,
                     content=payload.content,
+                    provider=provider,
                 )
             else:
                 user_message, character, prompt = await prepare_user_message(
@@ -220,6 +231,7 @@ async def chat_stream(
                     payload.content,
                     payload.content_mode,
                     payload.privacy_mode,
+                    provider,
                 )
             user_message_id = user_message.id
             record_prompt_context(
@@ -239,13 +251,25 @@ async def chat_stream(
             )
 
             chunks: list[str] = []
+            buffered_chunks: list[str] = []
+            prelude_checked = False
+            repair_attempted = False
+            context_compacted = False
+            stream_context_state = StreamContextState()
+            initial_quality_violations: tuple[str, ...] = ()
+            response_evaluation = None
             generation_started = perf_counter()
             first_token_ms = None
             generation_provider = provider.name
             generation_model = provider.model
             finish_reason = None
             usage = TokenUsage()
-            async for event in provider.stream(prompt.prompt):
+            stream = stream_with_context_retry(
+                provider,
+                prompt=prompt.prompt,
+                state=stream_context_state,
+            )
+            async for event in stream:
                 generation_provider = event.provider or generation_provider
                 generation_model = event.model or generation_model
                 if event.finish_reason is not None:
@@ -254,11 +278,82 @@ async def chat_stream(
                     usage = event.usage
                 if not event.content:
                     continue
-                enforce_stream_chunk("".join((*chunks, event.content)))
-                if first_token_ms is None:
-                    first_token_ms = elapsed_ms(generation_started)
                 chunks.append(event.content)
+                candidate = "".join(chunks)
+                enforce_stream_chunk(candidate, prompt.response_check_context)
+                if not prelude_checked:
+                    buffered_chunks.append(event.content)
+                    if not _stream_prelude_ready(candidate, event.finish_reason):
+                        continue
+                    prelude_evaluation = evaluate_response(
+                        candidate,
+                        prompt.response_check_context,
+                    )
+                    if quality_requires_repair(prelude_evaluation):
+                        initial_quality_violations = tuple(prelude_evaluation.violations[:8])
+                        close_stream = getattr(stream, "aclose", None)
+                        if callable(close_stream):
+                            await close_stream()
+                        repaired = await repair_checked_reply(
+                            provider,
+                            prompt=prompt.prompt,
+                            context=prompt.response_check_context,
+                            violations=initial_quality_violations,
+                        )
+                        prelude_checked = True
+                        repair_attempted = True
+                        context_compacted = repaired.context_compacted
+                        response_evaluation = repaired.evaluation
+                        generation_provider = repaired.generation.provider
+                        generation_model = repaired.generation.model
+                        finish_reason = repaired.generation.finish_reason
+                        usage = repaired.generation.usage
+                        chunks = [repaired.generation.content]
+                        if first_token_ms is None:
+                            first_token_ms = elapsed_ms(generation_started)
+                        for repaired_chunk in _bounded_stream_chunks(repaired.generation.content):
+                            yield sse("token", {"content": repaired_chunk})
+                        break
+                    prelude_checked = True
+                    if first_token_ms is None:
+                        first_token_ms = elapsed_ms(generation_started)
+                    for buffered_chunk in buffered_chunks:
+                        yield sse("token", {"content": buffered_chunk})
+                    buffered_chunks.clear()
+                    continue
                 yield sse("token", {"content": event.content})
+
+            if not prelude_checked and buffered_chunks:
+                prelude_evaluation = evaluate_response(
+                    "".join(chunks),
+                    prompt.response_check_context,
+                )
+                if quality_requires_repair(prelude_evaluation):
+                    initial_quality_violations = tuple(prelude_evaluation.violations[:8])
+                    repaired = await repair_checked_reply(
+                        provider,
+                        prompt=prompt.prompt,
+                        context=prompt.response_check_context,
+                        violations=initial_quality_violations,
+                    )
+                    prelude_checked = True
+                    repair_attempted = True
+                    context_compacted = repaired.context_compacted
+                    response_evaluation = repaired.evaluation
+                    generation_provider = repaired.generation.provider
+                    generation_model = repaired.generation.model
+                    finish_reason = repaired.generation.finish_reason
+                    usage = repaired.generation.usage
+                    chunks = [repaired.generation.content]
+                    if first_token_ms is None:
+                        first_token_ms = elapsed_ms(generation_started)
+                    for repaired_chunk in _bounded_stream_chunks(repaired.generation.content):
+                        yield sse("token", {"content": repaired_chunk})
+                else:
+                    if first_token_ms is None:
+                        first_token_ms = elapsed_ms(generation_started)
+                    for buffered_chunk in buffered_chunks:
+                        yield sse("token", {"content": buffered_chunk})
 
             generation = LLMGeneration(
                 content="".join(chunks),
@@ -267,6 +362,20 @@ async def chat_stream(
                 finish_reason=finish_reason,
                 usage=usage,
             )
+            context_compacted = context_compacted or stream_context_state.compacted
+            if response_evaluation is None:
+                content, response_evaluation = checked_response(
+                    generation.content,
+                    prompt.response_check_context,
+                    require_quality=True,
+                )
+                generation = LLMGeneration(
+                    content=content,
+                    provider=generation.provider,
+                    model=generation.model,
+                    finish_reason=generation.finish_reason,
+                    usage=generation.usage,
+                )
 
             assistant_message = await complete_assistant_message(
                 session,
@@ -280,6 +389,10 @@ async def chat_stream(
                 generation=generation,
                 latency_ms=elapsed_ms(generation_started),
                 first_token_ms=first_token_ms,
+                response_evaluation=response_evaluation,
+                repair_attempted=repair_attempted,
+                initial_quality_violations=initial_quality_violations,
+                context_compacted=context_compacted,
             )
             await session.commit()
             await session.refresh(assistant_message)
@@ -374,6 +487,32 @@ async def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def _stream_prelude_ready(content: str, finish_reason: str | None) -> bool:
+    compact = content.rstrip()
+    if finish_reason is not None:
+        return True
+    # Do not hold cancellation behind a sentence boundary when a provider pauses
+    # after its first meaningful fragment.
+    return len(compact) >= 12
+
+
+def _bounded_stream_chunks(content: str, *, target_chars: int = 36) -> list[str]:
+    words = content.split(" ")
+    chunks: list[str] = []
+    current: list[str] = []
+    for index, word in enumerate(words):
+        current.append(word)
+        joined = " ".join(current)
+        if len(joined) < target_chars and not word.endswith((".", "!", "?", ";")):
+            continue
+        suffix = " " if index < len(words) - 1 else ""
+        chunks.append(f"{joined}{suffix}")
+        current = []
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
 
 
 def sse(event: str, data: dict) -> str:

@@ -89,8 +89,10 @@ STOP_WORDS = {
     "with",
     "have",
     "from",
+    "the",
     "they",
     "them",
+    "user",
     "your",
     "just",
     "like",
@@ -598,6 +600,19 @@ async def retrieve_memories(
             memory.embedding = embedding
             backfilled_embedding = True
         candidate_embeddings[memory.id] = embedding
+    if terms or query_embedding is not None:
+        candidates = [
+            memory
+            for memory in candidates
+            if memory.memory_type == "boundary"
+            or memory.id in entity_match_ids
+            or bool(terms & _query_terms(memory.content))
+            or cosine_similarity(
+                query_embedding,
+                candidate_embeddings.get(memory.id),
+            )
+            >= 0.2
+        ]
     scored = sorted(
         (
             (

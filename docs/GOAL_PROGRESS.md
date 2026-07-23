@@ -167,3 +167,25 @@ Validation:
 - Ruff lint and format checks passed.
 - Frontend ESLint, TypeScript, and static production build passed through
   `make verify`.
+
+## 2026-07-23 — Companion intelligence and response quality
+
+Outcome:
+
+- Added compact pre-generation judgment across intent, subtext, mixed emotion,
+  stakes, relevant evidence, relationship posture, boundaries, initiative,
+  desired effect, uncertainty, and ending.
+- Made personality compile as stable behavioural identity and voice, tightened
+  memory/episode/thread relevance, and added checks for clichés, repetition,
+  verbosity, tone, false history/quotations/assumptions, identity drift, and
+  deceptive offline awareness.
+- Added provider capability profiles, full/compact prompt variants, compact
+  context-overflow retry, fallback-routed quality repair, guarded cancellable
+  streaming, and deterministic multi-turn quality/latency/fallback evaluation.
+
+Validation:
+
+- Alembic upgrade through `0014_proactive_presence` passed.
+- Backend: 293 non-live tests passed; the opt-in live-provider test was skipped.
+- Ruff lint and format checks passed.
+- Frontend ESLint, TypeScript, and static production build passed.

@@ -115,9 +115,11 @@ SSE event order:
 2. zero or more `token` events
 3. `message_done` with the canonical completed assistant message
 
-A terminal `error` event may replace completion. Disconnect/cancellation or
-generation failure stores no partial assistant line; an accepted source user
-message remains retryable.
+A terminal `error` event may replace completion. The backend validates a short
+initial fragment before emitting it and may replace one recoverably malformed,
+repetitive, generic, false, or out-of-character attempt with a repaired
+generation. Disconnect/cancellation or persistent generation failure stores no
+partial assistant line; an accepted source user message remains retryable.
 
 An eligible completed reply starts with a `pending` receipt. Post-chat work
 settles it to `ready`, `degraded`, or `skipped`; IDs and labels are returned only
