@@ -50,34 +50,37 @@ def compiled_soul_sections(
         (
             "Character identity, personality, style, and boundaries:",
             f"Character name: {_compact(character.name, 120)}",
-            f"Identity: {_compact(soul.identity, 700)}",
-            f"Worldview: {_compact(soul.worldview, 700)}",
-            f"Temperament: {_compact(soul.temperament, 700)}",
-            f"Values: {_compact(soul.values, 600)}",
-            f"Relationship path: {_compact(relationship_path, 500)}",
+            f"Identity: {_compact(soul.identity, 520)}",
+            f"Worldview: {_compact(soul.worldview, 460)}",
+            f"Temperament: {_compact(soul.temperament, 420)}",
+            f"Values: {_compact(soul.values, 360)}",
+            f"Relationship path: {_compact(relationship_path, 320)}",
         )
     )
     voice = "\n".join(
         (
-            "Character voice and conversational texture:",
-            f"Speech rhythm: {_compact(soul.speech_rhythm, 700)}",
-            f"Speech style: {_compact(soul.speech_rhythm, 700)}",
-            f"Humour: {_compact(soul.humour, 500)}",
-            f"Habits: {_compact(soul.habits, 600)}",
+            "Stable voice signature:",
+            f"Speech style: {_compact(soul.speech_rhythm, 480)}",
+            f"Humour: {_compact(soul.humour, 360)}",
+            f"Conversational habits: {_compact(soul.habits, 360)}",
             f"Emoji use: {soul.emoji_style}",
-            f"Terms of address: {_compact(soul.terms_of_address, 500)}",
+            f"Terms of address: {_compact(soul.terms_of_address, 320)}",
+            "Keep the rhythm recognisable across casual, practical, playful, and difficult turns. "
+            "Do not imitate the user's phrasing or announce these traits.",
         )
     )
     relating = "\n".join(
         (
-            "Character ways of relating:",
-            f"Affection style: {_compact(soul.affection_style, 650)}",
-            f"Conflict style: {_compact(soul.conflict_style, 650)}",
-            f"Insecurities and imperfect edges: {_compact(soul.insecurities, 650)}",
-            f"Initiative style: {_compact(soul.initiative_style, 650)}",
-            f"Personal boundaries: {_compact(soul.boundaries, 750)}",
-            "Remain recognisable. Do not flatten these traits into generic agreement, therapy, "
-            "or constant reassurance.",
+            "Behavioural rules for this character:",
+            f"When showing care: {_compact(soul.affection_style, 420)}",
+            f"When disagreeing or repairing: {_compact(soul.conflict_style, 420)}",
+            f"Imperfect edge: {_compact(soul.insecurities, 360)}",
+            f"When taking initiative: {_compact(soul.initiative_style, 420)}",
+            f"Personal boundaries: {_compact(soul.boundaries, 520)}",
+            "Let worldview and values produce an honest point of view when useful. Warmth should "
+            "come through judgment and specificity, not generic agreement or therapy language.",
+            "Adapt pacing gradually with earned familiarity while keeping the core worldview, "
+            "temperament, humour, boundaries, and speech rhythm stable.",
         )
     )
     return identity, voice, relating

@@ -21,6 +21,7 @@ ProviderFailureType = Literal[
     "refusal",
     "timeout",
 ]
+PromptVariant = Literal["compact", "full"]
 
 PUBLIC_FAILURE_DETAILS: dict[ProviderFailureType, str] = {
     "authentication": "The text provider is not configured correctly. Your message was saved.",
@@ -73,6 +74,21 @@ class LLMStreamEvent:
     usage: TokenUsage = TokenUsage()
 
 
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """App-owned generation limits used before a provider request is made."""
+
+    context_window_tokens: int
+    prompt_variant: PromptVariant
+    structured_output: bool
+    streaming: bool
+    quality_repair: bool
+
+    def input_budget(self, configured_budget: int, output_reserve: int = 1200) -> int:
+        provider_budget = max(1024, self.context_window_tokens - max(256, output_reserve))
+        return min(configured_budget, provider_budget)
+
+
 class LLMProvider(Protocol):
     name: str
     model: str
@@ -113,3 +129,16 @@ class LLMProviderUnavailable(RuntimeError):
 
 def public_provider_failure_detail(exc: LLMProviderUnavailable) -> str:
     return PUBLIC_FAILURE_DETAILS.get(exc.failure_type, SAFE_PROVIDER_UNAVAILABLE_DETAIL)
+
+
+def provider_capabilities(provider: LLMProvider) -> ProviderCapabilities:
+    declared = getattr(provider, "capabilities", None)
+    if isinstance(declared, ProviderCapabilities):
+        return declared
+    return ProviderCapabilities(
+        context_window_tokens=8192,
+        prompt_variant="full",
+        structured_output=callable(getattr(provider, "generate_structured", None)),
+        streaming=callable(getattr(provider, "stream", None)),
+        quality_repair=True,
+    )

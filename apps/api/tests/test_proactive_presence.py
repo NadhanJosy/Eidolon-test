@@ -158,6 +158,8 @@ async def test_explicit_reminder_uses_unified_delivery_lifecycle(
         profile = dict(stored_character["boundaries_json"])
         preferences = dict(profile["proactive_preferences"])
         preferences["cooldown_hours"] = 72
+        preferences["quiet_hours_start"] = "00:00"
+        preferences["quiet_hours_end"] = "00:00"
         preference_update = await client.patch(
             f"/characters/{conversation['character_id']}",
             json={
@@ -1206,6 +1208,27 @@ async def _scheduled_follow_up(
     content: str = "Please follow up about my reading plan next time.",
 ) -> tuple[dict, uuid.UUID]:
     conversation = (await client.post("/conversations", json={}, headers=headers)).json()
+    character = (
+        await client.get(
+            f"/characters/{conversation['character_id']}",
+            headers=headers,
+        )
+    ).json()
+    profile = dict(character["boundaries_json"])
+    preferences = dict(profile["proactive_preferences"])
+    preferences["quiet_hours_start"] = "00:00"
+    preferences["quiet_hours_end"] = "00:00"
+    updated = await client.patch(
+        f"/characters/{conversation['character_id']}",
+        json={
+            "boundaries_json": {
+                **profile,
+                "proactive_preferences": preferences,
+            }
+        },
+        headers=headers,
+    )
+    assert updated.status_code == 200
     thread = await client.post(
         f"/characters/{conversation['character_id']}/threads",
         json={

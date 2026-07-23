@@ -128,15 +128,18 @@ block refresh; same-site custom subdomains are the durable solution.
 1. Authenticate the request and load the owned conversation and companion.
 2. Validate content mode, privacy mode, message bounds, and hard safety rules.
 3. Persist the accepted user message and its privacy provenance.
-4. Infer bounded intent/tone and retrieve eligible relationship read state,
-   scoped active boundaries, memory, episodes, living threads, scenario, and
-   recent-message context.
+4. Infer bounded intent, subtext, mixed emotion, stakes, humour/sarcasm, and
+   retrieve only relevant relationship state, scoped boundaries, memory,
+   episodes, living threads, scenario, and recent-message context.
 5. Build a compact qualitative relationship plan and private response plan,
-   then compile ordered prompt modules.
-6. Call the selected provider.
-7. For SSE, emit `message_start`, screened `token` events, then
-   `message_done`; a terminal `error` event closes failed streams.
-8. Validate and persist the completed assistant message exactly once.
+   including the desired effect, evidence focus, truth posture, and ending.
+6. Apply the selected provider's full/compact capability profile, input budget,
+   and output reserve, then call it.
+7. For SSE, emit `message_start`, hold and validate a short first fragment,
+   emit screened `token` events, then `message_done`; one recoverable quality
+   defect can regenerate before the bad fragment is emitted.
+8. Validate safety, truth, personality, repetition, tone, question policy, and
+   length before persisting the completed assistant message exactly once.
 9. Record idempotent deterministic relationship evidence and its exact
    reversible emotional/read-model effect; routine turns make no relationship
    progress, while adult turns may record only isolated boundary evidence.
@@ -151,8 +154,10 @@ block refresh; same-site custom subdomains are the durable solution.
     changes that actually committed.
 
 A failed or cancelled generation keeps the accepted user message retryable and
-stores no partial assistant message. Reroll and latest-turn edit use the same
-orchestration and safety path.
+stores no partial assistant message. A pre-output context overflow gets one
+compact retry. A weak primary response gets one repair attempt, routed to the
+configured fallback when available; persistent defects fail retryably. Reroll
+and latest-turn edit use the same orchestration and safety path.
 
 ## Prompt and cognition boundary
 
@@ -231,6 +236,12 @@ not guarantee precise wall-clock delivery.
 The typed provider interface supports completed generations, streamed events,
 and bounded strict-schema generations without a vendor SDK leaking into chat
 services.
+
+An app-owned capability profile declares context capacity, prompt variant,
+streaming, structured-output, and repair support. Fallback chains use the
+smallest shared context profile; provider and model metadata on the completed
+generation reveal which route actually succeeded without storing response
+bodies.
 
 - `mock`: deterministic, external-call-free development and test provider
 - `groq`: active production provider using backend-only OpenAI-compatible HTTP

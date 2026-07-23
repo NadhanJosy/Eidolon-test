@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from app.llm.base import LLMGeneration, LLMProvider, LLMProviderUnavailable, LLMStreamEvent
+from app.llm.base import (
+    LLMGeneration,
+    LLMProvider,
+    LLMProviderUnavailable,
+    LLMStreamEvent,
+    ProviderCapabilities,
+    provider_capabilities,
+)
 
 FALLBACK_FAILURE_TYPES = {
     "model_unavailable",
@@ -19,6 +26,30 @@ class FallbackLLMProvider:
         self.fallback = fallback
         self.name = primary.name
         self.model = primary.model
+        primary_capabilities = provider_capabilities(primary)
+        fallback_capabilities = provider_capabilities(fallback)
+        self.capabilities = ProviderCapabilities(
+            context_window_tokens=min(
+                primary_capabilities.context_window_tokens,
+                fallback_capabilities.context_window_tokens,
+            ),
+            prompt_variant=(
+                "compact"
+                if "compact"
+                in {
+                    primary_capabilities.prompt_variant,
+                    fallback_capabilities.prompt_variant,
+                }
+                else "full"
+            ),
+            structured_output=(
+                primary_capabilities.structured_output and fallback_capabilities.structured_output
+            ),
+            streaming=primary_capabilities.streaming and fallback_capabilities.streaming,
+            quality_repair=(
+                primary_capabilities.quality_repair and fallback_capabilities.quality_repair
+            ),
+        )
 
     async def generate(self, prompt: str) -> LLMGeneration:
         try:
@@ -27,6 +58,10 @@ class FallbackLLMProvider:
             if exc.failure_type not in FALLBACK_FAILURE_TYPES:
                 raise
             return await self.fallback.generate(prompt)
+
+    async def generate_quality_repair(self, prompt: str) -> LLMGeneration:
+        """Route a quality retry away from a primary that returned weak prose."""
+        return await self.fallback.generate(prompt)
 
     async def generate_structured(
         self,

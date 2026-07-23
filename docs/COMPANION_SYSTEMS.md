@@ -12,15 +12,19 @@ Every completed chat, streamed chat, reroll, and latest-turn edit follows the
 same high-level path:
 
 1. validate owner, thread, message, privacy, content mode, and hard boundaries,
-2. infer bounded intent, tone, subtext, time gap, and unresolved context,
-3. retrieve eligible memory, episodes, living threads, relationship state,
-   Shared Scene, and recent messages,
+2. infer bounded intent, mixed emotion, tone, subtext, conversational stakes,
+   humour/sarcasm, time gap, and relevant unresolved context,
+3. retrieve the smallest relevant set of eligible memory, episodes, living
+   threads, relationship state, Shared Scene, and recent messages,
 4. project qualitative emotional posture,
-5. choose a private response strategy, question policy, target length, rhythm,
-   opening, callback posture, and optional initiative,
-6. compile the modular prompt and call the configured provider,
-7. screen streamed and completed output for hard-boundary or hidden-context
-   leakage,
+5. choose a private response strategy, desired effect, evidence focus,
+   truth/uncertainty posture, question policy, target length, rhythm, opening,
+   ending, callback posture, and optional initiative,
+6. select the provider capability profile, compile the corresponding modular
+   prompt, and call the configured provider,
+7. screen streamed and completed output for safety, truthfulness, private
+   context, repetition, clichés, tone, personality, and length; make at most one
+   evidence-preserving repair generation when the defect is recoverable,
 8. persist the completed reply exactly once,
 9. update the immediate deterministic relationship effect and queue durable
    post-chat work,
@@ -35,7 +39,7 @@ transcript. It must never be narrated in chat.
 ## Prompt assembly
 
 `apps/api/app/services/prompt.py` is the central renderer. Its current version is
-`relationship_intelligence_v10`.
+`companion_intelligence_v11`.
 
 Modules are ordered from durable instructions toward the immediate request:
 
@@ -58,6 +62,11 @@ lower-priority context before safety, identity, or the current turn. Prompt
 assembly must not include secrets, raw JSON dumps, embeddings, relationship
 meters, diagnostics, or private messages in a later normal turn.
 
+The provider capability profile bounds the input budget and chooses a `full` or
+`compact` prompt. Groq and the deterministic mock use the full profile; the
+optional Ollama path and a mixed-capability fallback chain use the compact
+profile. A context overflow before output receives one compact-context retry.
+
 Recognized system events are converted from trusted metadata into fixed
 conversation-event summaries. Stored system prose is never accepted as a prompt
 instruction.
@@ -67,10 +76,12 @@ instruction.
 `soul_json` contains the typed authored identity and relating style. Legacy
 description/personality/speech fields remain migration fallbacks.
 
-The renderer compiles soul fields into natural language rather than exposing the
-JSON structure. A companion may develop familiarity or a configured relationship
-path, but it must not force romance, assume unearned intimacy, or contradict
-authored limits.
+The renderer compiles soul fields into stable identity, voice, and behavioural
+rules rather than exposing the JSON structure. Worldview, temperament, humour,
+boundaries, and speech rhythm remain recognizable while pacing and terms of
+address adapt gradually. The companion may disagree, form a bounded opinion, or
+take relevant initiative, but it must not force romance, assume unearned
+intimacy, or contradict authored limits.
 
 ## Context manifests
 
@@ -163,12 +174,12 @@ requests, promises, rituals, and grounded future plans; repair posture can label
 an explicit follow-up as repair. It rejects ordinary conversation, closures,
 credentials, blocked text, private turns, adult turns, and disabled learning.
 
-Retrieval ranks only open owned rows by relevance, conversation locality,
-salience, confidence, kind, and recency. Prompt items preserve the user's exact
-bounded wording while instructing the model not to invent completion or offline
-action. Explicit user closure can resolve a sufficiently matching thread;
-companion output cannot. Manual controls always provide resolve, reopen, and
-permanent deletion.
+Retrieval first requires current-topic overlap, then ranks only matching open
+owned rows by conversation locality, salience, confidence, kind, and recency.
+Prompt items preserve the user's exact bounded wording while instructing the
+model not to invent completion or offline action. Explicit user closure can
+resolve a sufficiently matching thread; companion output cannot. Manual
+controls always provide resolve, reopen, and permanent deletion.
 
 ## Memory retrieval
 
@@ -187,9 +198,12 @@ The feature encoder is deterministic and dependency-free; it is not presented as
 a neural semantic model. Missing/invalid legacy vectors are recomputed or fall
 back to keyword/state scoring.
 
-Retrieval applies a relevance floor and a five-item reasoning budget so weak
-matches do not become a fact dump. Prompt evidence is compact, marks uncertainty
-or recurrence, and carries grounded emotional meaning separately from the fact.
+Retrieval requires keyword, entity, or sufficient vector relevance (except
+active boundary evidence), then applies a score floor and a five-item reasoning
+budget so important or pinned but unrelated rows do not become a fact dump.
+Episode and living-thread selection likewise omit zero-overlap history. Prompt
+evidence is compact, marks uncertainty or recurrence, and carries grounded
+emotional meaning separately from the fact.
 Sensitive manually stored rows require an explicit user-specific identifier
 category or exact email/phone value in the current query before scoring, so
 pinning and importance can never pull them into unrelated context.
@@ -342,6 +356,10 @@ Automated coverage should preserve:
 - exactly-once assistant persistence and no partial assistant on failure
 - prompt order, budgets, privacy exclusion, and hidden-state non-disclosure
 - natural mock text without provider/prompt/score narration
+- mixed-feeling, negation, humour/sarcasm, correction, conflict, vulnerability,
+  practical-advice, and long-session planning
+- response specificity, verbosity, truthfulness, personality, latency,
+  fallback, repetition, and one-shot repair behaviour
 - selective memory, vector/entity fallback, contradiction uncertainty,
   reinforcement, supersession, consolidation, tier-aware decay, and forgetting
 - exact-evidence grounding, polarity rejection, claim correction, provider

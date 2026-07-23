@@ -7,10 +7,16 @@ from fastapi import HTTPException
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.companion.domain import ResponseEvaluation
 from app.companion.quality import checked_response
 from app.companion.soul import canonical_soul_json
 from app.config import get_settings
-from app.llm.base import LLMGeneration, LLMProvider, LLMProviderUnavailable
+from app.llm.base import (
+    LLMGeneration,
+    LLMProvider,
+    LLMProviderUnavailable,
+    provider_capabilities,
+)
 from app.models import (
     Character,
     Conversation,
@@ -29,6 +35,7 @@ from app.services.conversation_privacy import (
     set_conversation_privacy_mode,
 )
 from app.services.conversation_scenario import set_conversation_scenario
+from app.services.generation import generate_checked_reply
 from app.services.jobs import create_job
 from app.services.memory import (
     memory_preferences_from_boundaries,
@@ -224,6 +231,7 @@ async def prepare_user_message(
     content: str,
     requested_mode: str,
     requested_privacy_mode: ConversationPrivacyMode,
+    provider: LLMProvider | None = None,
 ) -> tuple[Message, Character, PromptBundle]:
     validate_user_content(content)
     character = await session.get(Character, conversation.character_id)
@@ -278,6 +286,7 @@ async def prepare_user_message(
         user_message=user_message,
         requested_mode=requested_mode,
         privacy_mode=privacy_mode,
+        provider=provider,
     )
     return user_message, character, prompt
 
@@ -289,6 +298,7 @@ async def prepare_retry_user_message(
     conversation: Conversation,
     user_message_id: uuid.UUID,
     content: str,
+    provider: LLMProvider | None = None,
 ) -> tuple[Message, Character, PromptBundle]:
     validate_user_content(content)
     character = await session.get(Character, conversation.character_id)
@@ -343,6 +353,7 @@ async def prepare_retry_user_message(
         user_message=user_message,
         requested_mode=_message_content_mode(user_message),
         privacy_mode=privacy_mode,
+        provider=provider,
     )
     return user_message, character, prompt
 
@@ -402,6 +413,7 @@ async def _assemble_prompt_for_user_turn(
     user_message: Message,
     requested_mode: str,
     privacy_mode: ConversationPrivacyMode,
+    provider: LLMProvider | None = None,
 ) -> PromptBundle:
     context = await build_reasoning_context(
         session,
@@ -419,6 +431,8 @@ async def _assemble_prompt_for_user_turn(
         "content_mode": context.safety_status["effective_mode"],
         "privacy_mode": privacy_mode,
     }
+    settings = get_settings()
+    capabilities = provider_capabilities(provider) if provider is not None else None
     prompt = assemble_prompt(
         user=user,
         character=character,
@@ -438,7 +452,15 @@ async def _assemble_prompt_for_user_turn(
         soul=context.soul,
         scenario_mode=context.scenario_mode,
         scenario_text=context.scenario_text,
-        context_budget_tokens=get_settings().llm_context_budget_tokens,
+        context_budget_tokens=(
+            capabilities.input_budget(
+                settings.llm_context_budget_tokens,
+                settings.llm_max_output_tokens,
+            )
+            if capabilities is not None
+            else settings.llm_context_budget_tokens
+        ),
+        prompt_variant=capabilities.prompt_variant if capabilities is not None else "full",
     )
     return prompt
 
@@ -457,16 +479,23 @@ async def complete_assistant_message(
     latency_ms: int | None = None,
     first_token_ms: int | None = None,
     update_relationship_state: bool = True,
+    response_evaluation: ResponseEvaluation | None = None,
+    repair_attempted: bool = False,
+    initial_quality_violations: tuple[str, ...] = (),
+    context_compacted: bool = False,
 ) -> Message:
     await _lock_live_user_turn(
         session,
         conversation_id=conversation.id,
         user_message_id=user_message.id,
     )
-    content, response_evaluation = checked_response(
-        assistant_content,
-        prompt.response_check_context,
-    )
+    if response_evaluation is None:
+        content, response_evaluation = checked_response(
+            assistant_content,
+            prompt.response_check_context,
+        )
+    else:
+        content = assistant_content.strip()
     if not content:
         raise LLMProviderUnavailable(
             "The text provider returned no reply. Your message was saved; you can retry the reply.",
@@ -503,7 +532,12 @@ async def complete_assistant_message(
                 "away_state": "present",
             },
             "rerollable": True,
-            "response_quality": response_evaluation.metadata(),
+            "response_quality": {
+                **response_evaluation.metadata(),
+                "repair_attempted": repair_attempted,
+                "initial_violations": list(initial_quality_violations[:8]),
+                "context_compacted": context_compacted,
+            },
         },
     )
     conversation.updated_at = utc_now()
@@ -746,6 +780,7 @@ async def edit_latest_user_turn(
         user_message=user_message,
         requested_mode=requested_mode,
         privacy_mode=privacy_mode,
+        provider=provider,
     )
     record_prompt_context(
         user_message,
@@ -754,7 +789,12 @@ async def edit_latest_user_turn(
         generation_kind="edit",
     )
     generation_started = perf_counter()
-    generation = await provider.generate(prompt.prompt)
+    checked_generation = await generate_checked_reply(
+        provider,
+        prompt=prompt.prompt,
+        context=prompt.response_check_context,
+    )
+    generation = checked_generation.generation
     latency_ms = _elapsed_ms(generation_started)
     assistant_message = await complete_assistant_message(
         session,
@@ -769,6 +809,10 @@ async def edit_latest_user_turn(
         latency_ms=latency_ms,
         first_token_ms=latency_ms,
         update_relationship_state=False,
+        response_evaluation=checked_generation.evaluation,
+        repair_attempted=checked_generation.repair_attempted,
+        initial_quality_violations=checked_generation.initial_violations,
+        context_compacted=checked_generation.context_compacted,
     )
     assistant_metadata = dict(assistant_message.metadata_json or {})
     assistant_message.metadata_json = {
@@ -815,6 +859,7 @@ async def run_chat(
         content,
         requested_mode,
         requested_privacy_mode,
+        provider,
     )
     record_prompt_context(
         user_message,
@@ -828,7 +873,12 @@ async def run_chat(
     await session.refresh(user_message)
     generation_started = perf_counter()
     try:
-        generation = await provider.generate(prompt.prompt)
+        checked_generation = await generate_checked_reply(
+            provider,
+            prompt=prompt.prompt,
+            context=prompt.response_check_context,
+        )
+        generation = checked_generation.generation
         latency_ms = _elapsed_ms(generation_started)
         assistant_message = await complete_assistant_message(
             session,
@@ -842,6 +892,10 @@ async def run_chat(
             generation=generation,
             latency_ms=latency_ms,
             first_token_ms=latency_ms,
+            response_evaluation=checked_generation.evaluation,
+            repair_attempted=checked_generation.repair_attempted,
+            initial_quality_violations=checked_generation.initial_violations,
+            context_compacted=checked_generation.context_compacted,
         )
     except LLMProviderUnavailable as exc:
         await session.rollback()
@@ -931,12 +985,15 @@ async def reroll_assistant_message(
         provider_prompt_chars=len(reroll_prompt),
     )
     generation_started = perf_counter()
-    generation = await provider.generate(reroll_prompt)
-    latency_ms = _elapsed_ms(generation_started)
-    content, response_evaluation = checked_response(
-        generation.content,
-        prompt.response_check_context,
+    checked_generation = await generate_checked_reply(
+        provider,
+        prompt=reroll_prompt,
+        context=prompt.response_check_context,
     )
+    generation = checked_generation.generation
+    latency_ms = _elapsed_ms(generation_started)
+    content = generation.content
+    response_evaluation = checked_generation.evaluation
     if not content:
         raise LLMProviderUnavailable(
             "The text provider returned no reply. The existing reply is unchanged.",
@@ -961,7 +1018,12 @@ async def reroll_assistant_message(
                 latency_ms=latency_ms,
                 first_token_ms=latency_ms,
             ),
-            "response_quality": response_evaluation.metadata(),
+            "response_quality": {
+                **response_evaluation.metadata(),
+                "repair_attempted": checked_generation.repair_attempted,
+                "initial_violations": list(checked_generation.initial_violations[:8]),
+                "context_compacted": checked_generation.context_compacted,
+            },
         },
     )
     conversation.updated_at = utc_now()

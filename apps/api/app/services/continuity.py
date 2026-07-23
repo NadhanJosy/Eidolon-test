@@ -524,8 +524,9 @@ async def retrieve_continuity_threads(
     )
     now = utc_now()
     query_terms = _thread_terms(query)
-    ranked = sorted(
-        candidates,
+    relevant = [thread for thread in candidates if query_terms & _thread_terms(thread.content)]
+    selected = sorted(
+        relevant,
         key=lambda thread: _retrieval_score(
             thread,
             query_terms=query_terms,
@@ -533,8 +534,7 @@ async def retrieve_continuity_threads(
             now=now,
         ),
         reverse=True,
-    )
-    selected = ranked[: max(0, min(limit, 8))]
+    )[: max(0, min(limit, 8))]
     if mark_referenced:
         for thread in selected:
             metadata = thread.metadata_json if isinstance(thread.metadata_json, dict) else {}

@@ -84,6 +84,13 @@ status keeps the unsent draft editable but prevents a misleading send attempt.
 Thread and companion navigation must reject stale asynchronous results so a late
 request cannot overwrite a newer selection or session.
 
+Replies should read as specific dialogue from the authored companion: concise
+when the moment is light, emotionally precise without therapy clichés, capable
+of mixed feelings, humour, disagreement, and relevant initiative, and willing
+to state uncertainty instead of inventing facts or shared history. The product
+does not require every turn to contain reassurance, advice, a memory callback,
+or a follow-up question.
+
 ### Memory and journals
 
 Memory has three layers:

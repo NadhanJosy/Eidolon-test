@@ -5,13 +5,26 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from app.llm.base import LLMGeneration, LLMProviderUnavailable, LLMStreamEvent, TokenUsage
+from app.llm.base import (
+    LLMGeneration,
+    LLMProviderUnavailable,
+    LLMStreamEvent,
+    ProviderCapabilities,
+    TokenUsage,
+)
 
 OLLAMA_UNAVAILABLE = "Ollama provider is unavailable or returned an invalid response."
 
 
 class OllamaProvider:
     name = "ollama"
+    capabilities = ProviderCapabilities(
+        context_window_tokens=8192,
+        prompt_variant="compact",
+        structured_output=False,
+        streaming=True,
+        quality_repair=True,
+    )
 
     def __init__(
         self,

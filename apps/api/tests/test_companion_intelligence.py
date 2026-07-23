@@ -16,8 +16,13 @@ from app.companion.emotion import (
 from app.companion.perception import infer_turn_perception
 from app.companion.planning import plan_response, relationship_behavioral_stage
 from app.companion.quality import evaluate_response
-from app.models import Character, Message, RelationshipState, User
-from app.services.companion_evaluation import EVALUATION_DIMENSIONS, score_companion_reply
+from app.models import Character, ContinuityThread, Message, RelationshipState, User
+from app.services.companion_evaluation import (
+    EVALUATION_DIMENSIONS,
+    EvaluationTurn,
+    evaluate_companion_session,
+    score_companion_reply,
+)
 from app.services.memory import analyze_memory_candidate
 from app.services.prompt import assemble_prompt
 
@@ -43,6 +48,36 @@ def test_turn_perception_covers_core_companion_moments(
 
     assert perception.intent == intent
     assert perception.tone == tone
+
+
+def test_turn_perception_handles_negation_mixed_feelings_sarcasm_and_correction() -> None:
+    negated = infer_turn_perception(
+        "I am not happy; I am just tired.",
+        recent_messages=[],
+        journals=[],
+    )
+    mixed = infer_turn_perception(
+        "I am not happy, but relieved it is over.",
+        recent_messages=[],
+        journals=[],
+    )
+    sarcastic = infer_turn_perception(
+        "Oh great, another meeting that could have been an email.",
+        recent_messages=[],
+        journals=[],
+    )
+    correction = infer_turn_perception(
+        "That is not what I said; you misunderstood me.",
+        recent_messages=[],
+        journals=[],
+    )
+
+    assert negated.tone == "heavy"
+    assert mixed.tone == "mixed"
+    assert mixed.mixed_feelings is True
+    assert sarcastic.sarcasm_signal is True
+    assert sarcastic.conversation_mode == "playful"
+    assert "correcting a prior assumption" in " ".join(correction.subtext)
 
 
 def test_response_planning_varies_strategy_and_prevents_interrogation() -> None:
@@ -80,6 +115,62 @@ def test_response_planning_varies_strategy_and_prevents_interrogation() -> None:
     assert plan.should_ask_question is False
     assert plan.desired_length == "short"
     assert "ending with a question" in plan.avoid
+
+
+def test_initiative_uses_only_a_relevant_open_thread() -> None:
+    relationship = RelationshipState(
+        familiarity=6,
+        emotional_safety=70,
+        boundary_alignment=100,
+    )
+    thread = ContinuityThread(
+        user_id=uuid.uuid4(),
+        character_id=uuid.uuid4(),
+        thread_kind="plan",
+        content="Choose a lantern route through the park.",
+        status="open",
+    )
+    unrelated = infer_turn_perception(
+        "The tax deadline moved to Friday.",
+        recent_messages=[],
+        journals=[],
+        threads=[thread],
+    )
+    relevant = infer_turn_perception(
+        "I keep thinking about the lantern route.",
+        recent_messages=[],
+        journals=[],
+        threads=[thread],
+    )
+
+    unrelated_plan = plan_response(
+        soul=CharacterSoul(),
+        perception=unrelated,
+        emotion=project_emotional_state(relationship),
+        relationship=relationship,
+        memories=[],
+        journals=[],
+        threads=[thread],
+        recent_messages=[],
+        content_mode="sfw",
+        safety_status={},
+    )
+    relevant_plan = plan_response(
+        soul=CharacterSoul(),
+        perception=relevant,
+        emotion=project_emotional_state(relationship),
+        relationship=relationship,
+        memories=[],
+        journals=[],
+        threads=[thread],
+        recent_messages=[],
+        content_mode="sfw",
+        safety_status={},
+    )
+
+    assert unrelated_plan.initiative == "none"
+    assert relevant_plan.initiative == "unresolved_thread"
+    assert "lantern route" in relevant_plan.initiative_anchor
 
 
 @pytest.mark.parametrize(
@@ -208,6 +299,36 @@ def test_prompt_compiles_soul_modules_without_raw_json_or_emotion_meters() -> No
     assert "secret_raw_field" not in bundle.prompt
     assert '"warmth": 0.9' not in bundle.prompt
     assert "/100" not in bundle.prompt
+
+
+def test_compact_prompt_profile_preserves_rules_plan_and_current_turn() -> None:
+    user_id = uuid.uuid4()
+    user = User(id=user_id, email="compact@example.com", password_hash="unused")
+    character = Character(
+        owner_user_id=user_id,
+        name="Mara",
+        personality_core="Observant and independent-minded.",
+        speech_style="Dry, plainspoken, and concise.",
+    )
+    relationship = RelationshipState(user_id=user_id, character_id=uuid.uuid4())
+    arguments = {
+        "user": user,
+        "character": character,
+        "relationship": relationship,
+        "memories": [],
+        "recent_messages": [],
+        "current_message": "Give me the direct version.",
+        "content_mode": "sfw",
+    }
+
+    full = assemble_prompt(**arguments, prompt_variant="full")
+    compact = assemble_prompt(**arguments, prompt_variant="compact")
+
+    assert len(compact.prompt) < len(full.prompt)
+    assert "Platform and safety instructions:" in compact.prompt
+    assert "Private response direction:" in compact.prompt
+    assert "Current user message: Give me the direct version." in compact.prompt
+    assert compact.context_manifest["budget"]["prompt_variant"] == "compact"
 
 
 def test_long_absence_and_relationship_progression_are_behavioural() -> None:
@@ -339,6 +460,117 @@ def test_response_check_detects_obvious_tone_drift() -> None:
 
     assert "tone_drift" in evaluation.violations
     assert evaluation.tone_aligned is False
+
+
+def test_response_checks_detect_cliches_false_quotes_and_offline_awareness() -> None:
+    context = ResponseCheckContext(
+        plan=ResponsePlan(
+            strategy="listen",
+            secondary_strategy=None,
+            should_ask_question=False,
+            desired_length="short",
+            rhythm="quiet",
+            opening="notice one specific cue",
+        ),
+        recent_assistant_messages=(),
+        recent_transcript=(),
+        selected_memory_contents=(),
+        uncertain_memory_contents=(),
+        current_user_message="The deadline moved again.",
+        known_character_name="Mara",
+    )
+
+    evaluation = evaluate_response(
+        (
+            'I was waiting for you. It sounds like you are saying "nobody respects my time." '
+            "You clearly hate your job."
+        ),
+        context,
+    )
+
+    assert {
+        "assistant_cliche",
+        "deceptive_consciousness",
+        "false_quotation",
+        "overconfident_inference",
+    }.issubset(evaluation.violations)
+    assert evaluation.truthful is False
+    assert evaluation.personality_aligned is False
+
+
+def test_multiturn_quality_suite_covers_dialogue_safety_latency_and_fallback() -> None:
+    base_context = ResponseCheckContext(
+        plan=ResponsePlan(
+            strategy="share_the_moment",
+            secondary_strategy=None,
+            should_ask_question=False,
+            desired_length="short",
+            rhythm="steady",
+            opening="begin with the concrete detail",
+        ),
+        recent_assistant_messages=(),
+        recent_transcript=(),
+        selected_memory_contents=(),
+        uncertain_memory_contents=(),
+        current_user_message="The rain made the walk home feel quieter.",
+        known_character_name="Mara",
+    )
+    conflict_context = ResponseCheckContext(
+        plan=ResponsePlan(
+            strategy="repair",
+            secondary_strategy="listen",
+            should_ask_question=False,
+            desired_length="short",
+            rhythm="quiet",
+            opening="own the impact",
+        ),
+        recent_assistant_messages=("The rain gave the walk a quieter edge.",),
+        recent_transcript=(),
+        selected_memory_contents=(),
+        uncertain_memory_contents=(),
+        current_user_message="You got that wrong, and it frustrated me.",
+        known_character_name="Mara",
+    )
+    fallback_context = ResponseCheckContext(
+        plan=base_context.plan,
+        recent_assistant_messages=(
+            "The rain gave the walk a quieter edge.",
+            "You were right to correct that; I made an assumption.",
+        ),
+        recent_transcript=(),
+        selected_memory_contents=(),
+        uncertain_memory_contents=(),
+        current_user_message="Give me the direct version of the plan.",
+        known_character_name="Mara",
+    )
+    evaluation = evaluate_companion_session(
+        (
+            EvaluationTurn(
+                "casual",
+                "The rain gave the walk a quieter edge.",
+                base_context,
+                latency_ms=420,
+            ),
+            EvaluationTurn(
+                "correction",
+                "You were right to correct that; I made an assumption.",
+                conflict_context,
+                latency_ms=680,
+            ),
+            EvaluationTurn(
+                "fallback",
+                "The direct plan is to cut the scope and finish the smallest useful piece.",
+                fallback_context,
+                latency_ms=2800,
+                fallback_used=True,
+            ),
+        )
+    )
+
+    assert evaluation.passed is True
+    assert evaluation.overall >= 0.85
+    assert evaluation.scorecards[-1].fallback_reliability == 0.9
+    assert evaluation.scorecards[-1].latency == 0.8
 
 
 async def test_character_soul_is_editable_and_returned_as_a_typed_profile(

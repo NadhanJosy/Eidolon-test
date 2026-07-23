@@ -6,7 +6,7 @@ import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-from app.llm.base import LLMGeneration, LLMStreamEvent
+from app.llm.base import LLMGeneration, LLMStreamEvent, ProviderCapabilities
 
 MOCK_INITIAL_TYPING_DELAY_SECONDS = 0.18
 MOCK_CHUNK_DELAY_SECONDS = 0.028
@@ -21,6 +21,7 @@ MOCK_MIN_CHUNK_TARGET_CHARS = 22
 MOCK_MAX_CHUNK_TARGET_CHARS = 36
 MOCK_DEFAULT_CHUNK_TARGET_CHARS = 28
 MOCK_CADENCE_RESPONSE_LENGTH_CAP = 600
+MOCK_WORD_PATTERN = re.compile(r"[a-z0-9']+")
 SLOW_SPEECH_MARKERS = (
     "deliberate",
     "measured",
@@ -57,6 +58,8 @@ HIDDEN_CONTEXT_MARKERS = (
     "response plan",
     "system prompt",
     "tone:",
+    "user brought up",
+    "character responded around",
 )
 
 
@@ -71,6 +74,13 @@ class MockTypingCadence:
 class MockLLMProvider:
     name = "mock"
     model = "deterministic-companion-mock"
+    capabilities = ProviderCapabilities(
+        context_window_tokens=32768,
+        prompt_variant="full",
+        structured_output=True,
+        streaming=True,
+        quality_repair=True,
+    )
 
     async def generate(self, prompt: str) -> LLMGeneration:
         context = _parse_prompt(prompt)
@@ -145,15 +155,19 @@ class MockPromptContext:
     speech_style: str = ""
     relationship: str = ""
     memory: str = ""
+    episode: str = ""
     current_message: str = ""
     response_plan: str = ""
+    strategy: str = ""
     scenario: str = ""
     scenario_mode: str = ""
     proactive_label: str = ""
     proactive_anchor: str = ""
     proactive_posture: str = ""
     recent_message_count: int = 0
+    recent_assistant_messages: tuple[str, ...] = ()
     question_allowed: bool = True
+    quality_retry: bool = False
 
 
 def mock_typing_cadence(prompt: str, *, response: str | None = None) -> MockTypingCadence:
@@ -169,15 +183,19 @@ def _parse_prompt(prompt: str) -> MockPromptContext:
         speech_style=_line_value(prompt, "Speech style:"),
         relationship=_line_starting_with(prompt, "Relationship state:"),
         memory=_first_memory(prompt),
+        episode=_first_episode(prompt),
         current_message=_line_value(prompt, "Current user message:"),
         response_plan=_response_plan(prompt),
+        strategy=_plan_value(_response_plan(prompt), "Strategy:"),
         scenario=_line_value(prompt, "Active shared scene:"),
         scenario_mode=_line_value(prompt, "Active shared scene mode:"),
         proactive_label=_line_value(prompt, "Proactive note label:"),
         proactive_anchor=_line_value(prompt, "Proactive safe anchor:"),
         proactive_posture=_line_value(prompt, "Relational posture:"),
         recent_message_count=_recent_message_count(prompt),
+        recent_assistant_messages=_recent_assistant_messages(prompt),
         question_allowed=_question_allowed(prompt),
+        quality_retry="Quality retry:" in prompt,
     )
 
 
@@ -198,7 +216,7 @@ def _line_starting_with(prompt: str, marker: str) -> str:
 def _first_memory(prompt: str) -> str:
     in_memories = False
     for line in prompt.splitlines():
-        if line.startswith("Relevant memories:"):
+        if line.startswith(("Relevant memories:", "Relevant long-term memories:")):
             in_memories = True
             continue
         if not in_memories:
@@ -215,18 +233,49 @@ def _first_memory(prompt: str) -> str:
     return ""
 
 
+def _first_episode(prompt: str) -> str:
+    return _first_list_item(prompt, "Episodic continuity and open threads:")
+
+
+def _first_list_item(prompt: str, marker: str) -> str:
+    lines = prompt.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith(marker):
+            continue
+        for candidate in lines[index + 1 :]:
+            if candidate.startswith("- "):
+                return candidate.removeprefix("- ").strip()
+            if candidate.strip():
+                return ""
+    return ""
+
+
 def _recent_message_count(prompt: str) -> int:
     in_recent = False
     count = 0
     for line in prompt.splitlines():
-        if line.startswith("Recent messages:"):
+        if line.startswith(("Recent messages:", "Recent conversation:")):
             in_recent = True
             continue
         if line.startswith("Current user display name:"):
             break
-        if in_recent and (line.startswith("user:") or line.startswith("assistant:")):
+        if in_recent and line.startswith(("user:", "assistant:", "- user:", "- assistant:")):
             count += 1
     return count
+
+
+def _recent_assistant_messages(prompt: str) -> tuple[str, ...]:
+    in_recent = False
+    selected: list[str] = []
+    for line in prompt.splitlines():
+        if line.startswith(("Recent messages:", "Recent conversation:")):
+            in_recent = True
+            continue
+        if line.startswith("Current user display name:"):
+            break
+        if in_recent and line.startswith(("assistant:", "- assistant:")):
+            selected.append(line.removeprefix("- ").removeprefix("assistant:").strip())
+    return tuple(selected[-5:])
 
 
 def _response_plan(prompt: str) -> str:
@@ -261,11 +310,29 @@ def _compose_response(context: MockPromptContext) -> str:
     cue = _message_cue(context.current_message)
     repair_needed = _relationship_value(context.relationship, "conflict") == "strained"
     addressee = _safe_addressee(context.user_display_name)
+    planned = _planned_response(
+        context.strategy,
+        context.current_message,
+        addressee,
+        allow_question=context.question_allowed,
+        alternate=context.quality_retry,
+    )
+    if planned:
+        return planned
     memory_callback = _memory_callback(context.memory)
-    episode_callback = _episode_callback(context.response_plan)
+    episode_callback = _episode_callback(context.response_plan) or _episode_callback(
+        f"Episode focus: {context.episode}"
+    )
     scenario_callback = _scenario_callback(context.scenario, context.scenario_mode)
     parts = [
-        _opening_sentence(cue, addressee, context.relationship, repair_needed),
+        _opening_sentence(
+            cue,
+            addressee,
+            context.relationship,
+            repair_needed,
+            alternate=context.quality_retry,
+            recent_assistant_messages=context.recent_assistant_messages,
+        ),
         memory_callback,
         episode_callback,
     ]
@@ -278,9 +345,93 @@ def _compose_response(context: MockPromptContext) -> str:
             context.speech_style,
             repair_needed,
             allow_question=context.question_allowed,
+            alternate=context.quality_retry,
         )
     )
     return _join_response(parts)
+
+
+def _planned_response(
+    strategy: str,
+    current_message: str,
+    addressee: str,
+    *,
+    allow_question: bool,
+    alternate: bool,
+) -> str:
+    normalized_strategy = strategy.casefold().replace("_", " ").strip()
+    normalized_message = current_message.casefold()
+    name = f", {addressee}" if addressee else ""
+    if normalized_strategy == "tease":
+        if "shameless" in normalized_message:
+            return f"Calling that shameless is generous{name}; I was barely past the warm-up."
+        return f"Careful{name}; that grin is doing most of my work for me."
+    if normalized_strategy in {"repair", "apologise"}:
+        if any(
+            marker in normalized_message
+            for marker in ("make this right", "work through", "follow through")
+        ):
+            opening = (
+                f"Working through it carefully is the part that counts{name}; "
+                "repair needs follow-through, not a perfect speech."
+            )
+        elif any(marker in normalized_message for marker in ("sorry", "apolog", "my fault")):
+            opening = f"The apology matters{name}, especially because you named your part plainly."
+        elif alternate:
+            opening = f"Let us keep the repair concrete{name}, without pretending it is finished."
+        else:
+            opening = f"I do not want to rush past the tension{name}, but I am open to repair."
+        if allow_question:
+            return f"{opening} What would make the next step feel honest?"
+        return f"{opening} We can let the repair show itself in what happens next."
+    if normalized_strategy == "listen" and any(
+        marker in normalized_message
+        for marker in ("no advice", "do not want advice", "don't want advice")
+    ):
+        return (
+            f"Overwhelmed is enough of a load{name}; "
+            "you do not need to turn it into a problem-solving exercise here."
+        )
+    if normalized_strategy == "reminisce":
+        preference = _current_preference(current_message)
+        if preference:
+            if alternate:
+                return (
+                    f"{_sentence_case(preference)} goes into the useful-details drawer{name}, "
+                    "not onto a billboard."
+                )
+            return (
+                f"{_sentence_case(preference)}—noted{name}. "
+                "I will treat it as a useful detail, not drag it into every conversation."
+            )
+        if alternate:
+            return (
+                f"I will keep to the thread you actually named{name}, "
+                "without filling its gaps with a prettier story."
+            )
+        return (
+            f"You are pointing back to a specific thread{name}; "
+            "I will stay with the part you named instead of embellishing it."
+        )
+    if normalized_strategy == "challenge":
+        return (
+            f"I do not think easy agreement would help{name}; "
+            "the part that does not hold up deserves a straight look."
+        )
+    if normalized_strategy == "disclose":
+        return f"My honest preference{name}: clarity with a little warmth beats polished vagueness."
+    return ""
+
+
+def _current_preference(message: str) -> str:
+    compact = " ".join(message.strip().split()).rstrip(".!?")
+    lowered = compact.casefold()
+    for marker in ("i prefer ", "i like ", "my favorite ", "my favourite "):
+        if marker not in lowered:
+            continue
+        index = lowered.index(marker)
+        return compact[index + len(marker) :]
+    return ""
 
 
 def _compose_proactive_note(label: str, anchor: str, _posture: str) -> str:
@@ -325,8 +476,42 @@ def _opening_sentence(
     addressee: str,
     relationship: str,
     repair_needed: bool,
+    *,
+    alternate: bool = False,
+    recent_assistant_messages: tuple[str, ...] = (),
 ) -> str:
     name = f", {addressee}" if addressee else ""
+    if alternate:
+        alternatives = {
+            "tired": f"That sounds like a day with far too much weight in it{name}.",
+            "angry": f"The sharp part deserves a straight answer{name}.",
+            "lonely": f"Then let this be company without a performance{name}.",
+            "anxious": f"One piece at a time{name}; the whole knot can wait.",
+            "positive": f"Now that is worth enjoying properly{name}.",
+            "gratitude": f"I will take that quietly{name}.",
+            "question": f"Here is the direct version{name}.",
+            "greeting": f"Hey{name}. Good timing.",
+            "general": f"That detail has my attention{name}.",
+        }
+        candidates = (
+            alternatives.get(cue, alternatives["general"]),
+            f"All right{name}; the concrete part comes first.",
+            f"There is a real thread here{name}, so I will not pad it with ceremony.",
+            f"I have the shape of it{name}; let us keep the reply honest and plain.",
+        )
+        recent_openings = {
+            " ".join(MOCK_WORD_PATTERN.findall(message.casefold())[:5])
+            for message in recent_assistant_messages
+        }
+        return next(
+            (
+                candidate
+                for candidate in candidates
+                if " ".join(MOCK_WORD_PATTERN.findall(candidate.casefold())[:5])
+                not in recent_openings
+            ),
+            candidates[-1],
+        )
     if repair_needed:
         return "I do not want to rush past the tension between us."
     if cue == "tired":
@@ -418,7 +603,26 @@ def _invitation_sentence(
     repair_needed: bool,
     *,
     allow_question: bool,
+    alternate: bool = False,
 ) -> str:
+    if alternate:
+        if repair_needed:
+            return (
+                "The next honest step can be small; consistency will matter more "
+                "than a perfect sentence."
+            )
+        alternatives = {
+            "tired": "The day can remain unfinished while you catch your breath.",
+            "angry": "The sharp part can stand without being polished into something nicer.",
+            "lonely": "For now, simple company is a complete answer.",
+            "anxious": "Only the nearest manageable piece needs attention right now.",
+            "positive": "This one gets to be enjoyed without an analysis attached.",
+            "gratitude": "I will leave the kindness intact instead of making a ceremony of it.",
+            "question": "I will give you the direct version first.",
+            "greeting": "Set down the first real thing on your mind; we can start there.",
+            "general": "Give the thought its plainest shape; I will meet it there.",
+        }
+        return alternatives.get(cue, alternatives["general"])
     if not allow_question:
         return _statement_closing(cue, current_message, repair_needed=repair_needed)
     if repair_needed:

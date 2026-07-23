@@ -21,11 +21,20 @@ Tone = Literal[
     "bright",
     "guarded",
     "heavy",
+    "mixed",
     "neutral",
     "playful",
     "sharp",
     "tender",
 ]
+ConversationMode = Literal[
+    "casual",
+    "emotional",
+    "practical",
+    "playful",
+    "relational",
+]
+Stakes = Literal["low", "medium", "high"]
 ResponseStrategy = Literal[
     "advise",
     "apologise",
@@ -155,9 +164,16 @@ class TurnPerception:
     tone: Tone
     subtext: tuple[str, ...] = ()
     unresolved_context: tuple[str, ...] = ()
+    topic_terms: tuple[str, ...] = ()
+    conversation_mode: ConversationMode = "casual"
+    stakes: Stakes = "low"
+    emotional_intensity: float = 0.0
     direct_question: bool = False
     advice_requested: bool = False
     emotional_disclosure: bool = False
+    mixed_feelings: bool = False
+    sarcasm_signal: bool = False
+    humour_signal: bool = False
     conflict_signal: bool = False
     repair_signal: bool = False
     callback_signal: bool = False
@@ -171,6 +187,14 @@ class TurnPerception:
         lines = [f"Intent: {self.intent}", f"User tone: {self.tone}"]
         if self.subtext:
             lines.append(f"Likely subtext: {', '.join(self.subtext)}")
+        lines.append(
+            f"Moment: {self.conversation_mode}; stakes {self.stakes}; "
+            f"emotional intensity {self.emotional_intensity:.1f}"
+        )
+        if self.mixed_feelings:
+            lines.append("The user appears to hold mixed feelings; do not flatten them.")
+        if self.sarcasm_signal:
+            lines.append("Sarcasm or dry irony may be present; respond to the implied meaning.")
         if self.unresolved_context:
             lines.append("Unresolved context is available; use it only if it fits naturally.")
         if self.time_gap != "continuous":
@@ -190,6 +214,11 @@ class ResponsePlan:
     initiative_anchor: str = ""
     memory_callback_id: str | None = None
     tone: str = "steady"
+    stakes: Stakes = "low"
+    desired_effect: str = "leave the user feeling specifically understood"
+    context_focus: str = "current message"
+    truth_posture: str = "state only supported facts; mark inference and uncertainty"
+    ending: str = "end on a complete thought without an automatic question"
     continuity: str = "stay with the current moment"
     boundary_posture: str = "ordinary SFW boundaries"
     relationship_state: str = "new connection"
@@ -209,11 +238,16 @@ class ResponsePlan:
         pieces = [
             f"Strategy: {self.strategy.replace('_', ' ')}",
             f"Tone: {self.tone}",
+            f"Stakes: {self.stakes}",
+            f"Desired effect: {self.desired_effect}",
+            f"Context focus: {self.context_focus}",
+            f"Truth posture: {self.truth_posture}",
             f"Continuity: {self.continuity}",
             f"Length: {self.desired_length}",
             f"Rhythm: {self.rhythm}",
             f"Opening: {self.opening}",
             f"Question: {question_guidance}",
+            f"Ending: {self.ending}",
             f"Initiative: {self.initiative.replace('_', ' ')}",
             f"Boundaries: {self.boundary_posture}",
             f"Active user boundary: {self.active_boundary}",
@@ -241,10 +275,14 @@ class ResponseEvaluation:
     opening_repeated: bool
     boundary_safe: bool
     tone_aligned: bool
+    personality_aligned: bool
+    truthful: bool
+    specificity_score: float
+    verbosity_score: float
 
     def metadata(self) -> dict[str, object]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "passed": self.passed,
             "violations": list(self.violations),
             "repetition_score": round(self.repetition_score, 3),
@@ -252,6 +290,10 @@ class ResponseEvaluation:
             "opening_repeated": self.opening_repeated,
             "boundary_safe": self.boundary_safe,
             "tone_aligned": self.tone_aligned,
+            "personality_aligned": self.personality_aligned,
+            "truthful": self.truthful,
+            "specificity_score": round(self.specificity_score, 3),
+            "verbosity_score": round(self.verbosity_score, 3),
         }
 
 
@@ -264,3 +306,5 @@ class ResponseCheckContext:
     uncertain_memory_contents: tuple[str, ...]
     current_user_message: str
     known_character_name: str
+    character_voice: str = ""
+    character_identity: str = ""

@@ -66,8 +66,18 @@ Every prompt includes hard boundaries and the backend-computed effective mode.
 Adult mode never removes hard instructions.
 
 Streamed chunks are checked before emission, and the complete response is
-checked before persistence. A failure preserves the accepted user turn for
-retry and does not substitute fabricated live-provider text.
+checked before persistence. Checks cover hard boundaries, private-context
+leakage, unsupported history or quotations, memory uncertainty, deceptive
+offline-awareness claims, identity contradiction, and tone drift. One
+recoverable provider defect may be regenerated from the original evidence and a
+bounded correction directive; the rejected prose is never fed back. A
+persistent failure preserves the accepted user turn for retry and does not
+substitute fabricated live-provider text.
+
+Safety direction stays separate from character identity and voice. A safe reply
+must still follow the companion's stable behavioural rules; hard boundaries do
+not authorize generic refusal language, manipulation, moralising, or a collapse
+into an interchangeable assistant persona.
 
 Private response plans and context manifests are implementation scaffolding.
 Generated output must not reveal them, raw prompts, relationship meters,

@@ -11,6 +11,7 @@ from app.llm.base import (
     LLMGeneration,
     LLMProviderUnavailable,
     LLMStreamEvent,
+    ProviderCapabilities,
     TokenUsage,
 )
 
@@ -45,6 +46,13 @@ SAFE_UNAVAILABLE_DETAIL = (
 
 class GroqProvider:
     name = "groq"
+    capabilities = ProviderCapabilities(
+        context_window_tokens=32768,
+        prompt_variant="full",
+        structured_output=True,
+        streaming=True,
+        quality_repair=True,
+    )
 
     def __init__(
         self,
