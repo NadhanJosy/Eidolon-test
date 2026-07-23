@@ -140,8 +140,9 @@ Manual create and edit paths reject empty, credential-like, or hard-blocked
 durable text. Automatic capture also rejects explicit opt-out language and
 sensitive contact/address/financial identifiers without deliberate manual
 storage. Search/retrieval includes a sensitive row only when `q` explicitly
-matches its identifier category or exact value. Superseded correction rows
-appear in `forgotten`/`all` history but cannot be restored directly.
+names the user's matching identifier category or repeats an exact email/phone
+value. Superseded correction rows appear in `forgotten`/`all` history but cannot
+be restored directly.
 
 ## Journals
 

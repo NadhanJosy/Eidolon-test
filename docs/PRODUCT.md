@@ -121,7 +121,7 @@ and category erasure, and separately exported evidence/entity history. Explicit
 “do not remember” language prevents automatic capture. Contact/address and
 similarly sensitive identifiers require deliberate manual storage and receive a
 sensitive marker; they can enter a reply only when the user explicitly asks
-about the matching identifier category or exact value.
+about their matching identifier category or repeats an exact email/phone value.
 
 ### Living continuity threads
 

@@ -1877,7 +1877,7 @@ def _sensitive_memory_query_matches(content: str, query: str) -> bool:
     normalized_query = query.casefold()
     return any(
         match.group(0).casefold() in normalized_query
-        for pattern in SENSITIVE_MEMORY_PATTERNS
+        for pattern in SENSITIVE_MEMORY_PATTERNS[:2]
         for match in pattern.finditer(content)
     )
 
@@ -1888,21 +1888,21 @@ def _sensitive_memory_categories(
     include_query_markers: bool = False,
 ) -> set[str]:
     categories: set[str] = set()
-    if SENSITIVE_MEMORY_PATTERNS[0].search(value):
-        categories.add("email")
-    if SENSITIVE_MEMORY_PATTERNS[1].search(value):
-        categories.add("phone")
-    if SENSITIVE_MEMORY_PATTERNS[2].search(value):
-        categories.add("financial")
-    if SENSITIVE_MEMORY_PATTERNS[3].search(value):
-        categories.add("address")
     if not include_query_markers:
+        if SENSITIVE_MEMORY_PATTERNS[0].search(value):
+            categories.add("email")
+        if SENSITIVE_MEMORY_PATTERNS[1].search(value):
+            categories.add("phone")
+        if SENSITIVE_MEMORY_PATTERNS[2].search(value):
+            categories.add("financial")
+        if SENSITIVE_MEMORY_PATTERNS[3].search(value):
+            categories.add("address")
         return categories
 
     normalized = value.casefold()
-    if re.search(r"\bmy (?:email|e-mail)(?: address)?\b", normalized):
+    if re.search(r"\bmy (?:email|e-mail) address\b", normalized):
         categories.add("email")
-    if re.search(r"\bmy (?:phone|telephone|mobile)(?: number)?\b", normalized):
+    if re.search(r"\bmy (?:phone|telephone|mobile) number\b", normalized):
         categories.add("phone")
     if re.search(
         r"\bmy (?:bank account|routing number|credit card|financial details?)\b",

@@ -190,9 +190,9 @@ back to keyword/state scoring.
 Retrieval applies a relevance floor and a five-item reasoning budget so weak
 matches do not become a fact dump. Prompt evidence is compact, marks uncertainty
 or recurrence, and carries grounded emotional meaning separately from the fact.
-Sensitive manually stored rows require an explicit matching identifier category
-or exact value in the current query before scoring, so pinning and importance can
-never pull them into unrelated context.
+Sensitive manually stored rows require an explicit user-specific identifier
+category or exact email/phone value in the current query before scoring, so
+pinning and importance can never pull them into unrelated context.
 The response contract prefers silence over a forced callback and forbids creepy
 precision or mentioning memory merely to demonstrate recall.
 

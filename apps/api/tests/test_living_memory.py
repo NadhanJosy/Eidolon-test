@@ -11,6 +11,7 @@ from app.db.session import AsyncSessionLocal
 from app.models import MemoryEvidence, MemoryItem, ScheduledJob, utc_now
 from app.services.jobs import create_job
 from app.services.memory import (
+    _sensitive_memory_query_matches,
     analyze_memory_candidate,
     create_memory,
     maintain_memories,
@@ -31,6 +32,55 @@ def test_automatic_memory_honors_opt_out_and_sensitive_content() -> None:
     assert sensitive.accepted is False
     assert sensitive.reason == "sensitive_without_explicit_opt_in"
     assert sensitive.sensitivity == "sensitive"
+
+    assert not _sensitive_memory_query_matches(
+        "My email is private.person@example.com.",
+        "I got an email about weekend plans.",
+    )
+    assert _sensitive_memory_query_matches(
+        "My email is private.person@example.com.",
+        "What is my email address?",
+    )
+    assert not _sensitive_memory_query_matches(
+        "My email is private.person@example.com.",
+        "I wrote to someone.else@example.com.",
+    )
+    assert _sensitive_memory_query_matches(
+        "My email is private.person@example.com.",
+        "Is private.person@example.com still current?",
+    )
+    assert not _sensitive_memory_query_matches(
+        "My phone is +1 (555) 010-2020.",
+        "Phones have changed a lot.",
+    )
+    assert _sensitive_memory_query_matches(
+        "My phone is +1 (555) 010-2020.",
+        "What is my phone number?",
+    )
+    assert not _sensitive_memory_query_matches(
+        "My phone is +1 (555) 010-2020.",
+        "Call +1 (555) 010-3030 instead.",
+    )
+    assert _sensitive_memory_query_matches(
+        "My phone is +1 (555) 010-2020.",
+        "Is +1 (555) 010-2020 still current?",
+    )
+    assert not _sensitive_memory_query_matches(
+        "My bank account is at Cedar Bank.",
+        "A bank account was mentioned in the news.",
+    )
+    assert _sensitive_memory_query_matches(
+        "My bank account is at Cedar Bank.",
+        "What is my bank account?",
+    )
+    assert not _sensitive_memory_query_matches(
+        "My home address is 123 Example Street.",
+        "Home addresses can be difficult to format.",
+    )
+    assert _sensitive_memory_query_matches(
+        "My home address is 123 Example Street.",
+        "What is my home address?",
+    )
 
 
 async def test_reinforcement_history_entities_timeline_and_manual_sensitive_opt_in(
@@ -114,7 +164,7 @@ async def test_reinforcement_history_entities_timeline_and_manual_sensitive_opt_
     )
     assert manual_sensitive.json()["id"] not in {item["id"] for item in unrelated.json()}
     direct = await client.get(
-        f"/characters/{character_id}/memories/search?q=my%20email",
+        f"/characters/{character_id}/memories/search?q=my%20email%20address",
         headers=headers,
     )
     assert direct.json()[0]["id"] == manual_sensitive.json()["id"]
