@@ -139,8 +139,9 @@ Raw embedding vectors are never returned. Scope defaults to `general`.
 Manual create and edit paths reject empty, credential-like, or hard-blocked
 durable text. Automatic capture also rejects explicit opt-out language and
 sensitive contact/address/financial identifiers without deliberate manual
-storage. Superseded correction rows appear in `forgotten`/`all` history but
-cannot be restored directly.
+storage. Search/retrieval includes a sensitive row only when `q` explicitly
+matches its identifier category or exact value. Superseded correction rows
+appear in `forgotten`/`all` history but cannot be restored directly.
 
 ## Journals
 

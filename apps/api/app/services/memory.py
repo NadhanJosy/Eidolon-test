@@ -577,6 +577,13 @@ async def retrieve_memories(
             candidates_by_id.setdefault(memory.id, memory)
     candidates = list(candidates_by_id.values())
     terms = _query_terms(query)
+    if query.strip():
+        candidates = [
+            memory
+            for memory in candidates
+            if memory.sensitivity != "sensitive"
+            or _sensitive_memory_query_matches(memory.content, query)
+        ]
     entity_match_ids = await _entity_matching_memory_ids(
         session,
         candidates=candidates,
@@ -1462,11 +1469,6 @@ def _memory_score(
         + (0.08 if memory.retention_tier == "core" else 0)
         - memory.decay_score * 0.25
         - contradiction_penalty
-        - (
-            0.8
-            if memory.sensitivity == "sensitive" and keyword_score < 0.2 and not entity_match
-            else 0
-        )
     )
 
 
@@ -1862,6 +1864,54 @@ def classify_memory_sensitivity(content: str) -> str:
         if any(pattern.search(content) for pattern in SENSITIVE_MEMORY_PATTERNS)
         else "standard"
     )
+
+
+def _sensitive_memory_query_matches(content: str, query: str) -> bool:
+    """Require an explicit sensitive category or exact value before recall."""
+
+    content_categories = _sensitive_memory_categories(content)
+    query_categories = _sensitive_memory_categories(query, include_query_markers=True)
+    if content_categories & query_categories:
+        return True
+
+    normalized_query = query.casefold()
+    return any(
+        match.group(0).casefold() in normalized_query
+        for pattern in SENSITIVE_MEMORY_PATTERNS
+        for match in pattern.finditer(content)
+    )
+
+
+def _sensitive_memory_categories(
+    value: str,
+    *,
+    include_query_markers: bool = False,
+) -> set[str]:
+    categories: set[str] = set()
+    if SENSITIVE_MEMORY_PATTERNS[0].search(value):
+        categories.add("email")
+    if SENSITIVE_MEMORY_PATTERNS[1].search(value):
+        categories.add("phone")
+    if SENSITIVE_MEMORY_PATTERNS[2].search(value):
+        categories.add("financial")
+    if SENSITIVE_MEMORY_PATTERNS[3].search(value):
+        categories.add("address")
+    if not include_query_markers:
+        return categories
+
+    normalized = value.casefold()
+    if re.search(r"\bmy (?:email|e-mail)(?: address)?\b", normalized):
+        categories.add("email")
+    if re.search(r"\bmy (?:phone|telephone|mobile)(?: number)?\b", normalized):
+        categories.add("phone")
+    if re.search(
+        r"\bmy (?:bank account|routing number|credit card|financial details?)\b",
+        normalized,
+    ):
+        categories.add("financial")
+    if re.search(r"\b(?:my (?:home )?address|where do i live|where i live)\b", normalized):
+        categories.add("address")
+    return categories
 
 
 def user_opted_out_of_memory(content: str) -> bool:

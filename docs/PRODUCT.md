@@ -120,7 +120,8 @@ text search, lifecycle/provenance cues, reversible forgetting, permanent item
 and category erasure, and separately exported evidence/entity history. Explicit
 “do not remember” language prevents automatic capture. Contact/address and
 similarly sensitive identifiers require deliberate manual storage and receive a
-sensitive marker; they are never automatic callbacks merely because stored.
+sensitive marker; they can enter a reply only when the user explicitly asks
+about the matching identifier category or exact value.
 
 ### Living continuity threads
 

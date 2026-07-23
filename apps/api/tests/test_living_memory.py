@@ -95,18 +95,21 @@ async def test_reinforcement_history_entities_timeline_and_manual_sensitive_opt_
         json={
             "memory_type": "user_fact",
             "content": "My email is private.person@example.com.",
-            "importance": 0.6,
+            "importance": 1.0,
             "confidence": 1.0,
-            "retention_tier": "transient",
+            "retention_tier": "core",
+            "pinned": True,
         },
         headers=headers,
     )
     assert manual_sensitive.status_code == 201
     assert manual_sensitive.json()["sensitivity"] == "sensitive"
-    assert manual_sensitive.json()["retention_tier"] == "transient"
+    assert manual_sensitive.json()["retention_tier"] == "core"
+    assert manual_sensitive.json()["pinned"] is True
 
     unrelated = await client.get(
-        f"/characters/{character_id}/memories/search?q=weekend%20weather",
+        f"/characters/{character_id}/memories/search",
+        params={"q": "I got an email about weekend weather."},
         headers=headers,
     )
     assert manual_sensitive.json()["id"] not in {item["id"] for item in unrelated.json()}
@@ -115,6 +118,51 @@ async def test_reinforcement_history_entities_timeline_and_manual_sensitive_opt_
         headers=headers,
     )
     assert direct.json()[0]["id"] == manual_sensitive.json()["id"]
+
+    conversation = await client.post("/conversations", json={}, headers=headers)
+    assert conversation.status_code == 201
+    conversation_id = conversation.json()["id"]
+    unrelated_chat = await client.post(
+        "/chat/messages",
+        json={
+            "conversation_id": conversation_id,
+            "content": "I got an email about weekend plans. Can you help me plan a quiet walk?",
+        },
+        headers=headers,
+    )
+    assert unrelated_chat.status_code == 200
+    unrelated_debug = await client.get(
+        f"/debug/conversation/{conversation_id}",
+        headers=headers,
+    )
+    selected_unrelated_ids = {
+        item["id"]
+        for item in unrelated_debug.json()["last_assembled_context"]["context_manifest"][
+            "memory_items"
+        ]
+    }
+    assert manual_sensitive.json()["id"] not in selected_unrelated_ids
+
+    direct_chat = await client.post(
+        "/chat/messages",
+        json={
+            "conversation_id": conversation_id,
+            "content": "What is my email address?",
+        },
+        headers=headers,
+    )
+    assert direct_chat.status_code == 200
+    direct_debug = await client.get(
+        f"/debug/conversation/{conversation_id}",
+        headers=headers,
+    )
+    selected_direct_ids = {
+        item["id"]
+        for item in direct_debug.json()["last_assembled_context"]["context_manifest"][
+            "memory_items"
+        ]
+    }
+    assert manual_sensitive.json()["id"] in selected_direct_ids
 
     other_token, _ = await register_user(client, email="memory-outsider@example.com")
     other_headers = {"Authorization": f"Bearer {other_token}"}

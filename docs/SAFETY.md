@@ -92,8 +92,9 @@ Explicit “do not remember/save this” language stops automatic cognition and 
 deterministic fallback for that turn. Contact details, precise-address markers,
 and financial identifiers are classified as sensitive and require deliberate
 manual storage; manual ownership does not bypass credential or hard-block
-screens. Sensitive rows receive a retrieval penalty unless directly relevant
-and remain isolated by the same general/adult scope rules.
+screens. Sensitive rows are ineligible for prompt retrieval unless the current
+query explicitly matches their identifier category or exact value, and remain
+isolated by the same general/adult scope rules.
 
 Memory evidence and entity history are private product data. They may appear in
 owner-scoped archive/history/export responses, but not safe diagnostics, job

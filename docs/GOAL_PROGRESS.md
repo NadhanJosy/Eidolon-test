@@ -105,7 +105,8 @@ Outcome:
   retention tiers, recurrence, future relevance, emotional context, private
   evidence history, correction preservation, and linked entity timelines.
 - Made automatic capture reject explicit opt-out and unconsented sensitive
-  identifiers, score durable value across independent signals, and preserve
+  identifiers, require explicit matching recall even for pinned sensitive rows,
+  score durable value across independent signals, and preserve
   backend-authoritative grounding, adult scope, and privacy boundaries.
 - Added scheduled exact-claim consolidation and tier-aware decay, smaller
   entity/emotion-aware retrieval, subtle callback guidance, archive search and
