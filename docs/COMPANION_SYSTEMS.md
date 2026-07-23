@@ -103,13 +103,16 @@ allowlisted relationship evidence, and selected memory IDs visibly used in the
 reply. It cannot write state. Every proposed memory needs an exact contiguous
 quote from the current user line; episode evidence must be exact current-turn
 text. Backend grounding rejects invented named/numeric anchors, insufficient
-lexical support, polarity reversals, unknown types/signals, weak confidence, and
-transient claims. Prefer no memory over an unsupported one.
+lexical support, polarity reversals, unknown types/signals, weak confidence, low
+combined value, sensitive automatic capture, and transient claims. Candidates
+score importance, confidence, novelty, future usefulness, stability, and
+emotional meaning separately. Prefer no memory over an unsupported one.
 
 Claim keys let repeated evidence reinforce a memory, explicit correction
-language supersede it, and ambiguous disagreement remain an inspectable
-conflict. Retrieval facets enrich the deterministic embedding text without
-appearing as extra facts. A selected memory's recall/decay state changes only
+language supersede it with evidence history, and ambiguous disagreement remain
+an inspectable conflict. Grounded entity links connect people, places, dates,
+projects, routines, and recurring topics. Retrieval facets enrich deterministic
+embedding text without appearing as extra facts. A selected memory's recall/decay state changes only
 when the grounded report says the completed reply actually used its ID.
 
 The chat receipt is independent of reply streaming. It begins pending and then
@@ -126,7 +129,9 @@ Automatic extraction is evidence-grounded and conservative in production, with
 the deterministic extractor retained for mock development, disabled cognition,
 and structured-provider degradation. Both paths skip unsafe, blocked, private,
 or preference-disabled candidates without copying rejected prose into job/debug
-metadata.
+metadata. Explicit opt-out language and sensitive identifiers are automatic
+hard stops; deliberate manual storage remains owner-controlled and visibly
+classified.
 
 Users can manually add a memory or remember an eligible user/assistant message.
 Message capture preserves source linkage, is idempotent where appropriate, and
@@ -174,19 +179,30 @@ Active retrieval combines:
 - deterministic keyword overlap
 - local normalized 384-dimensional feature embeddings stored in pgvector
 - vector-nearest and pinned/recent candidate cohorts
-- recency, importance, confidence, emotional weight, pinning, type value,
-  contradiction state, and decay
+- recency, importance, confidence, future relevance, reinforcement, emotional
+  compatibility, entity matches, pinning, retention tier, type value,
+  contradiction state, sensitivity, and decay
 
 The feature encoder is deterministic and dependency-free; it is not presented as
 a neural semantic model. Missing/invalid legacy vectors are recomputed or fall
 back to keyword/state scoring.
+
+Retrieval applies a relevance floor and a five-item reasoning budget so weak
+matches do not become a fact dump. Prompt evidence is compact, marks uncertainty
+or recurrence, and carries grounded emotional meaning separately from the fact.
+Sensitive manually stored rows require an explicit user-specific identifier
+category or exact email/phone value in the current query before scoring, so
+pinning and importance can never pull them into unrelated context.
+The response contract prefers silence over a forced callback and forbids creepy
+precision or mentioning memory merely to demonstrate recall.
 
 Forgotten memory remains visible but cannot enter retrieval, prompts, recall
 timestamps, or active conflicts. Restore/relearning revives the row. Permanent
 deletion is a separate action.
 
 Conflicting active memories retain uncertainty. Resolution keeps the selected
-side and removes opposing rows in the group. Generated callbacks or shared
+side active and supersedes opposing rows while preserving correction history.
+Generated callbacks or shared
 history claims must be supported by selected memory, episodes, or recent
 conversation.
 
@@ -218,6 +234,7 @@ APScheduler periodically calls the PostgreSQL worker. Supported work includes:
 
 - `maintenance_noop`
 - `memory_extract`
+- `memory_maintenance`
 - `chat_postprocess`
 - `relationship_decay`
 - `proactive_inactivity_check`
@@ -233,6 +250,13 @@ Workers claim due rows with database locking. A transaction advisory lock also
 prevents overlapping batches. Transient failures return to pending with capped
 backoff; invalid/unsupported jobs fail terminally. Every transition releases
 worker lock fields, and stored errors use safe bounded text.
+
+Each eligible post-chat run ensures one future memory-maintenance row per
+companion. Maintenance consolidates exact non-conflicting claims, reinforces the
+keeper, backfills conservative entity links, and applies lifecycle decay.
+Boundaries, milestones, pins, and sufficiently repeated high-confidence facts
+are protected; transient low-value detail fades faster. No private prose is
+copied into job results.
 
 ## Proactive notes
 
@@ -276,10 +300,13 @@ Automated coverage should preserve:
 - exactly-once assistant persistence and no partial assistant on failure
 - prompt order, budgets, privacy exclusion, and hidden-state non-disclosure
 - natural mock text without provider/prompt/score narration
-- selective memory, vector fallback, contradiction uncertainty, and forgetting
+- selective memory, vector/entity fallback, contradiction uncertainty,
+  reinforcement, supersession, consolidation, tier-aware decay, and forgetting
 - exact-evidence grounding, polarity rejection, claim correction, provider
   degradation, and truthful continuity receipts
 - general/adult scope isolation, gated manual adult writes, and scoped erasure
+- opt-out/sensitivity rejection, evidence history, entity timelines, category
+  erasure, retention modes, and prompt relevance limits
 - explicit living-thread extraction, owner isolation, lifecycle, source cleanup,
   prompt selection, privacy exclusion, and proactive cooldown
 - gradual relationship progression and reversible source effects

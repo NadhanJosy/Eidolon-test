@@ -15,6 +15,9 @@ from app.models import (
     Conversation,
     EpisodicJournal,
     EpisodicJournalSource,
+    MemoryEntity,
+    MemoryEntityLink,
+    MemoryEvidence,
     MemoryItem,
     Message,
     RelationshipState,
@@ -53,9 +56,38 @@ async def export_account(
             .scalars()
             .all()
         )
-    memories = (
-        await session.execute(select(MemoryItem).where(MemoryItem.user_id == user.id))
-    ).scalars()
+    memory_list = list(
+        (await session.execute(select(MemoryItem).where(MemoryItem.user_id == user.id)))
+        .scalars()
+        .all()
+    )
+    memory_ids = [memory.id for memory in memory_list]
+    memory_evidence: list[MemoryEvidence] = []
+    memory_entity_links: list[MemoryEntityLink] = []
+    if memory_ids:
+        memory_evidence = list(
+            (
+                await session.execute(
+                    select(MemoryEvidence).where(MemoryEvidence.memory_id.in_(memory_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        memory_entity_links = list(
+            (
+                await session.execute(
+                    select(MemoryEntityLink).where(MemoryEntityLink.memory_id.in_(memory_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    memory_entities = list(
+        (await session.execute(select(MemoryEntity).where(MemoryEntity.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     journal_list = list(
         (await session.execute(select(EpisodicJournal).where(EpisodicJournal.user_id == user.id)))
         .scalars()
@@ -92,7 +124,18 @@ async def export_account(
         characters=[character_to_dict(character) for character in characters],
         conversations=[conversation_to_dict(conversation) for conversation in conversation_list],
         messages=[message_to_dict(message) for message in messages],
-        memories=[memory_to_dict(memory) for memory in memories],
+        memories=[memory_to_dict(memory) for memory in memory_list],
+        memory_evidence=[memory_evidence_to_dict(item) for item in memory_evidence],
+        memory_entities=[memory_entity_to_dict(entity) for entity in memory_entities],
+        memory_entity_links=[
+            {
+                "memory_id": str(link.memory_id),
+                "entity_id": str(link.entity_id),
+                "relation": link.relation,
+                "created_at": link.created_at.isoformat(),
+            }
+            for link in memory_entity_links
+        ],
         episodic_journals=[
             journal_to_dict(journal, journal_sources.get(str(journal.id), []))
             for journal in journal_list
@@ -167,19 +210,59 @@ def memory_to_dict(memory: MemoryItem) -> dict:
         "source_message_id": str(memory.source_message_id) if memory.source_message_id else None,
         "scope": memory.scope,
         "claim_key": memory.claim_key,
+        "retention_tier": memory.retention_tier,
+        "lifecycle_state": memory.lifecycle_state,
+        "sensitivity": memory.sensitivity,
         "memory_type": memory.memory_type,
         "content": memory.content,
         "importance": memory.importance,
         "confidence": memory.confidence,
         "emotional_weight": memory.emotional_weight,
+        "emotional_context_json": memory.emotional_context_json,
+        "novelty": memory.novelty,
+        "future_relevance": memory.future_relevance,
+        "reinforcement_count": memory.reinforcement_count,
         "pinned": memory.pinned,
         "decay_score": memory.decay_score,
         "contradiction_group": memory.contradiction_group,
         "last_recalled_at": isoformat_or_none(memory.last_recalled_at),
+        "last_reinforced_at": isoformat_or_none(memory.last_reinforced_at),
+        "last_evidence_at": isoformat_or_none(memory.last_evidence_at),
+        "superseded_by_id": str(memory.superseded_by_id) if memory.superseded_by_id else None,
         "forgotten_at": isoformat_or_none(memory.forgotten_at),
         "metadata_json": memory.metadata_json,
         "created_at": memory.created_at.isoformat(),
         "updated_at": memory.updated_at.isoformat(),
+    }
+
+
+def memory_evidence_to_dict(evidence: MemoryEvidence) -> dict:
+    return {
+        "id": str(evidence.id),
+        "memory_id": str(evidence.memory_id),
+        "source_message_id": (
+            str(evidence.source_message_id) if evidence.source_message_id else None
+        ),
+        "action": evidence.action,
+        "actor": evidence.actor,
+        "reason": evidence.reason,
+        "snapshot_json": evidence.snapshot_json,
+        "created_at": evidence.created_at.isoformat(),
+    }
+
+
+def memory_entity_to_dict(entity: MemoryEntity) -> dict:
+    return {
+        "id": str(entity.id),
+        "user_id": str(entity.user_id),
+        "character_id": str(entity.character_id),
+        "entity_type": entity.entity_type,
+        "name": entity.name,
+        "first_seen_at": entity.first_seen_at.isoformat(),
+        "last_seen_at": entity.last_seen_at.isoformat(),
+        "mention_count": entity.mention_count,
+        "created_at": entity.created_at.isoformat(),
+        "updated_at": entity.updated_at.isoformat(),
     }
 
 

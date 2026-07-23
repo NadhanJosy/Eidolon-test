@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { hasActiveMemoryConflict, memoryTypeLabel } from "./cognition";
 import { EmptyExperience, IconButton, PageHeading, PrimaryButton, QuietButton, fieldClass } from "./experience-primitives";
 import { Icon } from "./icons";
-import type { MemoryItem, MemoryView } from "./types";
+import type { MemoryCategory, MemoryItem, MemoryView } from "./types";
 
 type MemoryFilter = "all" | "people" | "promises" | "moments" | "inside-jokes" | "patterns";
 
@@ -37,6 +37,7 @@ export function MemoryArchive({
   onRestoreMemory,
   onResolveConflict,
   onForget,
+  onClearCategory,
   onChangeView
 }: {
   characterName: string;
@@ -65,14 +66,23 @@ export function MemoryArchive({
   onRestoreMemory: (memory: MemoryItem) => void;
   onResolveConflict: (memory: MemoryItem) => void;
   onForget: () => void;
+  onClearCategory: (category: MemoryCategory) => Promise<boolean>;
   onChangeView: (view: MemoryView) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState<MemoryFilter>("all");
+  const [query, setQuery] = useState("");
+  const [pendingClear, setPendingClear] = useState<MemoryCategory | null>(null);
   const visible = memoryView === "active" ? memories : forgottenMemories;
   const filtered = useMemo(
-    () => visible.filter((memory) => filter === "all" || memoryCategory(memory) === filter).sort(memoryOrder),
-    [filter, visible]
+    () => {
+      const normalizedQuery = query.trim().toLocaleLowerCase();
+      return visible
+        .filter((memory) => filter === "all" || memoryCategory(memory) === filter)
+        .filter((memory) => !normalizedQuery || memorySearchText(memory).includes(normalizedQuery))
+        .sort(memoryOrder);
+    },
+    [filter, query, visible]
   );
   const conflicts = memories.filter(hasActiveMemoryConflict);
   const archiveDescription = memoryArchiveDescription(memories, characterName);
@@ -105,12 +115,17 @@ export function MemoryArchive({
 
       <div className="mt-9 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
         <div className="hide-scrollbar flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Memory categories">
-          {(["all", "people", "promises", "moments", "inside-jokes", "patterns"] as MemoryFilter[]).map((item) => <button aria-selected={filter === item} className={`min-h-11 shrink-0 rounded-full border px-4 py-2 text-xs capitalize transition ${filter === item ? "border-[#b98265]/35 bg-[#b98265]/10 text-[#d5aa94]" : "border-white/[0.08] text-[#837b73] hover:border-white/[0.16]"}`} key={item} onClick={() => setFilter(item)} role="tab" type="button">{item.replace("-", " ")}</button>)}
+          {(["all", "people", "promises", "moments", "inside-jokes", "patterns"] as MemoryFilter[]).map((item) => <button aria-selected={filter === item} className={`min-h-11 shrink-0 rounded-full border px-4 py-2 text-xs capitalize transition ${filter === item ? "border-[#b98265]/35 bg-[#b98265]/10 text-[#d5aa94]" : "border-white/[0.08] text-[#837b73] hover:border-white/[0.16]"}`} key={item} onClick={() => { setFilter(item); setPendingClear(null); }} role="tab" type="button">{item.replace("-", " ")}</button>)}
         </div>
         <div className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.02] p-1">
           <button aria-pressed={memoryView === "active"} className={`min-h-11 rounded-full px-4 py-2 text-xs transition ${memoryView === "active" ? "bg-white/[0.08] text-[#dfd4c9]" : "text-[#756e67]"}`} onClick={() => onChangeView("active")} type="button">Held close</button>
           <button aria-pressed={memoryView === "forgotten"} className={`min-h-11 rounded-full px-4 py-2 text-xs transition ${memoryView === "forgotten" ? "bg-white/[0.08] text-[#dfd4c9]" : "text-[#756e67]"}`} onClick={() => onChangeView("forgotten")} type="button">Allowed to fade</button>
         </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <label className="relative flex-1"><span className="sr-only">Search memories</span><Icon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#776f68]" name="search" /><input className={`${fieldClass} pl-11`} maxLength={120} onChange={(event) => setQuery(event.target.value)} placeholder="Search people, places, promises, or moments" value={query} /></label>
+        {memoryView === "active" && filter !== "all" && filtered.length > 0 ? pendingClear === clearCategoryForFilter(filter) ? <div className="flex items-center gap-2 rounded-full border border-[#ad675a]/20 bg-[#6c3028]/[0.06] p-1 pl-4 text-xs text-[#b98c82]"><span>Permanently remove this category?</span><QuietButton disabled={memoryActionId !== null} onClick={() => { const category = clearCategoryForFilter(filter); if (category) void onClearCategory(category).then((cleared) => { if (cleared) setPendingClear(null); }); }}>Remove</QuietButton><QuietButton onClick={() => setPendingClear(null)}>Cancel</QuietButton></div> : <QuietButton disabled={memoryActionId !== null} onClick={() => setPendingClear(clearCategoryForFilter(filter))}>Clear this category</QuietButton> : null}
       </div>
 
       {forgottenMemoriesLoading && memoryView === "forgotten" ? <p className="py-16 text-center text-sm text-[#817970]">Looking through what has faded…</p> : null}
@@ -159,10 +174,12 @@ function MemoryCard({ memory, view, editing, editValue, memoryActionId, onEditVa
     <article className="mb-4 break-inside-avoid rounded-[1.5rem] border border-white/[0.08] bg-white/[0.025] p-5 transition hover:border-white/[0.14] hover:bg-white/[0.035]">
       <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-[0.66rem] uppercase tracking-[0.14em] text-[#8e7e73]"><Icon className="h-3.5 w-3.5 text-[#b98265]" name={memoryIcon(memory)} />{memoryTypeLabel(memory.memory_type)}</span>{memory.pinned ? <span title="Protected from fading"><Icon className="h-4 w-4 text-[#b98265]" name="bookmark" /></span> : null}</div>
       {editing ? <textarea autoFocus aria-label="Edit memory" className={`${fieldClass} mt-5 min-h-28 resize-none`} maxLength={1000} onChange={(event) => onEditValue(event.target.value)} value={editValue} /> : <p className="mt-5 whitespace-pre-wrap font-eidolon-display text-xl leading-7 text-[#dfd5ca]">{memory.content}</p>}
-      <p className="mt-5 text-[0.67rem] text-[#6f6861]">{memoryOrigin(memory)} · {formatMemoryDate(memory.created_at)}</p>
+      <p className="mt-5 text-[0.67rem] text-[#6f6861]">{memoryOrigin(memory)} · {formatMemoryDate(memory.last_evidence_at ?? memory.created_at)}</p>
+      <div className="mt-3 flex flex-wrap gap-2 text-[0.63rem] text-[#857a71]">{memory.reinforcement_count > 1 ? <span className="rounded-full bg-white/[0.04] px-2.5 py-1">Confirmed {memory.reinforcement_count} times</span> : null}<span className="rounded-full bg-white/[0.04] px-2.5 py-1">{memoryRetentionLabel(memory)}</span>{memory.sensitivity === "sensitive" ? <span className="rounded-full bg-white/[0.04] px-2.5 py-1">Private detail</span> : null}</div>
+      {memoryEmotionalMeaning(memory) ? <p className="mt-3 text-xs leading-5 text-[#8f8178]">{memoryEmotionalMeaning(memory)}</p> : null}
       {conflict && view === "active" ? <div className="mt-4 rounded-xl bg-[#b98265]/[0.08] p-3 text-xs leading-5 text-[#bd9986]"><p>This no longer matches another memory.</p><button className="mt-2 min-h-11 text-[#d6aa92] underline decoration-[#b98265]/40 underline-offset-4" disabled={memoryActionId !== null} onClick={() => onResolveConflict(memory)} type="button">Keep this version</button></div> : null}
       <div className="mt-5 flex flex-wrap gap-2 border-t border-white/[0.07] pt-4">
-        {view === "forgotten" ? <QuietButton disabled={memoryActionId !== null} onClick={() => onRestore(memory)}>Bring back</QuietButton> : editing ? <><PrimaryButton disabled={!editValue.trim() || memoryActionId !== null} onClick={() => onSaveEdit(memory)}>Save</PrimaryButton><QuietButton onClick={onEdit}>Cancel</QuietButton></> : <><QuietButton disabled={memoryActionId !== null} onClick={onEdit}>Edit</QuietButton><QuietButton disabled={memoryActionId !== null} onClick={() => onTogglePinned(memory)}>{memory.pinned ? "Let it soften" : "Keep close"}</QuietButton><QuietButton disabled={memoryActionId !== null} onClick={() => onForget(memory)}>Let fade</QuietButton></>}
+        {view === "forgotten" ? memory.lifecycle_state === "superseded" ? <span className="py-3 text-xs text-[#85776f]">Kept as correction history</span> : <QuietButton disabled={memoryActionId !== null} onClick={() => onRestore(memory)}>Bring back</QuietButton> : editing ? <><PrimaryButton disabled={!editValue.trim() || memoryActionId !== null} onClick={() => onSaveEdit(memory)}>Save</PrimaryButton><QuietButton onClick={onEdit}>Cancel</QuietButton></> : <><QuietButton disabled={memoryActionId !== null} onClick={onEdit}>Edit</QuietButton><QuietButton disabled={memoryActionId !== null} onClick={() => onTogglePinned(memory)}>{memory.pinned ? "Let it soften" : "Keep close"}</QuietButton><QuietButton disabled={memoryActionId !== null} onClick={() => onForget(memory)}>Let fade</QuietButton></>}
         <IconButton className="ml-auto border-transparent" disabled={memoryActionId !== null} icon="trash" label={view === "forgotten" ? "Delete permanently" : "Delete memory"} onClick={() => onDelete(memory)} />
       </div>
     </article>
@@ -178,7 +195,34 @@ function memoryCategory(memory: MemoryItem): MemoryFilter {
 }
 
 function memoryOrder(left: MemoryItem, right: MemoryItem): number {
-  return Number(right.pinned) - Number(left.pinned) || Date.parse(right.created_at) - Date.parse(left.created_at);
+  return Number(right.pinned) - Number(left.pinned) || Date.parse(right.last_evidence_at ?? right.created_at) - Date.parse(left.last_evidence_at ?? left.created_at);
+}
+
+function clearCategoryForFilter(filter: MemoryFilter): MemoryCategory | null {
+  if (filter === "inside-jokes") return "inside_jokes";
+  return filter === "people" || filter === "promises" || filter === "moments" || filter === "patterns" ? filter : null;
+}
+
+function memorySearchText(memory: MemoryItem): string {
+  const entities = Array.isArray(memory.metadata_json.entity_keys)
+    ? memory.metadata_json.entity_keys.filter((item): item is string => typeof item === "string")
+    : [];
+  return [memory.content, memory.memory_type, ...entities].join(" ").toLocaleLowerCase();
+}
+
+function memoryRetentionLabel(memory: MemoryItem): string {
+  if (memory.pinned || memory.retention_tier === "core") return "Protected from fading";
+  if (memory.retention_tier === "transient") return "May soften sooner";
+  return "Fades only when quiet and stale";
+}
+
+function memoryEmotionalMeaning(memory: MemoryItem): string {
+  const context = memory.emotional_context_json;
+  for (const key of ["meaning", "feeling", "helped", "hurt", "resolution"]) {
+    const value = context[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
 function memoryIcon(memory: MemoryItem): "bookmark" | "heart" | "user" | "sparkles" | "shield" {

@@ -96,3 +96,27 @@ Validation:
   authentication, resumable onboarding, streaming chat, offline recovery,
   confirmations, every primary view, responsive overflow, keyboard dismissal,
   default-title continuity, and account erasure.
+
+## 2026-07-16 — Living Memory
+
+Outcome:
+
+- Added explicit active, forgotten, and superseded memory lifecycle state with
+  retention tiers, recurrence, future relevance, emotional context, private
+  evidence history, correction preservation, and linked entity timelines.
+- Made automatic capture reject explicit opt-out and unconsented sensitive
+  identifiers, require explicit matching recall even for pinned sensitive rows,
+  score durable value across independent signals, and preserve
+  backend-authoritative grounding, adult scope, and privacy boundaries.
+- Added scheduled exact-claim consolidation and tier-aware decay, smaller
+  entity/emotion-aware retrieval, subtle callback guidance, archive search and
+  provenance, retention controls, history/timeline APIs, and category erasure.
+
+Validation:
+
+- Alembic downgraded to `0011_witnessed_continuity` and upgraded through
+  `0012_living_memory` successfully.
+- Backend: 241 tests passed and the opt-in live-provider test was skipped.
+- Ruff lint and format checks passed.
+- Frontend ESLint, TypeScript, and static production build passed through
+  `make verify`.

@@ -276,6 +276,12 @@ durable `chat_postprocess` row. If immediate work is interrupted, the normal
 scheduler retries it; the chat receipt remains pending and then becomes ready or
 degraded without affecting the persisted reply.
 
+Eligible post-chat work also ensures one `memory_maintenance` row due roughly a
+day later per companion. The pass is deterministic and local: it consolidates
+exact claims, backfills entity links, and applies retention-aware decay. It adds
+no provider call and stores only reviewed/consolidated/faded counts in the job
+payload. Scale-to-zero may delay it safely; the next active instance catches up.
+
 Do not enable minimum instances or always-allocated CPU merely to improve
 scheduling without explicit approval, because that can change cost. Disable the
 scheduler with `ENABLE_SCHEDULER=false` when proactive work is not desired.

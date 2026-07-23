@@ -139,8 +139,10 @@ block refresh; same-site custom subdomains are the durable solution.
 10. Create a durable post-chat job and expose a pending continuity receipt on
     the completed assistant message.
 11. For an eligible turn, request a bounded structured cognition report, reject
-    claims without exact source evidence, and let backend rules commit scoped
-    memory, a source-linked moment, and bounded relationship evidence.
+    claims without exact source evidence, and let backend rules classify value,
+    sensitivity, emotional meaning, entities, correction, and retention before
+    committing scoped memory, a source-linked moment, and bounded relationship
+    evidence.
 12. Finish living-thread and proactive work, then settle the receipt with only
     changes that actually committed.
 
@@ -165,6 +167,8 @@ source substrings, named/numeric anchors, lexical support, and polarity before
 claim identity, confidence, correction, conflict, scope, or lifecycle can
 change. Invalid/unavailable structured output degrades to the existing
 deterministic extraction path without failing the already-persisted reply.
+PostgreSQL then owns evidence history, recurrence, replacement links, entity
+links, lifecycle state, and retrieval eligibility.
 
 Details are in [COMPANION_SYSTEMS.md](COMPANION_SYSTEMS.md).
 
@@ -189,6 +193,11 @@ system-event prose as instructions.
 APScheduler is a wake-up mechanism. `scheduled_jobs` rows, claims, retry counts,
 and results live in PostgreSQL. Workers use row locking and a transaction-scoped
 advisory lock to avoid overlapping batches.
+
+`memory_maintenance` is a bounded per-companion lifecycle pass. It consolidates
+exact non-conflicting duplicates, backfills conservative entity links, and
+applies retention-aware decay. Job payloads expose only reviewed,
+consolidated, and faded counts, never memory prose.
 
 Cloud Run can scale to zero and may suspend CPU outside requests. Proactive jobs
 therefore catch up when an instance becomes active; the current deployment does

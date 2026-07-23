@@ -31,8 +31,9 @@ refresh tokens never belong in frontend code.
   PostgreSQL-backed throttling
 - multiple authored companions and conversations
 - exact Server-Sent Events token streaming with stop/retry/reroll/edit support
-- evidence-grounded post-turn cognition with selective semantic memory,
-  claim correction, source-linked shared moments, and quiet continuity receipts
+- evidence-grounded post-turn cognition with selective Living Memory, durable
+  reinforcement/correction history, linked entities, source-linked shared
+  moments, and quiet continuity receipts
 - visible living threads for explicit plans, promises, rituals, repairs, and
   follow-ups, with user-controlled closure and deletion
 - deterministic relationship and emotional continuity refined by bounded,
@@ -44,6 +45,8 @@ refresh tokens never belong in frontend code.
 - structural adult-mode gates and non-negotiable hard safety boundaries
 - owner-scoped Debug visibility without raw prompts or secrets
 - private data export, scoped cleanup, and account erasure
+- searchable memory timelines, retention controls, category erasure, and
+  inspectable lifecycle state without raw embeddings or unsafe logs
 
 ## Documentation
 

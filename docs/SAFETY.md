@@ -88,6 +88,20 @@ proactive context. Adult turns and credential-like text are also ineligible for
 automatic living threads. Memory preferences can reduce automatic learning but
 may not disable safety/boundary handling.
 
+Explicit “do not remember/save this” language stops automatic cognition and the
+deterministic fallback for that turn. Contact details, precise-address markers,
+and financial identifiers are classified as sensitive and require deliberate
+manual storage; manual ownership does not bypass credential or hard-block
+screens. Sensitive rows are ineligible for prompt retrieval unless the current
+query explicitly names the user's matching identifier category or repeats an
+exact email/phone value, and remain isolated by the same general/adult scope
+rules.
+
+Memory evidence and entity history are private product data. They may appear in
+owner-scoped archive/history/export responses, but not safe diagnostics, job
+payloads, proactive messages, normal logs, or unrelated prompt context. Hard
+deletion cascades evidence and links; superseded rows stay outside retrieval.
+
 Adult episode detail is not copied into durable journal callbacks or proactive
 anchors. Scheduled jobs use the same hard-block screen and minimal SFW prompts.
 Provider output that is empty, malformed, oversized, credential-like, unsafe,

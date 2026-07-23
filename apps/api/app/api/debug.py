@@ -123,10 +123,14 @@ async def debug_character(
             {
                 "id": str(memory.id),
                 "memory_type": memory.memory_type,
-                "content": memory.content,
                 "importance": memory.importance,
                 "confidence": memory.confidence,
                 "pinned": memory.pinned,
+                "retention_tier": memory.retention_tier,
+                "lifecycle_state": memory.lifecycle_state,
+                "reinforcement_count": memory.reinforcement_count,
+                "decay_score": memory.decay_score,
+                "sensitivity": memory.sensitivity,
             }
             for memory in memories
         ],
@@ -275,6 +279,8 @@ def _current_context_summary(
                 "id": str(memory.id),
                 "memory_type": memory.memory_type[:80],
                 "pinned": memory.pinned,
+                "retention_tier": memory.retention_tier,
+                "reinforcement_count": memory.reinforcement_count,
             }
             for memory in memories[:12]
         ],
@@ -677,6 +683,9 @@ def _memory_debug_payload(memory: MemoryItem | None) -> dict[str, object] | None
         "memory_type": memory.memory_type,
         "importance": memory.importance,
         "confidence": memory.confidence,
+        "retention_tier": memory.retention_tier,
+        "reinforcement_count": memory.reinforcement_count,
+        "lifecycle_state": memory.lifecycle_state,
     }
 
 

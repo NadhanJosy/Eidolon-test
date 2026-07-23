@@ -421,6 +421,7 @@ export function EidolonApp() {
                     setMemoryType={actions.setMemoryType}
                     onAdd={actions.addMemory}
                     onChangeView={actions.changeMemoryView}
+                    onClearCategory={actions.clearMemoryCategory}
                     onDelete={confirmMemoryDeletion}
                     onForget={actions.forgetMemories}
                     onForgetMemory={actions.forgetMemory}

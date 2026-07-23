@@ -107,6 +107,22 @@ identity, confidence thresholds, correction, conflict, scope, and lifecycle.
 Chat shows a quiet per-turn continuity receipt while that work settles and only
 names changes that were actually committed.
 
+Semantic memory has explicit lifecycle state. Repeated evidence reinforces a
+claim; direct corrections supersede the older version without erasing its
+private history; uncertain disagreement stays unresolved. Retention tiers
+protect pinned memories, boundaries, milestones, and well-reinforced patterns
+while allowing low-value transient detail to soften through scheduled review.
+Ordinary retention can be minimal, balanced, or long-lived per companion.
+
+People, places, dates, routines, projects, and topics can be linked to memory
+items for entity-focused search and chronological recall. The archive supports
+text search, lifecycle/provenance cues, reversible forgetting, permanent item
+and category erasure, and separately exported evidence/entity history. Explicit
+“do not remember” language prevents automatic capture. Contact/address and
+similarly sensitive identifiers require deliberate manual storage and receive a
+sensitive marker; they can enter a reply only when the user explicitly asks
+about their matching identifier category or repeats an exact email/phone value.
+
 ### Living continuity threads
 
 Eidolon carries explicit future intent as first-class living threads rather
@@ -139,8 +155,10 @@ manipulative dependency, jealousy, punishment, or pressure to return.
 
 ### Scheduled presence
 
-PostgreSQL-backed jobs can extract memory, decay relationship state, refresh
-continuity, and create optional proactive notes. Supported note categories
+PostgreSQL-backed jobs can extract and maintain memory, decay relationship
+state, refresh continuity, and create optional proactive notes. Memory
+maintenance consolidates exact duplicate claims and applies tier-aware decay;
+its payload records counts rather than private prose. Supported note categories
 include quiet check-ins, morning or goodnight notes, a restrained
 thinking-of-you note, a milestone note, an intentional open-thread follow-up,
 and a delayed follow-up.

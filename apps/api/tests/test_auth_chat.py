@@ -40,6 +40,7 @@ async def test_register_login_me_and_default_character(client: AsyncClient) -> N
     assert default_character["boundaries_json"]["memory_preferences"] == {
         "remember_preferences": True,
         "remember_emotional_notes": True,
+        "retention_mode": "balanced",
         "private_mode_default": False,
         "adult_memory_storage": False,
     }

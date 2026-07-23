@@ -92,6 +92,21 @@ async def test_database_is_at_head_with_level2_columns() -> None:
                 )
             )
         }
+        memory_evidence_exists = (
+            await connection.execute(
+                text("select to_regclass('public.memory_evidence') is not null")
+            )
+        ).scalar_one()
+        memory_entities_exists = (
+            await connection.execute(
+                text("select to_regclass('public.memory_entities') is not null")
+            )
+        ).scalar_one()
+        memory_entity_links_exists = (
+            await connection.execute(
+                text("select to_regclass('public.memory_entity_links') is not null")
+            )
+        ).scalar_one()
 
         legacy_login_throttle_exists = (
             await connection.execute(
@@ -99,7 +114,7 @@ async def test_database_is_at_head_with_level2_columns() -> None:
             )
         ).scalar_one()
 
-    assert revision == "0011_witnessed_continuity"
+    assert revision == "0012_living_memory"
     assert {
         "importance",
         "pinned",
@@ -107,7 +122,20 @@ async def test_database_is_at_head_with_level2_columns() -> None:
         "forgotten_at",
         "scope",
         "claim_key",
+        "retention_tier",
+        "lifecycle_state",
+        "sensitivity",
+        "emotional_context_json",
+        "novelty",
+        "future_relevance",
+        "reinforcement_count",
+        "last_reinforced_at",
+        "last_evidence_at",
+        "superseded_by_id",
     }.issubset(memory_columns)
+    assert memory_evidence_exists is True
+    assert memory_entities_exists is True
+    assert memory_entity_links_exists is True
     assert {
         "mood",
         "conflict_state",

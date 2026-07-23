@@ -117,6 +117,12 @@ export type Message = {
 
 export type SearchStatus = "idle" | "loading" | "ready" | "error";
 export type MemoryView = "active" | "forgotten";
+export type MemoryCategory =
+  | "inside_jokes"
+  | "moments"
+  | "patterns"
+  | "people"
+  | "promises";
 
 export type ChatResponse = {
   user_message: Message;
@@ -130,15 +136,25 @@ export type MemoryItem = {
   source_message_id: string | null;
   scope: "general" | "adult";
   claim_key: string | null;
+  retention_tier: "transient" | "normal" | "core";
+  lifecycle_state: "active" | "superseded" | "forgotten";
+  sensitivity: "standard" | "sensitive";
   memory_type: string;
   content: string;
   importance: number;
   confidence: number;
   emotional_weight: number;
+  emotional_context_json: Record<string, unknown>;
+  novelty: number;
+  future_relevance: number;
+  reinforcement_count: number;
   pinned: boolean;
   decay_score: number;
   contradiction_group: string | null;
   last_recalled_at: string | null;
+  last_reinforced_at: string | null;
+  last_evidence_at: string | null;
+  superseded_by_id: string | null;
   forgotten_at: string | null;
   metadata_json: Record<string, unknown>;
   created_at: string;
@@ -275,6 +291,7 @@ export type CharacterDraft = {
   aftercare_style: string;
   remember_preferences: boolean;
   remember_emotional_notes: boolean;
+  retention_mode: "minimal" | "balanced" | "long_lived";
   private_mode_default: boolean;
   adult_memory_storage: boolean;
   proactive_enabled: boolean;

@@ -169,6 +169,30 @@ class MemoryItem(TimestampMixin, Base):
             "scope IN ('general', 'adult')",
             name="ck_memory_items_scope",
         ),
+        CheckConstraint(
+            "retention_tier IN ('transient', 'normal', 'core')",
+            name="ck_memory_items_retention_tier",
+        ),
+        CheckConstraint(
+            "lifecycle_state IN ('active', 'superseded', 'forgotten')",
+            name="ck_memory_items_lifecycle_state",
+        ),
+        CheckConstraint(
+            "sensitivity IN ('standard', 'sensitive')",
+            name="ck_memory_items_sensitivity",
+        ),
+        CheckConstraint(
+            "novelty >= 0 AND novelty <= 1",
+            name="ck_memory_items_novelty",
+        ),
+        CheckConstraint(
+            "future_relevance >= 0 AND future_relevance <= 1",
+            name="ck_memory_items_future_relevance",
+        ),
+        CheckConstraint(
+            "reinforcement_count >= 1",
+            name="ck_memory_items_reinforcement_count",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -188,11 +212,26 @@ class MemoryItem(TimestampMixin, Base):
     )
     scope: Mapped[str] = mapped_column(String(16), default="general", index=True, nullable=False)
     claim_key: Mapped[str | None] = mapped_column(String(160), index=True, nullable=True)
+    retention_tier: Mapped[str] = mapped_column(
+        String(16), default="normal", index=True, nullable=False
+    )
+    lifecycle_state: Mapped[str] = mapped_column(
+        String(16), default="active", index=True, nullable=False
+    )
+    sensitivity: Mapped[str] = mapped_column(
+        String(16), default="standard", index=True, nullable=False
+    )
     memory_type: Mapped[str] = mapped_column(String(80), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     importance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     emotional_weight: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    emotional_context_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, default=dict, nullable=False
+    )
+    novelty: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    future_relevance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    reinforcement_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     embedding: Mapped[Any | None] = mapped_column(Vector(384), nullable=True)
     decay_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
@@ -201,12 +240,107 @@ class MemoryItem(TimestampMixin, Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    last_reinforced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_evidence_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("memory_items.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
     forgotten_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         index=True,
         nullable=True,
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+
+class MemoryEvidence(Base):
+    """Private, owner-exportable evidence and lifecycle history for one memory."""
+
+    __tablename__ = "memory_evidence"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('created', 'reinforced', 'merged', 'edited', 'corrected', "
+            "'forgotten', 'restored', 'resolved')",
+            name="ck_memory_evidence_action",
+        ),
+        CheckConstraint(
+            "actor IN ('system', 'user')",
+            name="ck_memory_evidence_actor",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    memory_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("memory_items.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    action: Mapped[str] = mapped_column(String(24), nullable=False)
+    actor: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str] = mapped_column(String(120), nullable=False)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True, nullable=False
+    )
+
+
+class MemoryEntity(TimestampMixin, Base):
+    __tablename__ = "memory_entities"
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type IN ('date', 'person', 'place', 'project', 'routine', 'topic')",
+            name="ck_memory_entities_type",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "character_id",
+            "entity_type",
+            "normalized_name",
+            name="uq_memory_entities_owner_character_identity",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    entity_type: Mapped[str] = mapped_column(String(24), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(160), index=True, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    mention_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+
+class MemoryEntityLink(Base):
+    __tablename__ = "memory_entity_links"
+
+    memory_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("memory_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("memory_entities.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    relation: Mapped[str] = mapped_column(String(40), default="about", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
 
 
 class EpisodicJournal(TimestampMixin, Base):

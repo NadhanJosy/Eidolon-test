@@ -4,7 +4,8 @@
 
 The MVP is implemented and deployed with authentication, multi-companion and
 multi-thread chat, SSE streaming, persona prompts, semantic/episodic memory,
-evidence-grounded witnessed continuity with claim correction and turn receipts,
+evidence-grounded Living Memory with reinforcement/correction history, linked
+entities, retention-aware consolidation/decay, subtle bounded recall, and turn receipts,
 first-class living plans/promises/follow-ups, relationship continuity,
 PostgreSQL-backed jobs, earned proactive notes, separately scoped adult
 continuity, privacy gates, debug visibility, export/erasure, migrations, CI, and

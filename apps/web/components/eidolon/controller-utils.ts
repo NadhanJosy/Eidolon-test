@@ -61,6 +61,7 @@ export function emptyCharacterDraft(): CharacterDraft {
     aftercare_style: "",
     remember_preferences: true,
     remember_emotional_notes: true,
+    retention_mode: "balanced",
     private_mode_default: false,
     adult_memory_storage: false,
     proactive_enabled: true,
@@ -124,6 +125,7 @@ export function toCharacterDraft(character: Character): CharacterDraft {
     aftercare_style: stringValue(character.boundaries_json.aftercare_style),
     remember_preferences: booleanValue(memoryPreferences.remember_preferences, true),
     remember_emotional_notes: booleanValue(memoryPreferences.remember_emotional_notes, true),
+    retention_mode: memoryRetentionMode(memoryPreferences.retention_mode),
     private_mode_default: booleanValue(memoryPreferences.private_mode_default, false),
     adult_memory_storage: booleanValue(memoryPreferences.adult_memory_storage, false),
     proactive_enabled: booleanValue(proactivePreferences.enabled, true),
@@ -186,6 +188,7 @@ export function toBoundariesJson(
       ...existingPreferences,
       remember_preferences: draft.remember_preferences,
       remember_emotional_notes: draft.remember_emotional_notes,
+      retention_mode: draft.retention_mode,
       private_mode_default: draft.private_mode_default,
       adult_memory_storage: draft.adult_memory_storage
     },
@@ -309,6 +312,7 @@ export function defaultCharacterProfile(name: string): Pick<
       memory_preferences: {
         remember_preferences: true,
         remember_emotional_notes: true,
+        retention_mode: "balanced",
         private_mode_default: false,
         adult_memory_storage: false
       },
@@ -423,6 +427,12 @@ function stringValue(value: unknown): string {
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function memoryRetentionMode(
+  value: unknown
+): "minimal" | "balanced" | "long_lived" {
+  return value === "minimal" || value === "long_lived" ? value : "balanced";
 }
 
 function proactiveCooldownValue(value: unknown): string {

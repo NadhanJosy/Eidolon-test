@@ -381,10 +381,14 @@ async def test_manual_memory_retrieval_and_debug_prompt(client: AsyncClient) -> 
     assert debug_memory == {
         "id": created.json()["id"],
         "memory_type": "preference",
-        "content": "User likes quiet late-night conversations.",
         "importance": 0.5,
         "confidence": 0.9,
         "pinned": False,
+        "retention_tier": "normal",
+        "lifecycle_state": "active",
+        "reinforcement_count": 1,
+        "decay_score": 0.0,
+        "sensitivity": "standard",
     }
     debug_relationship = debug.json()["relationship"]
     assert set(debug_relationship) == {
@@ -840,6 +844,10 @@ async def test_character_memory_preferences_reject_malformed_known_controls(
         (
             {"memory_preferences": {"private_mode_default": 1}},
             "memory_preferences.private_mode_default must be true or false.",
+        ),
+        (
+            {"memory_preferences": {"retention_mode": "forever"}},
+            "memory_preferences.retention_mode must be minimal, balanced, or long_lived.",
         ),
     )
     for boundaries_json, expected_error in malformed_cases:

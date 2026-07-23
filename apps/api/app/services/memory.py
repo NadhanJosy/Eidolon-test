@@ -9,7 +9,7 @@ from sqlalchemy import bindparam, delete, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.types import Vector
-from app.models import MemoryItem, utc_now
+from app.models import MemoryEntity, MemoryEntityLink, MemoryEvidence, MemoryItem, utc_now
 from app.services.embedding import (
     EMBEDDING_DIMENSIONS,
     coerce_embedding,
@@ -65,6 +65,21 @@ UNSAFE_MEMORY_TERMS = (
     "exploit",
     "credential",
 )
+MEMORY_OPT_OUT_MARKERS = (
+    "do not remember this",
+    "don't remember this",
+    "do not save this",
+    "don't save this",
+    "keep this out of memory",
+    "this is off the record",
+    "forget what i just said",
+)
+SENSITIVE_MEMORY_PATTERNS = (
+    re.compile(r"\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b", re.I),
+    re.compile(r"\b(?:\+?\d[\d ()-]{7,}\d)\b"),
+    re.compile(r"\b(?:social security|bank account|routing number|credit card)\b", re.I),
+    re.compile(r"\b(?:my home address|i live at|my address is)\b", re.I),
+)
 STOP_WORDS = {
     "about",
     "after",
@@ -106,6 +121,13 @@ class MemoryCaptureError(ValueError):
 
 
 @dataclass(frozen=True)
+class MemoryMaintenanceResult:
+    consolidated: int = 0
+    faded: int = 0
+    reviewed: int = 0
+
+
+@dataclass(frozen=True)
 class MemoryCandidateDecision:
     accepted: bool
     reason: str
@@ -114,6 +136,10 @@ class MemoryCandidateDecision:
     importance: float = 0.0
     confidence: float = 0.0
     emotional_weight: float = 0.0
+    novelty: float = 0.0
+    future_relevance: float = 0.0
+    retention_tier: str | None = None
+    sensitivity: str = "standard"
     trigger: str | None = None
 
     def to_metadata(self) -> dict[str, object]:
@@ -129,6 +155,10 @@ class MemoryCandidateDecision:
             metadata["importance"] = round(self.importance, 3)
             metadata["confidence"] = round(self.confidence, 3)
             metadata["emotional_weight"] = round(self.emotional_weight, 3)
+            metadata["novelty"] = round(self.novelty, 3)
+            metadata["future_relevance"] = round(self.future_relevance, 3)
+            metadata["retention_tier"] = self.retention_tier or "normal"
+            metadata["sensitivity"] = self.sensitivity
         return metadata
 
 
@@ -150,10 +180,29 @@ async def create_memory(
     scope: str = "general",
     claim_key: str | None = None,
     retrieval_facets: list[str] | None = None,
+    retention_tier: str | None = None,
+    sensitivity: str | None = None,
+    novelty: float = 0.5,
+    future_relevance: float = 0.5,
+    emotional_context: dict[str, object] | None = None,
+    linked_entities: list[tuple[str, str]] | None = None,
+    evidence_actor: str | None = None,
 ) -> MemoryItem:
     if scope not in {"general", "adult"}:
         raise MemoryCaptureError("Memory scope must be general or adult.")
     memory_content = _validated_memory_content(content)
+    selected_retention = _retention_tier(
+        memory_type,
+        importance=importance,
+        pinned=pinned,
+        requested=retention_tier,
+    )
+    selected_sensitivity = sensitivity or classify_memory_sensitivity(memory_content)
+    if selected_sensitivity not in {"standard", "sensitive"}:
+        raise MemoryCaptureError("Memory sensitivity must be standard or sensitive.")
+    novelty = clamp(novelty, 0.0, 1.0)
+    future_relevance = clamp(future_relevance, 0.0, 1.0)
+    bounded_emotional_context = _bounded_emotional_context(emotional_context or {})
     facets = _bounded_facets(retrieval_facets or [])
     embedding_text = _embedding_text(memory_content, facets)
     contradiction_group, polarity = _contradiction_key(memory_content)
@@ -184,9 +233,11 @@ async def create_memory(
             claim_key=claim_key,
         )
     if existing is not None:
-        if existing.forgotten_at is not None:
+        was_forgotten = existing.forgotten_at is not None
+        if was_forgotten:
             _restore_memory_state(existing, reason="relearned")
         old_group = existing.contradiction_group
+        old_content = existing.content
         merged_content = _best_memory_content(existing.content, memory_content)
         merged_group, merged_polarity = _contradiction_key(merged_content)
         merged_metadata = _without_contradiction_metadata(existing.metadata_json or {})
@@ -212,6 +263,27 @@ async def create_memory(
             1.0,
         )
         existing.pinned = existing.pinned or pinned
+        existing.retention_tier = _stronger_retention_tier(
+            existing.retention_tier,
+            selected_retention,
+        )
+        existing.sensitivity = (
+            "sensitive"
+            if "sensitive" in {existing.sensitivity, selected_sensitivity}
+            else "standard"
+        )
+        existing.novelty = clamp((existing.novelty + novelty) / 2, 0.0, 1.0)
+        existing.future_relevance = clamp(
+            max(existing.future_relevance, future_relevance), 0.0, 1.0
+        )
+        existing.emotional_context_json = _merge_emotional_context(
+            existing.emotional_context_json,
+            bounded_emotional_context,
+        )
+        existing.reinforcement_count += 1
+        existing.last_reinforced_at = utc_now()
+        existing.last_evidence_at = utc_now()
+        existing.lifecycle_state = "active"
         existing.source_message_id = existing.source_message_id or source_message_id
         existing.decay_score = clamp(existing.decay_score - 0.1, 0.0, 1.0)
         existing.contradiction_group = merged_group
@@ -234,6 +306,28 @@ async def create_memory(
             "last_merged_at": utc_now().isoformat(),
         }
         await session.flush()
+        if was_forgotten:
+            await _record_memory_evidence(
+                session,
+                existing,
+                action="restored",
+                actor="system",
+                reason="relearned_from_new_evidence",
+                source_message_id=source_message_id,
+            )
+        await _record_memory_evidence(
+            session,
+            existing,
+            action="merged" if merged_content != old_content else "reinforced",
+            actor=evidence_actor or ("user" if memory_source in {None, "manual"} else "system"),
+            reason="repeated_grounded_evidence",
+            source_message_id=source_message_id,
+        )
+        await _link_memory_entities(
+            session,
+            existing,
+            linked_entities or _inferred_entities(existing.memory_type, existing.content, facets),
+        )
         await _refresh_contradiction_group(
             session,
             user_id=user_id,
@@ -255,19 +349,42 @@ async def create_memory(
         source_message_id=source_message_id,
         scope=scope,
         claim_key=claim_key,
+        retention_tier=selected_retention,
+        lifecycle_state="active",
+        sensitivity=selected_sensitivity,
         memory_type=memory_type,
         content=memory_content,
         importance=importance,
         confidence=confidence,
         emotional_weight=emotional_weight,
+        emotional_context_json=bounded_emotional_context,
+        novelty=novelty,
+        future_relevance=future_relevance,
+        reinforcement_count=1,
         pinned=pinned,
         embedding=text_embedding(embedding_text),
         decay_score=0.0,
+        last_reinforced_at=utc_now(),
+        last_evidence_at=utc_now(),
         contradiction_group=contradiction_group,
         metadata_json=metadata,
     )
     session.add(memory)
     await session.flush()
+    await _record_memory_evidence(
+        session,
+        memory,
+        action="created",
+        actor=evidence_actor
+        or ("user" if memory_source in {None, "manual", "user_saved"} else "system"),
+        reason=memory_source or "manual",
+        source_message_id=source_message_id,
+    )
+    await _link_memory_entities(
+        session,
+        memory,
+        linked_entities or _inferred_entities(memory_type, memory_content, facets),
+    )
     await _refresh_contradiction_group(
         session,
         user_id=user_id,
@@ -319,6 +436,14 @@ async def remember_message_as_memory(
             decision=decision,
         )
         await session.flush()
+        await _record_memory_evidence(
+            session,
+            existing,
+            action="reinforced",
+            actor="user",
+            reason="remembered_by_user",
+            source_message_id=message_id,
+        )
         return existing
 
     return await create_memory(
@@ -330,6 +455,10 @@ async def remember_message_as_memory(
         importance=decision.importance,
         confidence=decision.confidence,
         emotional_weight=decision.emotional_weight,
+        novelty=decision.novelty,
+        future_relevance=decision.future_relevance,
+        retention_tier=decision.retention_tier,
+        sensitivity=decision.sensitivity,
         pinned=True,
         source_message_id=message_id,
         memory_source="user_saved",
@@ -371,6 +500,10 @@ def analyze_user_saved_memory(
             importance=max(automatic.importance, 0.65),
             confidence=max(automatic.confidence, 0.9),
             emotional_weight=automatic.emotional_weight,
+            novelty=automatic.novelty,
+            future_relevance=max(automatic.future_relevance, 0.65),
+            retention_tier="core",
+            sensitivity=classify_memory_sensitivity(content),
             trigger=automatic.trigger,
         )
 
@@ -382,6 +515,10 @@ def analyze_user_saved_memory(
         importance=0.65,
         confidence=0.9 if source_role == "user" else 0.85,
         emotional_weight=0.15 if source_role == "user" else 0.2,
+        novelty=0.7,
+        future_relevance=0.65,
+        retention_tier="core",
+        sensitivity=classify_memory_sensitivity(content),
     )
 
 
@@ -407,6 +544,7 @@ async def retrieve_memories(
             MemoryItem.user_id == user_id,
             MemoryItem.character_id == character_id,
             MemoryItem.forgotten_at.is_(None),
+            MemoryItem.lifecycle_state == "active",
             MemoryItem.scope.in_(allowed_scopes),
         )
         .order_by(desc(MemoryItem.pinned), desc(MemoryItem.updated_at), MemoryItem.id.asc())
@@ -427,6 +565,7 @@ async def retrieve_memories(
                 MemoryItem.user_id == user_id,
                 MemoryItem.character_id == character_id,
                 MemoryItem.forgotten_at.is_(None),
+                MemoryItem.lifecycle_state == "active",
                 MemoryItem.scope.in_(allowed_scopes),
                 MemoryItem.embedding.is_not(None),
             )
@@ -438,6 +577,18 @@ async def retrieve_memories(
             candidates_by_id.setdefault(memory.id, memory)
     candidates = list(candidates_by_id.values())
     terms = _query_terms(query)
+    if query.strip():
+        candidates = [
+            memory
+            for memory in candidates
+            if memory.sensitivity != "sensitive"
+            or _sensitive_memory_query_matches(memory.content, query)
+        ]
+    entity_match_ids = await _entity_matching_memory_ids(
+        session,
+        candidates=candidates,
+        query=query,
+    )
     candidate_embeddings: dict[uuid.UUID, list[float]] = {}
     backfilled_embedding = False
     for memory in candidates:
@@ -447,19 +598,30 @@ async def retrieve_memories(
             memory.embedding = embedding
             backfilled_embedding = True
         candidate_embeddings[memory.id] = embedding
-    ranked = sorted(
-        candidates,
-        key=lambda memory: _memory_score(
-            memory,
-            terms,
-            query,
-            now,
-            query_embedding=query_embedding,
-            memory_embedding=candidate_embeddings.get(memory.id),
+    scored = sorted(
+        (
+            (
+                memory,
+                _memory_score(
+                    memory,
+                    terms,
+                    query,
+                    now,
+                    query_embedding=query_embedding,
+                    memory_embedding=candidate_embeddings.get(memory.id),
+                    entity_match=memory.id in entity_match_ids,
+                ),
+            )
+            for memory in candidates
         ),
+        key=lambda item: item[1],
         reverse=True,
     )
-    memories = _select_ranked_memories(ranked, limit=limit)
+    memories = _select_ranked_memories(
+        scored,
+        limit=limit,
+        has_query=bool(terms or query_embedding is not None),
+    )
     if mark_recalled:
         for memory in memories:
             memory.last_recalled_at = now
@@ -479,12 +641,15 @@ async def update_memory(
     confidence: float | None = None,
     emotional_weight: float | None = None,
     pinned: bool | None = None,
+    retention_tier: str | None = None,
 ) -> MemoryItem:
+    before = _memory_snapshot(memory)
     if memory_type is not None:
         memory.memory_type = memory_type
     if content is not None:
         old_group = memory.contradiction_group
         memory.content = _validated_memory_content(content)
+        memory.sensitivity = classify_memory_sensitivity(memory.content)
         memory.embedding = text_embedding(memory.content)
         contradiction_group, polarity = _contradiction_key(memory.content)
         memory.contradiction_group = contradiction_group
@@ -502,7 +667,39 @@ async def update_memory(
         memory.emotional_weight = emotional_weight
     if pinned is not None:
         memory.pinned = pinned
+        if pinned:
+            memory.retention_tier = "core"
+        elif memory.retention_tier == "core" and memory.memory_type not in {
+            "boundary",
+            "relationship_milestone",
+        }:
+            memory.retention_tier = "normal"
+    if retention_tier is not None:
+        memory.retention_tier = _retention_tier(
+            memory.memory_type,
+            importance=memory.importance,
+            pinned=memory.pinned,
+            requested=retention_tier,
+        )
+    memory.lifecycle_state = "active" if memory.forgotten_at is None else memory.lifecycle_state
+    memory.last_evidence_at = utc_now()
     await session.flush()
+    await _record_memory_evidence(
+        session,
+        memory,
+        action="edited",
+        actor="user",
+        reason="edited_by_user",
+        source_message_id=None,
+        snapshot=before,
+    )
+    if content is not None:
+        await _link_memory_entities(
+            session,
+            memory,
+            _inferred_entities(memory.memory_type, memory.content, []),
+            replace=True,
+        )
     if content is not None:
         await _refresh_contradiction_group(
             session,
@@ -526,6 +723,7 @@ async def delete_memory(session: AsyncSession, memory: MemoryItem) -> None:
     contradiction_group = memory.contradiction_group
     await session.delete(memory)
     await session.flush()
+    await _delete_orphan_entities(session, user_id=user_id, character_id=character_id)
     await _refresh_contradiction_group(
         session,
         user_id=user_id,
@@ -543,8 +741,18 @@ async def forget_memory(
     if memory.forgotten_at is not None:
         return False
     contradiction_group = memory.contradiction_group
+    before = _memory_snapshot(memory)
     _forget_memory_state(memory, reason=reason)
     await session.flush()
+    await _record_memory_evidence(
+        session,
+        memory,
+        action="forgotten",
+        actor="user" if reason == "forgotten_by_user" else "system",
+        reason=reason,
+        source_message_id=None,
+        snapshot=before,
+    )
     await _refresh_contradiction_group(
         session,
         user_id=memory.user_id,
@@ -557,8 +765,22 @@ async def forget_memory(
 async def restore_memory(session: AsyncSession, memory: MemoryItem) -> bool:
     if memory.forgotten_at is None:
         return False
+    if memory.lifecycle_state == "superseded":
+        raise MemoryConflictResolutionError(
+            "A superseded memory stays in correction history and cannot be restored directly."
+        )
+    before = _memory_snapshot(memory)
     _restore_memory_state(memory, reason="restored_by_user")
     await session.flush()
+    await _record_memory_evidence(
+        session,
+        memory,
+        action="restored",
+        actor="user",
+        reason="restored_by_user",
+        source_message_id=None,
+        snapshot=before,
+    )
     await _refresh_contradiction_group(
         session,
         user_id=memory.user_id,
@@ -566,6 +788,35 @@ async def restore_memory(session: AsyncSession, memory: MemoryItem) -> bool:
         contradiction_group=memory.contradiction_group,
     )
     return True
+
+
+async def supersede_memory(
+    session: AsyncSession,
+    memory: MemoryItem,
+    *,
+    replacement: MemoryItem,
+    reason: str,
+    source_message_id: uuid.UUID | None,
+    actor: str = "system",
+) -> None:
+    before = _memory_snapshot(memory)
+    _forget_memory_state(memory, reason=reason)
+    memory.lifecycle_state = "superseded"
+    memory.superseded_by_id = replacement.id
+    memory.metadata_json = {
+        **(memory.metadata_json or {}),
+        "superseded_by_memory_id": str(replacement.id),
+    }
+    await session.flush()
+    await _record_memory_evidence(
+        session,
+        memory,
+        action="corrected",
+        actor=actor,
+        reason=reason,
+        source_message_id=source_message_id,
+        snapshot=before,
+    )
 
 
 async def remove_message_source_memories(
@@ -579,6 +830,7 @@ async def remove_message_source_memories(
         select(MemoryItem).where(
             MemoryItem.user_id == user_id,
             MemoryItem.character_id == character_id,
+            MemoryItem.lifecycle_state != "superseded",
             or_(
                 MemoryItem.source_message_id == message_id,
                 MemoryItem.metadata_json.contains({"source_message_ids": [str(message_id)]}),
@@ -612,6 +864,12 @@ async def remove_message_source_memories(
         memory.metadata_json = metadata
 
     await session.flush()
+    if removed:
+        await _delete_orphan_entities(
+            session,
+            user_id=user_id,
+            character_id=character_id,
+        )
     for contradiction_group in affected_groups:
         await _refresh_contradiction_group(
             session,
@@ -655,7 +913,14 @@ async def resolve_memory_conflict(
     removed_ids = [item.id for item in opposing]
     now = utc_now()
     for item in opposing:
-        await session.delete(item)
+        await supersede_memory(
+            session,
+            item,
+            replacement=memory,
+            reason="superseded_by_user_resolution",
+            source_message_id=None,
+            actor="user",
+        )
 
     metadata = _without_contradiction_metadata(memory.metadata_json or {})
     metadata["polarity"] = selected_polarity
@@ -667,7 +932,18 @@ async def resolve_memory_conflict(
     memory.importance = clamp(max(memory.importance, 0.65), 0.0, 1.0)
     memory.decay_score = clamp(memory.decay_score - 0.2, 0.0, 1.0)
     memory.pinned = True
+    memory.retention_tier = "core"
+    memory.reinforcement_count += 1
+    memory.last_reinforced_at = now
     await session.flush()
+    await _record_memory_evidence(
+        session,
+        memory,
+        action="resolved",
+        actor="user",
+        reason="kept_by_user",
+        source_message_id=None,
+    )
     await _refresh_contradiction_group(
         session,
         user_id=memory.user_id,
@@ -689,6 +965,46 @@ async def clear_memories(
         )
     )
     await session.flush()
+    await _delete_orphan_entities(session, user_id=user_id, character_id=character_id)
+    return int(result.rowcount or 0)
+
+
+async def clear_memory_category(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    *,
+    category: str,
+    scope: str = "general",
+) -> int:
+    memory_types = {
+        "boundaries": {"boundary"},
+        "people": {"person"},
+        "preferences": {"interest", "preference", "routine", "user_fact"},
+        "inside_jokes": {"inside_joke"},
+        "moments": {"date", "event", "place", "shared_lore", "shared_moment"},
+        "patterns": {
+            "interest",
+            "preference",
+            "relationship_milestone",
+            "routine",
+            "theme",
+            "user_fact",
+        },
+        "promises": {"boundary", "promise"},
+    }.get(category)
+    if not memory_types:
+        raise MemoryCaptureError("Unknown memory category.")
+    result = await session.execute(
+        delete(MemoryItem).where(
+            MemoryItem.user_id == user_id,
+            MemoryItem.character_id == character_id,
+            MemoryItem.scope == scope,
+            MemoryItem.memory_type.in_(memory_types),
+        )
+    )
+    await session.flush()
+    await _delete_orphan_entities(session, user_id=user_id, character_id=character_id)
     return int(result.rowcount or 0)
 
 
@@ -710,12 +1026,130 @@ async def forget_low_value_memories(
     )
     forgotten = 0
     for memory in result.scalars().all():
+        if _memory_is_decay_protected(memory):
+            memory.decay_score = min(memory.decay_score, 0.15)
+            continue
         _apply_decay(memory, now)
-        if memory.decay_score >= 1.0 or memory.confidence - memory.decay_score <= 0.1:
+        fade_threshold = 0.82 if memory.retention_tier == "transient" else 0.96
+        durable_value = (
+            memory.importance * 0.3
+            + memory.confidence * 0.25
+            + memory.future_relevance * 0.25
+            + min(memory.reinforcement_count, 5) / 5 * 0.2
+        )
+        if (
+            memory.confidence <= 0.1
+            or durable_value < 0.22
+            or (memory.decay_score >= fade_threshold and durable_value < 0.58)
+        ):
             if await forget_memory(session, memory, reason="faded_by_decay"):
                 forgotten += 1
     await session.flush()
     return forgotten
+
+
+async def maintain_memories(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> MemoryMaintenanceResult:
+    """Consolidate exact durable claims, then run tier-aware decay."""
+
+    result = await session.execute(
+        select(MemoryItem)
+        .where(
+            MemoryItem.user_id == user_id,
+            MemoryItem.character_id == character_id,
+            MemoryItem.forgotten_at.is_(None),
+            MemoryItem.lifecycle_state == "active",
+        )
+        .order_by(MemoryItem.created_at.asc(), MemoryItem.id.asc())
+    )
+    memories = list(result.scalars().all())
+    for memory in memories:
+        if not _metadata_string_list((memory.metadata_json or {}).get("entity_keys")):
+            await _link_memory_entities(
+                session,
+                memory,
+                _inferred_entities(memory.memory_type, memory.content, []),
+            )
+    groups: dict[tuple[str, str], list[MemoryItem]] = {}
+    for memory in memories:
+        identity = memory.claim_key or f"exact:{_normalized_content(memory.content)}"
+        groups.setdefault((memory.scope, identity), []).append(memory)
+
+    consolidated = 0
+    for group in groups.values():
+        if (
+            len(group) < 2
+            or len({item.contradiction_group for item in group if item.contradiction_group}) > 1
+        ):
+            continue
+        if any(
+            (item.metadata_json or {}).get("contradiction_status") == "conflicts" for item in group
+        ):
+            continue
+        keeper = max(
+            group,
+            key=lambda item: (
+                item.pinned,
+                item.retention_tier == "core",
+                item.reinforcement_count,
+                item.confidence,
+                item.updated_at,
+                str(item.id),
+            ),
+        )
+        for duplicate in group:
+            if duplicate.id == keeper.id:
+                continue
+            keeper.importance = max(keeper.importance, duplicate.importance)
+            keeper.confidence = clamp(max(keeper.confidence, duplicate.confidence) + 0.02, 0.0, 1.0)
+            keeper.future_relevance = max(keeper.future_relevance, duplicate.future_relevance)
+            keeper.novelty = clamp((keeper.novelty + duplicate.novelty) / 2, 0.0, 1.0)
+            keeper.reinforcement_count += max(duplicate.reinforcement_count, 1)
+            keeper.last_reinforced_at = max(
+                value
+                for value in (keeper.last_reinforced_at, duplicate.last_reinforced_at, utc_now())
+                if value is not None
+            )
+            keeper.last_evidence_at = max(
+                value
+                for value in (keeper.last_evidence_at, duplicate.last_evidence_at, utc_now())
+                if value is not None
+            )
+            keeper.retention_tier = _stronger_retention_tier(
+                keeper.retention_tier,
+                duplicate.retention_tier,
+            )
+            keeper.metadata_json = _merged_source_metadata(keeper, duplicate)
+            await _transfer_entity_links(session, source=duplicate, target=keeper)
+            await session.delete(duplicate)
+            consolidated += 1
+        if consolidated:
+            await session.flush()
+            await _record_memory_evidence(
+                session,
+                keeper,
+                action="merged",
+                actor="system",
+                reason="scheduled_consolidation",
+                source_message_id=None,
+            )
+
+    faded = await forget_low_value_memories(
+        session,
+        user_id,
+        character_id,
+        now=now,
+    )
+    return MemoryMaintenanceResult(
+        consolidated=consolidated,
+        faded=faded,
+        reviewed=len(memories),
+    )
 
 
 async def maybe_extract_memory(
@@ -739,6 +1173,10 @@ async def maybe_extract_memory(
         importance=decision.importance,
         confidence=decision.confidence,
         emotional_weight=decision.emotional_weight,
+        novelty=decision.novelty,
+        future_relevance=decision.future_relevance,
+        retention_tier=decision.retention_tier,
+        sensitivity=decision.sensitivity,
         source_message_id=message_id,
         extraction_metadata=decision.to_metadata(),
         scope=scope,
@@ -755,6 +1193,14 @@ def analyze_memory_candidate(
         return MemoryCandidateDecision(accepted=False, reason="too_short")
     if any(term in normalized for term in UNSAFE_MEMORY_TERMS):
         return MemoryCandidateDecision(accepted=False, reason="unsafe_term")
+    if any(marker in normalized for marker in MEMORY_OPT_OUT_MARKERS):
+        return MemoryCandidateDecision(accepted=False, reason="user_opted_out")
+    if classify_memory_sensitivity(content) == "sensitive":
+        return MemoryCandidateDecision(
+            accepted=False,
+            reason="sensitive_without_explicit_opt_in",
+            sensitivity="sensitive",
+        )
     if is_blocked_content(content):
         return MemoryCandidateDecision(accepted=False, reason="blocked_content")
     trigger = _memory_trigger(normalized)
@@ -774,6 +1220,18 @@ def analyze_memory_candidate(
             trigger=trigger,
         )
     importance, confidence, emotional_weight = _candidate_scores(memory_type, normalized)
+    novelty, future_relevance = _candidate_lifecycle_scores(memory_type, normalized)
+    retention_tier = _retention_tier(
+        memory_type,
+        importance=importance,
+        pinned=False,
+        requested=None,
+    )
+    retention_tier = retention_tier_for_preferences(
+        memory_type,
+        retention_tier,
+        memory_preferences or {},
+    )
     return MemoryCandidateDecision(
         accepted=True,
         reason="accepted",
@@ -782,6 +1240,9 @@ def analyze_memory_candidate(
         importance=importance,
         confidence=confidence,
         emotional_weight=emotional_weight,
+        novelty=novelty,
+        future_relevance=future_relevance,
+        retention_tier=retention_tier,
         trigger=trigger,
     )
 
@@ -815,6 +1276,21 @@ def memory_type_allowed_by_preferences(
     ):
         return False
     return True
+
+
+def retention_tier_for_preferences(
+    memory_type: str,
+    proposed: str,
+    memory_preferences: dict[str, object],
+) -> str:
+    mode = memory_preferences.get("retention_mode", "balanced")
+    if mode == "minimal":
+        if memory_type in {"boundary", "relationship_milestone"}:
+            return "core"
+        return "transient" if memory_type in {"event", "theme", "shared_moment"} else "normal"
+    if mode == "long_lived" and proposed == "transient":
+        return "normal"
+    return proposed if proposed in {"transient", "normal", "core"} else "normal"
 
 
 def memories_prompt_section(memories: list[MemoryItem]) -> str:
@@ -904,6 +1380,27 @@ def _candidate_scores(memory_type: str, normalized_content: str) -> tuple[float,
     return 0.45, 0.72, 0.0
 
 
+def _candidate_lifecycle_scores(memory_type: str, normalized_content: str) -> tuple[float, float]:
+    novelty = 0.65
+    future_relevance = {
+        "boundary": 0.95,
+        "date": 0.78,
+        "inside_joke": 0.68,
+        "person": 0.76,
+        "place": 0.66,
+        "preference": 0.72,
+        "promise": 0.92,
+        "routine": 0.86,
+        "theme": 0.76,
+        "user_fact": 0.8,
+    }.get(memory_type, 0.55)
+    if any(
+        term in normalized_content for term in ("always", "every ", "next time", "please remember")
+    ):
+        future_relevance = max(future_relevance, 0.84)
+    return novelty, future_relevance
+
+
 def _query_terms(query: str) -> set[str]:
     return {
         term
@@ -920,6 +1417,7 @@ def _memory_score(
     *,
     query_embedding: list[float] | None,
     memory_embedding: list[float] | None,
+    entity_match: bool,
 ) -> float:
     content_terms = _query_terms(memory.content)
     keyword_score = 0.0
@@ -928,6 +1426,14 @@ def _memory_score(
     vector_score = max(cosine_similarity(query_embedding, memory_embedding), 0.0)
     age_days = max((now - memory.created_at).total_seconds() / 86400, 0)
     recency_score = 1 / (1 + age_days / 14)
+    reinforcement_score = min(memory.reinforcement_count, 6) / 6
+    query_emotion = _query_emotional_weight(query)
+    emotional_compatibility = 0.0
+    if query_emotion and memory.emotional_weight:
+        emotional_compatibility = max(
+            0.0,
+            1.0 - abs(query_emotion - memory.emotional_weight),
+        )
     relationship_relevance = {
         "boundary": 0.18,
         "inside_joke": 0.16,
@@ -952,24 +1458,32 @@ def _memory_score(
         + vector_score * 0.4
         + memory.importance * 0.2
         + memory.confidence * 0.18
-        + abs(memory.emotional_weight) * 0.08
-        + recency_score * 0.1
+        + abs(memory.emotional_weight) * 0.04
+        + emotional_compatibility * 0.1
+        + memory.future_relevance * 0.12
+        + reinforcement_score * 0.08
+        + recency_score * (0.04 if memory.retention_tier == "core" else 0.08)
         + relationship_relevance
+        + (0.24 if entity_match else 0)
         + (0.2 if memory.pinned else 0)
+        + (0.08 if memory.retention_tier == "core" else 0)
         - memory.decay_score * 0.25
         - contradiction_penalty
     )
 
 
 def _select_ranked_memories(
-    ranked: list[MemoryItem],
+    ranked: list[tuple[MemoryItem, float]],
     *,
     limit: int,
+    has_query: bool,
 ) -> list[MemoryItem]:
     selected: list[MemoryItem] = []
     seen_content: set[str] = set()
     contradiction_counts: dict[str, int] = {}
-    for memory in ranked:
+    for memory, score in ranked:
+        if has_query and score < 0.42 and not memory.pinned:
+            continue
         key = _normalized_content(memory.content)
         if not key or key in seen_content:
             continue
@@ -997,6 +1511,7 @@ async def _find_memory_by_source_message(
         .where(
             MemoryItem.user_id == user_id,
             MemoryItem.character_id == character_id,
+            MemoryItem.lifecycle_state != "superseded",
             or_(
                 MemoryItem.source_message_id == message_id,
                 MemoryItem.metadata_json.contains({"source_message_ids": [str(message_id)]}),
@@ -1039,6 +1554,12 @@ def _mark_memory_user_saved(
         memory.emotional_weight = decision.emotional_weight
     memory.decay_score = 0.0
     memory.pinned = True
+    memory.retention_tier = "core"
+    memory.sensitivity = decision.sensitivity
+    memory.future_relevance = max(memory.future_relevance, decision.future_relevance)
+    memory.reinforcement_count += 1
+    memory.last_reinforced_at = utc_now()
+    memory.last_evidence_at = utc_now()
 
 
 def _source_message_ids(
@@ -1093,6 +1614,7 @@ async def _find_merge_candidate(
         MemoryItem.character_id == character_id,
         MemoryItem.scope == scope,
         MemoryItem.memory_type == memory_type,
+        MemoryItem.lifecycle_state != "superseded",
     )
     if claim_key is not None:
         statement = statement.where(MemoryItem.claim_key == claim_key)
@@ -1141,6 +1663,7 @@ async def _refresh_contradiction_group(
             MemoryItem.character_id == character_id,
             MemoryItem.contradiction_group == contradiction_group,
             MemoryItem.forgotten_at.is_(None),
+            MemoryItem.lifecycle_state == "active",
         )
         .order_by(MemoryItem.created_at.asc(), MemoryItem.id.asc())
     )
@@ -1203,6 +1726,7 @@ def _forget_memory_state(memory: MemoryItem, *, reason: str) -> None:
     metadata["last_forget_reason"] = reason[:80]
     memory.metadata_json = metadata
     memory.forgotten_at = now
+    memory.lifecycle_state = "forgotten"
 
 
 def _restore_memory_state(memory: MemoryItem, *, reason: str) -> None:
@@ -1212,6 +1736,8 @@ def _restore_memory_state(memory: MemoryItem, *, reason: str) -> None:
     metadata["last_restore_reason"] = reason[:80]
     memory.metadata_json = metadata
     memory.forgotten_at = None
+    memory.lifecycle_state = "active"
+    memory.superseded_by_id = None
     memory.decay_score = 0.0 if reason != "restored_by_user" else min(memory.decay_score, 0.6)
 
 
@@ -1281,14 +1807,414 @@ def _normalized_content(content: str) -> str:
 
 
 def _apply_decay(memory: MemoryItem, now: datetime) -> None:
-    if memory.pinned:
+    if _memory_is_decay_protected(memory):
         memory.decay_score = 0.0
         return
-    last_anchor = memory.last_recalled_at or memory.updated_at or memory.created_at
-    age_days = max((now - last_anchor).total_seconds() / 86400, 0)
-    decay_delta = age_days * 0.015
-    protection = (memory.importance * 0.006) + (memory.confidence * 0.004)
-    memory.decay_score = clamp(memory.decay_score + decay_delta - protection, 0.0, 1.0)
+    last_anchor = max(
+        value
+        for value in (
+            memory.last_recalled_at,
+            memory.last_reinforced_at,
+            memory.last_evidence_at,
+            memory.updated_at,
+            memory.created_at,
+        )
+        if value is not None
+    )
+    metadata = dict(memory.metadata_json or {})
+    last_review = _metadata_datetime(metadata.get("last_decay_review_at"))
+    total_age_days = max((now - last_anchor).total_seconds() / 86400, 0)
+    previous_age_days = (
+        max((last_review - last_anchor).total_seconds() / 86400, 0)
+        if last_review is not None
+        else 0.0
+    )
+    decay_days = max(total_age_days - 7, 0) - max(previous_age_days - 7, 0)
+    tier_rate = {"transient": 0.022, "normal": 0.009, "core": 0.002}.get(
+        memory.retention_tier,
+        0.009,
+    )
+    protection = min(
+        memory.importance * 0.25
+        + memory.confidence * 0.2
+        + memory.future_relevance * 0.2
+        + min(memory.reinforcement_count, 5) * 0.05
+        + abs(memory.emotional_weight) * 0.05,
+        0.8,
+    )
+    decay_delta = max(decay_days, 0) * tier_rate * (1 - protection)
+    memory.decay_score = clamp(memory.decay_score + decay_delta, 0.0, 1.0)
+    metadata["last_decay_review_at"] = now.isoformat()
+    memory.metadata_json = metadata
+
+
+def _metadata_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def classify_memory_sensitivity(content: str) -> str:
+    return (
+        "sensitive"
+        if any(pattern.search(content) for pattern in SENSITIVE_MEMORY_PATTERNS)
+        else "standard"
+    )
+
+
+def _sensitive_memory_query_matches(content: str, query: str) -> bool:
+    """Require an explicit sensitive category or exact value before recall."""
+
+    content_categories = _sensitive_memory_categories(content)
+    query_categories = _sensitive_memory_categories(query, include_query_markers=True)
+    if content_categories & query_categories:
+        return True
+
+    normalized_query = query.casefold()
+    return any(
+        match.group(0).casefold() in normalized_query
+        for pattern in SENSITIVE_MEMORY_PATTERNS[:2]
+        for match in pattern.finditer(content)
+    )
+
+
+def _sensitive_memory_categories(
+    value: str,
+    *,
+    include_query_markers: bool = False,
+) -> set[str]:
+    categories: set[str] = set()
+    if not include_query_markers:
+        if SENSITIVE_MEMORY_PATTERNS[0].search(value):
+            categories.add("email")
+        if SENSITIVE_MEMORY_PATTERNS[1].search(value):
+            categories.add("phone")
+        if SENSITIVE_MEMORY_PATTERNS[2].search(value):
+            categories.add("financial")
+        if SENSITIVE_MEMORY_PATTERNS[3].search(value):
+            categories.add("address")
+        return categories
+
+    normalized = value.casefold()
+    if re.search(r"\bmy (?:email|e-mail) address\b", normalized):
+        categories.add("email")
+    if re.search(r"\bmy (?:phone|telephone|mobile) number\b", normalized):
+        categories.add("phone")
+    if re.search(
+        r"\bmy (?:bank account|routing number|credit card|financial details?)\b",
+        normalized,
+    ):
+        categories.add("financial")
+    if re.search(r"\b(?:my (?:home )?address|where do i live|where i live)\b", normalized):
+        categories.add("address")
+    return categories
+
+
+def user_opted_out_of_memory(content: str) -> bool:
+    normalized = content.casefold()
+    return any(marker in normalized for marker in MEMORY_OPT_OUT_MARKERS)
+
+
+def _retention_tier(
+    memory_type: str,
+    *,
+    importance: float,
+    pinned: bool,
+    requested: str | None,
+) -> str:
+    if requested not in {None, "transient", "normal", "core"}:
+        raise MemoryCaptureError("Memory retention must be transient, normal, or core.")
+    if pinned or memory_type in {"boundary", "relationship_milestone"}:
+        return "core"
+    if requested is not None:
+        return requested
+    if memory_type in {"promise", "routine"} or importance >= 0.8:
+        return "core"
+    if memory_type in {"event", "theme"} and importance < 0.45:
+        return "transient"
+    return "normal"
+
+
+def _stronger_retention_tier(left: str, right: str) -> str:
+    order = {"transient": 0, "normal": 1, "core": 2}
+    return max((left, right), key=lambda value: order.get(value, 1))
+
+
+def _memory_is_decay_protected(memory: MemoryItem) -> bool:
+    return bool(
+        memory.pinned
+        or memory.retention_tier == "core"
+        or memory.memory_type in {"boundary", "relationship_milestone"}
+        or (memory.reinforcement_count >= 3 and memory.confidence >= 0.82)
+    )
+
+
+def _query_emotional_weight(query: str) -> float:
+    normalized = query.casefold()
+    positive = ("happy", "glad", "excited", "proud", "relieved", "love")
+    negative = ("sad", "hurt", "angry", "afraid", "anxious", "upset", "grief")
+    if any(marker in normalized for marker in positive):
+        return 0.65
+    if any(marker in normalized for marker in negative):
+        return -0.65
+    return 0.0
+
+
+def _bounded_emotional_context(value: dict[str, object]) -> dict[str, object]:
+    context: dict[str, object] = {}
+    for key in ("feeling", "meaning", "helped", "hurt", "resolution"):
+        item = value.get(key)
+        if isinstance(item, str) and item.strip():
+            context[key] = " ".join(item.split())[:240]
+    resolved = value.get("resolved")
+    if isinstance(resolved, bool):
+        context["resolved"] = resolved
+    return context
+
+
+def _merge_emotional_context(
+    existing: object,
+    incoming: dict[str, object],
+) -> dict[str, object]:
+    current = _bounded_emotional_context(existing if isinstance(existing, dict) else {})
+    return {**current, **incoming}
+
+
+def _memory_snapshot(memory: MemoryItem) -> dict[str, object]:
+    return {
+        "content": memory.content,
+        "memory_type": memory.memory_type,
+        "importance": round(memory.importance, 4),
+        "confidence": round(memory.confidence, 4),
+        "emotional_weight": round(memory.emotional_weight, 4),
+        "retention_tier": memory.retention_tier,
+        "lifecycle_state": memory.lifecycle_state,
+        "reinforcement_count": memory.reinforcement_count,
+        "pinned": memory.pinned,
+    }
+
+
+async def _record_memory_evidence(
+    session: AsyncSession,
+    memory: MemoryItem,
+    *,
+    action: str,
+    actor: str,
+    reason: str,
+    source_message_id: uuid.UUID | None,
+    snapshot: dict[str, object] | None = None,
+) -> None:
+    session.add(
+        MemoryEvidence(
+            memory_id=memory.id,
+            source_message_id=source_message_id,
+            action=action,
+            actor=actor if actor in {"system", "user"} else "system",
+            reason=" ".join(reason.split())[:120] or "unspecified",
+            snapshot_json=snapshot or _memory_snapshot(memory),
+        )
+    )
+    await session.flush()
+
+
+def _inferred_entities(
+    memory_type: str,
+    content: str,
+    facets: list[str],
+) -> list[tuple[str, str]]:
+    entity_type = {
+        "date": "date",
+        "person": "person",
+        "place": "place",
+        "routine": "routine",
+    }.get(memory_type)
+    values: list[tuple[str, str]] = []
+    if entity_type:
+        values.append((entity_type, _entity_name_for_memory(memory_type, content)))
+    for facet in facets[:4]:
+        values.append(("topic", facet))
+    return values
+
+
+def _entity_name_for_memory(memory_type: str, content: str) -> str:
+    if memory_type == "person":
+        match = re.search(
+            r"\bmy\s+(?:friend|partner|sister|brother|parent)\s+([\w'-]{2,})",
+            content,
+            re.I,
+        )
+        if match:
+            return match.group(1)
+    if memory_type == "place":
+        match = re.search(r"\b(?:live in|from|place is)\s+([^,.;!?]{2,80})", content, re.I)
+        if match:
+            return match.group(1).strip()
+    if memory_type == "date":
+        match = re.search(
+            r"\b(?:\d{4}-\d{2}-\d{2}|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:,\s*\d{4})?)\b",
+            content,
+            re.I,
+        )
+        if match:
+            return match.group(0)
+    return content
+
+
+async def _link_memory_entities(
+    session: AsyncSession,
+    memory: MemoryItem,
+    entities: list[tuple[str, str]],
+    *,
+    replace: bool = False,
+) -> None:
+    if replace:
+        await session.execute(
+            delete(MemoryEntityLink).where(MemoryEntityLink.memory_id == memory.id)
+        )
+    now = utc_now()
+    seen: set[tuple[str, str]] = set()
+    entity_keys: list[str] = []
+    for raw_type, raw_name in entities[:8]:
+        entity_type = (
+            raw_type
+            if raw_type in {"date", "person", "place", "project", "routine", "topic"}
+            else "topic"
+        )
+        name = " ".join(str(raw_name).split())[:160]
+        normalized_name = _normalized_content(name)[:160]
+        identity = (entity_type, normalized_name)
+        if len(normalized_name) < 2 or identity in seen:
+            continue
+        seen.add(identity)
+        result = await session.execute(
+            select(MemoryEntity).where(
+                MemoryEntity.user_id == memory.user_id,
+                MemoryEntity.character_id == memory.character_id,
+                MemoryEntity.entity_type == entity_type,
+                MemoryEntity.normalized_name == normalized_name,
+            )
+        )
+        entity = result.scalar_one_or_none()
+        if entity is None:
+            entity = MemoryEntity(
+                user_id=memory.user_id,
+                character_id=memory.character_id,
+                entity_type=entity_type,
+                name=name,
+                normalized_name=normalized_name,
+                first_seen_at=now,
+                last_seen_at=now,
+                mention_count=1,
+            )
+            session.add(entity)
+            await session.flush()
+        else:
+            entity.last_seen_at = now
+            entity.mention_count += 1
+        link = await session.get(
+            MemoryEntityLink,
+            {"memory_id": memory.id, "entity_id": entity.id},
+        )
+        if link is None:
+            session.add(
+                MemoryEntityLink(
+                    memory_id=memory.id,
+                    entity_id=entity.id,
+                    relation="about",
+                )
+            )
+        entity_keys.append(f"{entity_type}:{normalized_name}")
+    if entity_keys:
+        memory.metadata_json = {
+            **(memory.metadata_json or {}),
+            "entity_keys": entity_keys,
+        }
+    elif replace:
+        metadata = dict(memory.metadata_json or {})
+        metadata.pop("entity_keys", None)
+        memory.metadata_json = metadata
+    await session.flush()
+
+
+async def _entity_matching_memory_ids(
+    session: AsyncSession,
+    *,
+    candidates: list[MemoryItem],
+    query: str,
+) -> set[uuid.UUID]:
+    if not candidates or not query.strip():
+        return set()
+    normalized_query = _normalized_content(query)
+    rows = await session.execute(
+        select(MemoryEntityLink.memory_id, MemoryEntity.normalized_name)
+        .join(MemoryEntity, MemoryEntity.id == MemoryEntityLink.entity_id)
+        .where(MemoryEntityLink.memory_id.in_([memory.id for memory in candidates]))
+    )
+    return {
+        memory_id
+        for memory_id, normalized_name in rows.all()
+        if len(normalized_name) >= 2 and normalized_name in normalized_query
+    }
+
+
+async def _transfer_entity_links(
+    session: AsyncSession,
+    *,
+    source: MemoryItem,
+    target: MemoryItem,
+) -> None:
+    rows = await session.execute(
+        select(MemoryEntityLink).where(MemoryEntityLink.memory_id == source.id)
+    )
+    for link in rows.scalars().all():
+        existing = await session.get(
+            MemoryEntityLink,
+            {"memory_id": target.id, "entity_id": link.entity_id},
+        )
+        if existing is None:
+            session.add(
+                MemoryEntityLink(
+                    memory_id=target.id,
+                    entity_id=link.entity_id,
+                    relation=link.relation,
+                )
+            )
+
+
+async def _delete_orphan_entities(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+) -> None:
+    await session.execute(
+        delete(MemoryEntity).where(
+            MemoryEntity.user_id == user_id,
+            MemoryEntity.character_id == character_id,
+            MemoryEntity.id.not_in(select(MemoryEntityLink.entity_id)),
+        )
+    )
+    await session.flush()
+
+
+def _merged_source_metadata(keeper: MemoryItem, duplicate: MemoryItem) -> dict[str, object]:
+    metadata = dict(keeper.metadata_json or {})
+    source_ids = _source_message_ids(
+        metadata, keeper.source_message_id, duplicate.source_message_id
+    )
+    for source_id in _metadata_string_list(
+        (duplicate.metadata_json or {}).get("source_message_ids")
+    ):
+        if source_id not in source_ids:
+            source_ids.append(source_id)
+    if source_ids:
+        metadata["source_message_ids"] = source_ids[:24]
+    metadata["consolidated_at"] = utc_now().isoformat()
+    return metadata
 
 
 def _bounded_facets(values: list[str]) -> list[str]:

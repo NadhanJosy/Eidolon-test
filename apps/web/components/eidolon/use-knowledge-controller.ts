@@ -17,6 +17,7 @@ import type {
   ContinuityThread,
   Conversation,
   Journal,
+  MemoryCategory,
   MemoryItem,
   MemoryResolveResult,
   Message
@@ -38,6 +39,7 @@ type MemoryActionKind =
   | "restore"
   | "resolve"
   | "remember"
+  | "clear-category"
   | "clear"
   | "clear-adult"
   | "forget-stale";
@@ -1028,6 +1030,71 @@ export function useKnowledgeController({
     }
   }
 
+  async function clearMemoryCategory(category: MemoryCategory): Promise<boolean> {
+    if (!token || !activeCharacterId || !activeConversation || memoryActionInFlight.current) {
+      return false;
+    }
+    const authToken = token;
+    const requestCharacterId = activeCharacterId;
+    const requestConversationId = activeConversation.id;
+    const action: MemoryAction = {
+      kind: "clear-category",
+      key: `clear-${category}`,
+      characterId: requestCharacterId,
+      conversationId: requestConversationId,
+      targetId: null
+    };
+    if (!beginMemoryAction(action)) {
+      return false;
+    }
+    let persisted = false;
+    setError(null);
+    setNotice(null);
+    try {
+      const value = await apiJson<unknown>(
+        `/characters/${requestCharacterId}/memories/category/${category}`,
+        { method: "DELETE", token: authToken }
+      );
+      persisted = true;
+      if (memoryActionStillApplies(action)) {
+        setMemories((current) =>
+          current.filter((memory) => memoryArchiveCategory(memory) !== category)
+        );
+        setForgottenMemories((current) =>
+          current.filter((memory) => memoryArchiveCategory(memory) !== category)
+        );
+      }
+      if (memoryActionConversationStillApplies(action)) {
+        await refreshSideState(
+          authToken,
+          requestCharacterId,
+          requestConversationId,
+          () => memoryActionConversationStillApplies(action)
+        );
+      }
+      if (memoryActionStillApplies(action)) {
+        const count = isDeleteCountResponse(value) ? value.deleted : 0;
+        setNotice(
+          count > 0
+            ? `${count} ${count === 1 ? "memory" : "memories"} removed from that category.`
+            : "That category was already empty."
+        );
+      }
+      return true;
+    } catch (caught) {
+      if (memoryActionStillApplies(action)) {
+        setError(
+          persisted
+            ? "The category was cleared, but recall could not refresh. Reload Eidolon before continuing."
+            : readError(caught)
+        );
+      }
+      return persisted;
+    } finally {
+      finishMemoryAction(action);
+    }
+  }
+
   async function clearAdultContinuity(): Promise<boolean> {
     if (
       !token ||
@@ -1674,6 +1741,7 @@ export function useKnowledgeController({
       resolveMemoryConflict,
       rememberMessage,
       clearMemories,
+      clearMemoryCategory,
       clearAdultContinuity,
       forgetMemories,
       addJournal,
@@ -1792,6 +1860,16 @@ function memoryReferencesMessage(memory: MemoryItem, messageId: string): boolean
   }
   const sourceIds = memory.metadata_json.source_message_ids;
   return Array.isArray(sourceIds) && sourceIds.includes(messageId);
+}
+
+function memoryArchiveCategory(memory: MemoryItem): MemoryCategory {
+  if (memory.memory_type === "person") return "people";
+  if (memory.memory_type === "inside_joke") return "inside_jokes";
+  if (["event", "shared_moment", "date", "place", "shared_lore"].includes(memory.memory_type)) {
+    return "moments";
+  }
+  if (["boundary", "promise"].includes(memory.memory_type)) return "promises";
+  return "patterns";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
