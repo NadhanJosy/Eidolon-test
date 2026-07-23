@@ -89,26 +89,34 @@ export function relationshipPhase(relationship: Relationship): string {
   if (relationship.repair_needed || relationship.conflict_state === "strained") {
     return "repair arc";
   }
-  if (relationship.intimacy >= 20 || relationship.attachment >= 20) {
+  if (
+    relationship.shared_history_depth >= 6 &&
+    relationship.familiarity >= 5 &&
+    relationship.trust >= 3
+  ) {
     return "close bond";
   }
-  if (relationship.trust >= 10 && relationship.warmth >= 8) {
+  if (
+    relationship.trust >= 1.5 &&
+    relationship.reliability >= 52 &&
+    relationship.emotional_safety >= 50
+  ) {
     return "trusted warmth";
   }
-  if (relationship.familiarity >= 8 || relationship.warmth >= 4) {
+  if (relationship.familiarity >= 1 || relationship.shared_history_depth >= 1.5) {
     return "warming up";
   }
   return "new connection";
 }
 
 export function relationshipTemperature(relationship: Relationship): string {
-  if (relationship.tension >= 15) {
+  if (relationship.boundary_alignment < 98 || relationship.tension >= 8) {
     return "tense";
   }
-  if (relationship.tension >= 5) {
+  if (relationship.tension >= 1 || relationship.emotional_safety < 48) {
     return "careful";
   }
-  if (relationship.warmth >= 12) {
+  if (relationship.warmth >= 3 && relationship.emotional_safety >= 50) {
     return "warm";
   }
   if (relationship.warmth <= -6) {
@@ -118,13 +126,13 @@ export function relationshipTemperature(relationship: Relationship): string {
 }
 
 export function relationshipMomentum(relationship: Relationship): string {
-  if (relationship.familiarity >= 20) {
+  if (relationship.shared_history_depth >= 6 && relationship.familiarity >= 5) {
     return "well-established";
   }
-  if (relationship.familiarity >= 8) {
+  if (relationship.shared_history_depth >= 2 || relationship.familiarity >= 2) {
     return "building rhythm";
   }
-  if (relationship.attachment >= 5) {
+  if (relationship.trust >= 0.5 || relationship.reciprocity >= 1) {
     return "starting to stick";
   }
   return "early days";

@@ -479,6 +479,12 @@ class RelationshipState(TimestampMixin, Base):
     tension: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     familiarity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     attachment: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    emotional_safety: Mapped[float] = mapped_column(Float, default=50.0, nullable=False)
+    reliability: Mapped[float] = mapped_column(Float, default=50.0, nullable=False)
+    reciprocity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    repair_progress: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    boundary_alignment: Mapped[float] = mapped_column(Float, default=100.0, nullable=False)
+    shared_history_depth: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     mood: Mapped[str] = mapped_column(String(80), default="steady", nullable=False)
     conflict_state: Mapped[str] = mapped_column(String(80), default="clear", nullable=False)
     repair_needed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -491,6 +497,87 @@ class RelationshipState(TimestampMixin, Base):
     last_interaction_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+
+class RelationshipEvent(TimestampMixin, Base):
+    """Owner-visible relationship evidence with an exact reversible state effect."""
+
+    __tablename__ = "relationship_events"
+    __table_args__ = (
+        CheckConstraint(
+            "scope IN ('general', 'adult')",
+            name="ck_relationship_events_scope",
+        ),
+        CheckConstraint(
+            "event_type IN ("
+            "'support', 'vulnerability', 'promise', 'consistency', 'promise_broken', "
+            "'conflict', 'apology', 'boundary_set', 'boundary_violation', "
+            "'boundary_revoked', 'repair', 'humor', 'ritual', 'milestone', "
+            "'absence', 'return', 'reset')",
+            name="ck_relationship_events_type",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_relationship_events_confidence",
+        ),
+        CheckConstraint(
+            "significance >= 0 AND significance <= 1",
+            name="ck_relationship_events_significance",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "character_id",
+            "event_key",
+            name="uq_relationship_events_owner_character_key",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    memory_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("memory_items.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    journal_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("episodic_journals.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    scope: Mapped[str] = mapped_column(String(16), default="general", index=True, nullable=False)
+    event_key: Mapped[str] = mapped_column(String(96), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    summary: Mapped[str] = mapped_column(String(500), nullable=False)
+    evidence_quote: Mapped[str | None] = mapped_column(String(600), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    significance: Mapped[float] = mapped_column(Float, nullable=False)
+    dimension_deltas_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+    affects_current_state: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        index=True,
+        nullable=False,
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 

@@ -612,6 +612,12 @@ class RelationshipOut(BaseModel):
     tension: float
     familiarity: float
     attachment: float
+    emotional_safety: float
+    reliability: float
+    reciprocity: float
+    repair_progress: float
+    boundary_alignment: float
+    shared_history_depth: float
     mood: str
     conflict_state: str
     repair_needed: bool
@@ -622,6 +628,99 @@ class RelationshipOut(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+RelationshipEventType = Literal[
+    "support",
+    "vulnerability",
+    "promise",
+    "consistency",
+    "promise_broken",
+    "conflict",
+    "apology",
+    "boundary_set",
+    "boundary_violation",
+    "boundary_revoked",
+    "repair",
+    "humor",
+    "ritual",
+    "milestone",
+    "absence",
+    "return",
+    "reset",
+]
+
+
+class RelationshipEventOut(BaseModel):
+    id: uuid.UUID
+    character_id: uuid.UUID
+    source_message_id: uuid.UUID | None
+    linked_moment_id: uuid.UUID | None
+    scope: Literal["general", "adult"]
+    event_type: RelationshipEventType
+    summary: str
+    evidence_excerpt: str | None
+    significance: Literal["subtle", "meaningful", "important"]
+    is_boundary_active: bool
+    corrected: bool
+    occurred_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class RelationshipEventUpdate(BaseModel):
+    summary: str | None = Field(default=None, min_length=1, max_length=500)
+    event_type: RelationshipEventType | None = None
+
+    @field_validator("summary")
+    @classmethod
+    def normalize_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("A relationship interpretation needs visible text.")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_update(self) -> RelationshipEventUpdate:
+        if not self.model_fields_set:
+            raise ValueError("At least one relationship event field must be provided.")
+        for field_name in self.model_fields_set:
+            if getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null.")
+        return self
+
+
+class RelationshipResetRequest(BaseModel):
+    mode: Literal["dimensions", "restart"]
+    dimensions: (
+        list[
+            Literal[
+                "trust",
+                "intimacy",
+                "warmth",
+                "tension",
+                "familiarity",
+                "attachment",
+                "emotional_safety",
+                "reliability",
+                "reciprocity",
+                "repair_progress",
+                "boundary_alignment",
+                "shared_history_depth",
+            ]
+        ]
+        | None
+    ) = Field(default=None, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_dimensions(self) -> RelationshipResetRequest:
+        if self.mode == "restart" and self.dimensions is not None:
+            raise ValueError("A relationship restart does not accept individual dimensions.")
+        if self.dimensions is not None and not self.dimensions:
+            raise ValueError("Choose at least one relationship dimension to reset.")
+        return self
 
 
 class ScheduledJobOut(BaseModel):
@@ -732,4 +831,5 @@ class ExportOut(BaseModel):
     episodic_journals: list[dict[str, Any]]
     continuity_threads: list[dict[str, Any]]
     relationship_states: list[dict[str, Any]]
+    relationship_events: list[dict[str, Any]]
     scheduled_jobs: list[dict[str, Any]]

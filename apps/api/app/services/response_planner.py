@@ -22,6 +22,7 @@ from app.models import (
     ScheduledJob,
 )
 from app.services.journal import journal_continuity_notes, journal_continuity_signals
+from app.services.relationship import RelationshipPlanContext
 
 PROACTIVE_LABELS = {
     "proactive_inactivity_check": "quiet check-in",
@@ -87,6 +88,7 @@ def build_response_plan(
     pending_proactive_events: Sequence[str],
     scenario_mode: str = "default",
     scenario_text: str | None = None,
+    relationship_context: RelationshipPlanContext | None = None,
 ) -> str:
     structured = build_structured_response_plan(
         character=character,
@@ -98,6 +100,7 @@ def build_response_plan(
         current_message=current_message,
         content_mode=content_mode,
         safety_status=safety_status,
+        relationship_context=relationship_context,
     )
     continuity = _continuity(recent_messages, pending_proactive_events)
     memory_focus = _memory_focus(memories)
@@ -106,10 +109,11 @@ def build_response_plan(
     scene = _scene_focus(scenario_mode, scenario_text)
     summary = structured.private_summary()
     return _compact(
-        f"{summary}; Continuity: {continuity}; Memory focus: {memory_focus}; "
+        f"Continuity: {continuity}; Relationship-aware plan: {summary}; "
+        f"Memory focus: {memory_focus}; "
         f"Episode focus: {episode_focus}; Living thread: {thread_focus}; "
         f"Scene: {scene}; Timing: {time_context}",
-        1200,
+        1800,
     )
 
 
@@ -127,6 +131,7 @@ def build_structured_response_plan(
     soul: CharacterSoul | None = None,
     perception: TurnPerception | None = None,
     emotion: EmotionalState | None = None,
+    relationship_context: RelationshipPlanContext | None = None,
 ) -> ResponsePlan:
     selected_soul = soul or character_soul(character)
     selected_perception = perception or infer_turn_perception(
@@ -147,6 +152,7 @@ def build_structured_response_plan(
         recent_messages=recent_messages,
         content_mode=content_mode,
         safety_status=safety_status,
+        relationship_context=relationship_context,
     )
     return replace(plan, continuity=_compact(plan.continuity, 260))
 

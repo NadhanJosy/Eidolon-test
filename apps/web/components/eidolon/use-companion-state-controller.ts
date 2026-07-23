@@ -9,7 +9,8 @@ import {
   completeRelationship,
   isCompleteContinuityThreadList,
   isCompleteJournalList,
-  isCompleteMemoryList
+  isCompleteMemoryList,
+  isCompleteRelationshipEventList
 } from "./companion-state-contract";
 import { emptyRelationship } from "./controller-utils";
 import type {
@@ -18,7 +19,9 @@ import type {
   ContinuityThread,
   Journal,
   MemoryItem,
-  Relationship
+  Relationship,
+  RelationshipEvidenceEvent,
+  RelationshipMetric
 } from "./types";
 
 type UseCompanionStateControllerArgs = {
@@ -38,6 +41,8 @@ export function useCompanionStateController({
   const stateCharacterIdRef = useRef<string | null>(null);
   const adultStatusCharacterIdRef = useRef<string | null>(null);
   const [relationship, setRelationship] = useState<Relationship>(emptyRelationship);
+  const [relationshipEvents, setRelationshipEvents] = useState<RelationshipEvidenceEvent[]>([]);
+  const [relationshipActionId, setRelationshipActionId] = useState<string | null>(null);
   const [adultStatus, setAdultStatus] = useState<AdultStatus | null>(null);
   const [adultStatusCharacterId, setAdultStatusCharacterId] = useState<string | null>(null);
   const [adultReadinessState, setAdultReadinessState] =
@@ -58,6 +63,7 @@ export function useCompanionStateController({
       setJournals([]);
       setContinuityThreads([]);
       setRelationship(emptyRelationship);
+      setRelationshipEvents([]);
     }
     if (adultStatusCharacterIdRef.current !== characterId) {
       adultStatusCharacterIdRef.current = null;
@@ -70,16 +76,20 @@ export function useCompanionStateController({
       relationshipResult,
       journalsResult,
       threadsResult,
-      adultResult
+      adultResult,
+      relationshipEventsResult
     ] = await Promise.allSettled([
-        apiJson<unknown>(`/characters/${characterId}/memories`, { token: authToken }),
-        apiJson<unknown>(`/characters/${characterId}/relationship`, { token: authToken }),
-        apiJson<unknown>(`/characters/${characterId}/journals`, { token: authToken }),
-        apiJson<unknown>(`/characters/${characterId}/threads?status=all`, {
-          token: authToken
-        }),
-        apiJson<unknown>(`/characters/${characterId}/adult-status`, { token: authToken })
-      ]);
+      apiJson<unknown>(`/characters/${characterId}/memories`, { token: authToken }),
+      apiJson<unknown>(`/characters/${characterId}/relationship`, { token: authToken }),
+      apiJson<unknown>(`/characters/${characterId}/journals`, { token: authToken }),
+      apiJson<unknown>(`/characters/${characterId}/threads?status=all`, {
+        token: authToken
+      }),
+      apiJson<unknown>(`/characters/${characterId}/adult-status`, { token: authToken }),
+      apiJson<unknown>(`/characters/${characterId}/relationship/events`, {
+        token: authToken
+      })
+    ]);
 
     if (
       requestVersion !== refreshVersion.current ||
@@ -106,6 +116,14 @@ export function useCompanionStateController({
       setRelationship(completeRelationshipValue);
     } else {
       unavailable.push("relationship history");
+    }
+    if (
+      relationshipEventsResult.status === "fulfilled" &&
+      isCompleteRelationshipEventList(relationshipEventsResult.value, characterId)
+    ) {
+      setRelationshipEvents(relationshipEventsResult.value);
+    } else {
+      unavailable.push("meaningful relationship moments");
     }
     if (
       journalsResult.status === "fulfilled" &&
@@ -149,15 +167,78 @@ export function useCompanionStateController({
     stateCharacterIdRef.current = null;
     adultStatusCharacterIdRef.current = null;
     setRelationship(emptyRelationship);
+    setRelationshipEvents([]);
+    setRelationshipActionId(null);
     setAdultStatus(null);
     setAdultStatusCharacterId(null);
     setAdultReadinessState("idle");
     setSupportingStateError(null);
   }
 
+  async function correctRelationshipEvent(
+    authToken: string,
+    characterId: string,
+    eventId: string,
+    summary: string,
+    eventType?: RelationshipEvidenceEvent["event_type"]
+  ) {
+    setRelationshipActionId(eventId);
+    try {
+      await apiJson(`/characters/${characterId}/relationship/events/${eventId}`, {
+        method: "PATCH",
+        token: authToken,
+        body: JSON.stringify({
+          summary,
+          ...(eventType ? { event_type: eventType } : {})
+        })
+      });
+      await refreshCompanionState(authToken, characterId);
+    } finally {
+      setRelationshipActionId(null);
+    }
+  }
+
+  async function removeRelationshipEvent(
+    authToken: string,
+    characterId: string,
+    eventId: string
+  ) {
+    setRelationshipActionId(eventId);
+    try {
+      await apiJson(`/characters/${characterId}/relationship/events/${eventId}`, {
+        method: "DELETE",
+        token: authToken
+      });
+      await refreshCompanionState(authToken, characterId);
+    } finally {
+      setRelationshipActionId(null);
+    }
+  }
+
+  async function resetRelationship(
+    authToken: string,
+    characterId: string,
+    mode: "dimensions" | "restart",
+    dimensions?: RelationshipMetric[]
+  ) {
+    setRelationshipActionId(`reset:${mode}`);
+    try {
+      await apiJson(`/characters/${characterId}/relationship/reset`, {
+        method: "POST",
+        token: authToken,
+        body: JSON.stringify({ mode, ...(dimensions ? { dimensions } : {}) })
+      });
+      await refreshCompanionState(authToken, characterId);
+    } finally {
+      setRelationshipActionId(null);
+    }
+  }
+
   return {
     state: {
       relationship,
+      relationshipEvents,
+      relationshipActionId,
       adultStatus,
       adultStatusCharacterId,
       adultReadinessState,
@@ -166,7 +247,10 @@ export function useCompanionStateController({
     },
     actions: {
       refreshCompanionState,
-      resetCompanionState
+      resetCompanionState,
+      correctRelationshipEvent,
+      removeRelationshipEvent,
+      resetRelationship
     }
   };
 }

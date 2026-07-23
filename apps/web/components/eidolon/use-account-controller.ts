@@ -51,6 +51,7 @@ const EXPORT_COLLECTION_KEYS = [
   "memories",
   "episodic_journals",
   "relationship_states",
+  "relationship_events",
   "scheduled_jobs"
 ] as const;
 
@@ -445,6 +446,7 @@ function isAccountExport(value: unknown, expectedUser: User): value is ValidAcco
   const memories = value.memories as Record<string, unknown>[];
   const journals = value.episodic_journals as Record<string, unknown>[];
   const relationships = value.relationship_states as Record<string, unknown>[];
+  const relationshipEvents = value.relationship_events as Record<string, unknown>[];
   const jobs = value.scheduled_jobs as Record<string, unknown>[];
   if (!recordsHaveUniqueIds(characters) || !recordsHaveUniqueIds(conversations)) {
     return false;
@@ -473,6 +475,12 @@ function isAccountExport(value: unknown, expectedUser: User): value is ValidAcco
           conversationIds.has(asString(item.conversation_id)))
     ) &&
     relationships.every(
+      (item) =>
+        isNonemptyString(item.id) &&
+        item.user_id === expectedUser.id &&
+        characterIds.has(asString(item.character_id))
+    ) &&
+    relationshipEvents.every(
       (item) =>
         isNonemptyString(item.id) &&
         item.user_id === expectedUser.id &&

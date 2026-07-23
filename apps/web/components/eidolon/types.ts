@@ -174,6 +174,40 @@ export type RelationshipEvent = {
   tags?: string[];
 };
 
+export type RelationshipEvidenceEvent = {
+  id: string;
+  character_id: string;
+  source_message_id: string | null;
+  linked_moment_id: string | null;
+  scope: "general" | "adult";
+  event_type:
+    | "support"
+    | "vulnerability"
+    | "promise"
+    | "consistency"
+    | "promise_broken"
+    | "conflict"
+    | "apology"
+    | "boundary_set"
+    | "boundary_violation"
+    | "boundary_revoked"
+    | "repair"
+    | "humor"
+    | "ritual"
+    | "milestone"
+    | "absence"
+    | "return"
+    | "reset";
+  summary: string;
+  evidence_excerpt: string | null;
+  significance: "subtle" | "meaningful" | "important";
+  is_boundary_active: boolean;
+  corrected: boolean;
+  occurred_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type RelationshipRecentChange = {
   at?: string;
   key?: string;
@@ -191,6 +225,12 @@ export type Relationship = {
   tension: number;
   familiarity: number;
   attachment: number;
+  emotional_safety: number;
+  reliability: number;
+  reciprocity: number;
+  repair_progress: number;
+  boundary_alignment: number;
+  shared_history_depth: number;
   mood: string;
   conflict_state: string;
   repair_needed: boolean;
@@ -333,7 +373,13 @@ export const relationshipMetrics = [
   "warmth",
   "tension",
   "familiarity",
-  "attachment"
+  "attachment",
+  "emotional_safety",
+  "reliability",
+  "reciprocity",
+  "repair_progress",
+  "boundary_alignment",
+  "shared_history_depth"
 ] as const;
 
 export type RelationshipMetric = (typeof relationshipMetrics)[number];

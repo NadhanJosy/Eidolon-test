@@ -10,6 +10,11 @@ from app.companion.domain import (
 )
 from app.companion.emotion import emotional_posture
 from app.models import ContinuityThread, EpisodicJournal, MemoryItem, Message, RelationshipState
+from app.services.relationship import (
+    RelationshipPlanContext,
+    build_relationship_plan_context,
+    relationship_behavioral_stage_text,
+)
 
 
 def plan_response(
@@ -24,7 +29,11 @@ def plan_response(
     content_mode: str,
     safety_status: dict,
     threads: Sequence[ContinuityThread] = (),
+    relationship_context: RelationshipPlanContext | None = None,
 ) -> ResponsePlan:
+    selected_relationship_context = relationship_context or build_relationship_plan_context(
+        relationship
+    )
     strategy, secondary = _strategies(
         soul=soul,
         perception=perception,
@@ -70,31 +79,18 @@ def plan_response(
         tone=emotional_posture(emotion, repair_needed=relationship.repair_needed),
         continuity=_continuity(perception, relationship, journals, threads),
         boundary_posture=boundary_posture,
+        relationship_state=selected_relationship_context.current_state,
+        recent_relationship_change=selected_relationship_context.recent_change,
+        unresolved_tension=selected_relationship_context.unresolved_tension,
+        active_boundary=selected_relationship_context.active_boundary,
+        familiarity_posture=selected_relationship_context.familiarity,
+        initiative_posture=selected_relationship_context.initiative,
         avoid=_avoid_list(perception, question),
     )
 
 
 def relationship_behavioral_stage(state: RelationshipState) -> str:
-    metadata = state.metadata_json if isinstance(state.metadata_json, dict) else {}
-    evidence = metadata.get("evidence_counts")
-    evidence = evidence if isinstance(evidence, dict) else {}
-    exchanges = _non_negative_int(evidence.get("exchanges"))
-    repairs = _non_negative_int(evidence.get("repairs"))
-    shared_events = _non_negative_int(evidence.get("meaningful_events"))
-    if state.repair_needed or state.conflict_state == "strained":
-        return "repair in progress; previous familiarity remains, but warmth must recover gradually"
-    if exchanges >= 30 and shared_events >= 4 and (state.trust >= 4 or repairs >= 2):
-        return (
-            "established bond with earned shorthand, selective vulnerability, and familiar humour"
-        )
-    if exchanges >= 12 and shared_events >= 2:
-        return (
-            "growing familiarity with a recognisable rhythm; affection may be specific "
-            "but not assumed"
-        )
-    if exchanges >= 4:
-        return "early familiarity; a few patterns are forming, while closeness still needs evidence"
-    return "new connection; be distinct and curious without instant intimacy"
+    return relationship_behavioral_stage_text(state)
 
 
 def _strategies(
@@ -128,8 +124,10 @@ def _strategies(
         return ("reminisce", "share_the_moment")
     romantic_ready = (
         soul.relationship_path == "romantic"
-        and relationship.familiarity >= 4
-        and relationship.trust >= 0.5
+        and relationship.familiarity >= 2
+        and relationship.trust >= 1
+        and relationship.emotional_safety >= 50
+        and relationship.boundary_alignment >= 98
     )
     if perception.flirt_signal and romantic_ready:
         return ("flirt", None)
@@ -214,6 +212,12 @@ def _initiative(
         return "none", "", None
     if perception.direct_question or perception.tone in {"anxious", "heavy", "sharp"}:
         return "none", "", None
+    if (
+        relationship.repair_needed
+        or relationship.emotional_safety < 48
+        or relationship.boundary_alignment < 98
+    ):
+        return "none", "", None
 
     if perception.callback_signal and memories:
         memory = memories[0]
@@ -231,10 +235,15 @@ def _initiative(
     assistant_turns = sum(message.role == "assistant" for message in recent_messages)
     if perception.intent in {"celebrate", "play"} and assistant_turns >= 2:
         return "activity", "suggest one small shared text-based activity", None
-    if assistant_turns >= 4 and assistant_turns % 4 == 0:
+    if assistant_turns >= 4 and relationship.reciprocity >= 2:
         anchor = _compact(soul.initiative_style, 180)
         return "own_thought", anchor, None
-    if relationship.familiarity >= 8 and assistant_turns >= 3 and memories:
+    if (
+        relationship.familiarity >= 3
+        and relationship.shared_history_depth >= 2
+        and assistant_turns >= 3
+        and memories
+    ):
         memory = memories[0]
         return "memory_callback", _compact(memory.content, 180), str(memory.id)
     return "none", "", None
@@ -294,12 +303,6 @@ def _avoid_list(perception: TurnPerception, should_ask_question: bool) -> tuple[
     if perception.time_gap == "long_absence":
         avoid.extend(("guilt about absence", "claims of waiting or offline awareness"))
     return tuple(avoid)
-
-
-def _non_negative_int(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return 0
-    return max(value, 0)
 
 
 def _compact(value: str, limit: int) -> str:

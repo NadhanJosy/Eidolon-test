@@ -23,6 +23,7 @@ users
   |-- refresh_tokens
   |-- characters
   |     |-- relationship_states (one per user + character)
+  |     |-- relationship_events
   |     |-- memory_items
   |     |-- episodic_journals
   |     |-- continuity_threads
@@ -200,14 +201,26 @@ Exactly one row per user-companion pair:
 
 - trust and warmth in `-100..100`
 - intimacy, tension, familiarity, and attachment in `0..100`
+- emotional safety, reliability, reciprocity, repair progress, boundary
+  alignment, and shared-history depth in `0..100`
 - mood, conflict state, and repair flag
 - private bounded emotional-state JSON
-- tags, last interaction, timeline/milestone/evidence metadata
+- qualitative facets, last interaction, and bounded compatibility metadata
 
-Source turns may store reversible relationship effects in message metadata so a
-latest-turn edit/delete can undo and recompute its contribution without guessing
-at older legacy turns. A structured cognition pass may add small bounded deltas
-only from allowlisted grounded evidence labels; it cannot set metric values.
+`relationship_events` is the private audit and control ledger. Each row is
+owner/companion scoped and contains an idempotency key, allowlisted event type,
+general/adult scope, optional exact source message, bounded confidence and
+significance, backend-calculated dimension deltas, whether it still affects the
+current read model, and optional linked milestone memory/journal. Normal APIs
+translate confidence/significance to human labels and do not expose evidence
+quotes or raw deltas; account export includes the owner's complete ledger.
+
+Source turns store event IDs and exact reversible effects in message metadata so
+edit/delete can remove the right evidence without guessing. User correction
+preserves bounded correction history on the event. A dimension reset marks old
+effects detached; restart removes general non-boundary history while retaining
+the boundary ledger. Adult-scoped events are separately retrievable/erasable and
+never affect normal dimensions, prompts, proactive work, or UI lists.
 
 ## `scheduled_jobs`
 

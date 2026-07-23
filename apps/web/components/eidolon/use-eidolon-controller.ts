@@ -29,6 +29,8 @@ import type {
   ContentMode,
   Conversation,
   Message,
+  RelationshipEvidenceEvent,
+  RelationshipMetric,
   User
 } from "./types";
 import { useAccountController } from "./use-account-controller";
@@ -703,6 +705,63 @@ export function useEidolonController() {
     );
   }
 
+  async function correctRelationshipMoment(
+    eventId: string,
+    summary: string,
+    eventType?: RelationshipEvidenceEvent["event_type"]
+  ) {
+    if (!token || !activeCharacterId) return;
+    setError(null);
+    try {
+      await companion.actions.correctRelationshipEvent(
+        token,
+        activeCharacterId,
+        eventId,
+        summary,
+        eventType
+      );
+      setNotice("That relationship moment was corrected.");
+    } catch (cause) {
+      setError(readError(cause));
+    }
+  }
+
+  async function removeRelationshipMoment(eventId: string) {
+    if (!token || !activeCharacterId) return;
+    setError(null);
+    try {
+      await companion.actions.removeRelationshipEvent(token, activeCharacterId, eventId);
+      setNotice("That relationship moment was removed.");
+    } catch (cause) {
+      setError(readError(cause));
+    }
+  }
+
+  async function resetRelationship(
+    mode: "dimensions" | "restart",
+    dimensions?: RelationshipMetric[]
+  ) {
+    if (!token || !activeCharacterId) return;
+    setError(null);
+    try {
+      await companion.actions.resetRelationship(
+        token,
+        activeCharacterId,
+        mode,
+        dimensions
+      );
+      setNotice(
+        mode === "restart"
+          ? "The relationship was restarted. Your stated boundaries remain active."
+          : dimensions
+            ? "That part of the relationship interpretation was reset."
+          : "The relationship's current interpretation was reset."
+      );
+    } catch (cause) {
+      setError(readError(cause));
+    }
+  }
+
   async function refreshAuthSession(
     legacyRefreshToken: string | null = null
   ): Promise<SessionIdentity> {
@@ -978,6 +1037,8 @@ export function useEidolonController() {
       accountActionId: account.state.accountActionId,
       accountMutating: account.state.accountMutating,
       relationship: companion.state.relationship,
+      relationshipEvents: companion.state.relationshipEvents,
+      relationshipActionId: companion.state.relationshipActionId,
       adultStatus: companion.state.adultStatus,
       busy,
       sending: chat.state.sending,
@@ -1048,6 +1109,9 @@ export function useEidolonController() {
       resolveContinuityThread: knowledge.actions.resolveContinuityThread,
       reopenContinuityThread: knowledge.actions.reopenContinuityThread,
       deleteContinuityThread: knowledge.actions.deleteContinuityThread,
+      correctRelationshipMoment,
+      removeRelationshipMoment,
+      resetRelationship,
       exportAccount: account.actions.exportAccount,
       deleteAccount: account.actions.deleteAccount,
       clearConversationMessages: privacy.clearConversationMessages,

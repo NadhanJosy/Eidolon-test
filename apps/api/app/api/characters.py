@@ -1,26 +1,38 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.companion.soul import canonical_soul_json
 from app.db.session import get_session
 from app.dependencies import get_current_user, require_character
-from app.models import Character, EpisodicJournal, MemoryItem, User
+from app.models import Character, EpisodicJournal, MemoryItem, RelationshipEvent, User
 from app.schemas import (
     AdultGateStatus,
     CharacterCreate,
     CharacterOut,
     CharacterUpdate,
     DeleteResponse,
+    RelationshipEventOut,
+    RelationshipEventUpdate,
     RelationshipOut,
+    RelationshipResetRequest,
 )
 from app.services.proactive import proactive_preferences, reschedule_pending_proactive_jobs
-from app.services.relationship import get_current_relationship, get_or_create_relationship
+from app.services.relationship import (
+    active_relationship_boundaries,
+    correct_relationship_event,
+    delete_relationship_event,
+    get_current_relationship,
+    get_or_create_relationship,
+    list_relationship_events,
+    relationship_event_public_dict,
+    reset_relationship,
+)
 from app.services.safety import (
     adult_gate_status,
     canonicalize_character_adult_settings,
@@ -140,6 +152,124 @@ async def get_relationship(
     return relationship
 
 
+@router.get(
+    "/{character_id}/relationship/events",
+    response_model=list[RelationshipEventOut],
+)
+async def get_relationship_events(
+    character_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: Literal["general", "adult"] = "general",
+) -> list[dict[str, object]]:
+    character = await require_character(character_id, user, session)
+    events = await list_relationship_events(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        scopes=(scope,),
+    )
+    active_boundaries = await active_relationship_boundaries(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        scopes=(scope,),
+    )
+    active_ids = {event.id for event in active_boundaries}
+    return [
+        relationship_event_public_dict(event, active_boundary_ids=active_ids) for event in events
+    ]
+
+
+@router.patch(
+    "/{character_id}/relationship/events/{event_id}",
+    response_model=RelationshipEventOut,
+)
+async def update_relationship_event(
+    character_id: uuid.UUID,
+    event_id: uuid.UUID,
+    payload: RelationshipEventUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, object]:
+    character = await require_character(character_id, user, session)
+    event = await _owned_relationship_event(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        event_id=event_id,
+    )
+    relationship = await get_current_relationship(session, user.id, character.id)
+    try:
+        event = await correct_relationship_event(
+            session,
+            event=event,
+            state=relationship,
+            summary=payload.summary,
+            event_type=payload.event_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    await session.refresh(event)
+    active = await active_relationship_boundaries(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        scopes=(event.scope,),
+    )
+    return relationship_event_public_dict(
+        event,
+        active_boundary_ids={item.id for item in active},
+    )
+
+
+@router.delete(
+    "/{character_id}/relationship/events/{event_id}",
+    response_model=DeleteResponse,
+)
+async def remove_relationship_event(
+    character_id: uuid.UUID,
+    event_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DeleteResponse:
+    character = await require_character(character_id, user, session)
+    event = await _owned_relationship_event(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        event_id=event_id,
+    )
+    relationship = await get_current_relationship(session, user.id, character.id)
+    await delete_relationship_event(session, event=event, state=relationship)
+    await session.commit()
+    return DeleteResponse(deleted=1)
+
+
+@router.post(
+    "/{character_id}/relationship/reset",
+    response_model=RelationshipOut,
+)
+async def reset_relationship_state(
+    character_id: uuid.UUID,
+    payload: RelationshipResetRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    character = await require_character(character_id, user, session)
+    relationship = await get_current_relationship(session, user.id, character.id)
+    relationship = await reset_relationship(
+        session,
+        state=relationship,
+        mode=payload.mode,
+        dimensions=tuple(dict.fromkeys(payload.dimensions or ())) or None,
+    )
+    await session.commit()
+    await session.refresh(relationship)
+    return relationship
+
+
 @router.get("/{character_id}/adult-status", response_model=AdultGateStatus)
 async def get_adult_status(
     character_id: uuid.UUID,
@@ -190,7 +320,38 @@ async def delete_adult_continuity(
             EpisodicJournal.scope == "adult",
         )
     )
+    relationship_result = await session.execute(
+        delete(RelationshipEvent).where(
+            RelationshipEvent.user_id == user.id,
+            RelationshipEvent.character_id == character.id,
+            RelationshipEvent.scope == "adult",
+        )
+    )
     await session.commit()
     return DeleteResponse(
-        deleted=int(memory_result.rowcount or 0) + int(moment_result.rowcount or 0)
+        deleted=(
+            int(memory_result.rowcount or 0)
+            + int(moment_result.rowcount or 0)
+            + int(relationship_result.rowcount or 0)
+        )
     )
+
+
+async def _owned_relationship_event(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    character_id: uuid.UUID,
+    event_id: uuid.UUID,
+) -> RelationshipEvent:
+    result = await session.execute(
+        select(RelationshipEvent).where(
+            RelationshipEvent.id == event_id,
+            RelationshipEvent.user_id == user_id,
+            RelationshipEvent.character_id == character_id,
+        )
+    )
+    event = result.scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Relationship moment not found.")
+    return event

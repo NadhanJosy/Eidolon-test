@@ -25,7 +25,7 @@ from app.models import (
 )
 from app.services.continuity import continuity_prompt_items
 
-PROMPT_VERSION = "living_memory_v9"
+PROMPT_VERSION = "relationship_intelligence_v10"
 PRIVATE_PROMPT_CONTEXT_KEY = "_prompt_context"
 HARD_BOUNDARIES = (
     "Do not generate sexual content involving minors or ambiguous age, coercion, "
@@ -296,6 +296,11 @@ def _relationship_section(
             f"Relationship state: {description}",
             "Express progression through behaviour, familiarity, humour, terms of address, and "
             "earned vulnerability. Never mention scores, stages, or meters.",
+            (
+                "Let explicit boundaries override mood, closeness, conflict, and initiative. "
+                "Never use guilt, jealousy, exclusivity, emotional dependency, scarcity, "
+                "punishment, rewards for engagement, or pressure to return."
+            ),
         )
     )
 
@@ -338,7 +343,7 @@ def _response_direction_section(
     *,
     legacy_summary: str | None,
 ) -> str:
-    summary = _compact(legacy_summary or plan.private_summary(), 1200)
+    summary = _compact(legacy_summary or plan.private_summary(), 1800)
     question_line = (
         "At most one natural question may be used."
         if plan.should_ask_question

@@ -30,7 +30,12 @@ from app.services.conversation_scenario import (
 )
 from app.services.journal import list_journals
 from app.services.memory import retrieve_memories
-from app.services.relationship import get_current_relationship, get_or_create_relationship
+from app.services.relationship import (
+    active_relationship_boundaries,
+    build_relationship_plan_context,
+    get_current_relationship,
+    get_or_create_relationship,
+)
 from app.services.response_planner import (
     build_response_plan,
     build_structured_response_plan,
@@ -154,6 +159,20 @@ async def build_reasoning_context(
     scenario = effective_conversation_scenario(conversation, character)
     emotional_state = project_emotional_state(relationship, now=now)
     soul = character_soul(character)
+    boundary_scopes = (
+        ("general", "adult") if safety_status["effective_mode"] == "adult" else ("general",)
+    )
+    relationship_boundaries = await active_relationship_boundaries(
+        session,
+        user_id=user.id,
+        character_id=character.id,
+        scopes=boundary_scopes,
+    )
+    relationship_context = build_relationship_plan_context(
+        relationship,
+        active_boundaries=relationship_boundaries,
+        current_message=current_message,
+    )
     # Stage 4: choose a bounded private response strategy before generation.
     structured_plan = build_structured_response_plan(
         character=character,
@@ -168,6 +187,7 @@ async def build_reasoning_context(
         soul=soul,
         perception=perception,
         emotion=emotional_state,
+        relationship_context=relationship_context,
     )
     response_plan = build_response_plan(
         character=character,
@@ -183,6 +203,7 @@ async def build_reasoning_context(
         pending_proactive_events=pending_proactive_events,
         scenario_mode=scenario.mode,
         scenario_text=scenario.text,
+        relationship_context=relationship_context,
     )
     return ReasoningContext(
         relationship=relationship,

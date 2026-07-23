@@ -80,6 +80,18 @@ Provider proposals cannot directly set relationship scores or persistence.
 Direct memory creation and editing also reapply credential and hard-block
 screens; owning an archive does not make it an instruction bypass.
 
+Relationship evidence proposals require an allowlisted type, exact current-user
+quote, confidence, and significance. Backend transitions remain authoritative.
+Explicit user boundaries and consent revocation take effect in the current
+response plan before any later event extraction, override mood and closeness,
+remain active across relationship restart, and can be removed only by an
+explicit user change/control. Adult-scoped boundary evidence is isolated from
+normal prompts, progression, archives, and proactive work.
+
+Relationship state may adjust care, pacing, or initiative but must never create
+guilt, jealousy, exclusivity, emotional dependency, punishment, scarcity,
+engagement rewards, obligation, fabricated crisis, or pressure to reply.
+
 ## Memory and scheduled work
 
 Blocked or private message content is not eligible for automatic memory,

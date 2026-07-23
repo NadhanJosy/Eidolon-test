@@ -229,6 +229,8 @@ def test_long_absence_and_relationship_progression_are_behavioural() -> None:
     relationship = RelationshipState(
         familiarity=9,
         trust=5,
+        reliability=54,
+        shared_history_depth=7,
         metadata_json={"evidence_counts": {"exchanges": 31, "meaningful_events": 5}},
     )
     plan = plan_response(
@@ -405,5 +407,5 @@ async def test_multiturn_companion_pipeline_keeps_plan_private_and_varies_questi
     assert debug.status_code == 200
     orchestration = debug.json()["last_assembled_context"]["context_manifest"]["orchestration"]
     assert orchestration["intent"] in {"connect", "support"}
-    assert orchestration["strategy"] in {"reminisce", "share_the_moment"}
+    assert orchestration["strategy"] in {"reminisce", "repair", "share_the_moment"}
     assert orchestration["question_planned"] is False
