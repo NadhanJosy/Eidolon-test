@@ -386,8 +386,7 @@ async def _run_chat_postprocess_job(
                     user_id=user.id,
                     character_id=character.id,
                     source_message=source_message,
-                    signals=application.relationship_signals,
-                    confidence=application.relationship_confidence,
+                    evidence=application.relationship_evidence,
                 )
 
     deterministic_fallback = payload.get("memory_allowed") is True and (

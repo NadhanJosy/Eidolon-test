@@ -492,13 +492,15 @@ async def complete_assistant_message(
         "generation_failure_type": None,
     }
     if turn_allows_state_learning(user_message):
-        if update_relationship_state and prompt.content_mode != "adult":
+        if update_relationship_state:
             _relationship, relationship_effect = await update_relationship_from_message_with_effect(
                 session,
                 user.id,
                 character.id,
                 user_message.content,
                 source_message_id=user_message.id,
+                scope="adult" if prompt.content_mode == "adult" else "general",
+                boundary_only=prompt.content_mode == "adult",
             )
             user_metadata = dict(user_message.metadata_json or {})
             user_message.metadata_json = {
@@ -690,6 +692,8 @@ async def edit_latest_user_turn(
                 character.id,
                 user_message.content,
                 source_message_id=user_message.id,
+                scope="adult" if requested_mode == "adult" else "general",
+                boundary_only=requested_mode == "adult",
             )
             user_message.metadata_json = {
                 **(user_message.metadata_json or {}),

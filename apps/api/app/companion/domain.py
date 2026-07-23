@@ -192,6 +192,12 @@ class ResponsePlan:
     tone: str = "steady"
     continuity: str = "stay with the current moment"
     boundary_posture: str = "ordinary SFW boundaries"
+    relationship_state: str = "new connection"
+    recent_relationship_change: str = "no recent supported change"
+    unresolved_tension: str = "none supported"
+    active_boundary: str = "authored hard limits remain active"
+    familiarity_posture: str = "avoid assumed familiarity"
+    initiative_posture: str = "keep initiative light and optional"
     avoid: tuple[str, ...] = field(default_factory=tuple)
 
     def private_summary(self) -> str:
@@ -210,6 +216,12 @@ class ResponsePlan:
             f"Question: {question_guidance}",
             f"Initiative: {self.initiative.replace('_', ' ')}",
             f"Boundaries: {self.boundary_posture}",
+            f"Active user boundary: {self.active_boundary}",
+            f"Unresolved tension: {self.unresolved_tension}",
+            f"Relationship: {self.relationship_state}",
+            f"Recent relationship change: {self.recent_relationship_change}",
+            f"Familiarity: {self.familiarity_posture}",
+            f"Initiative posture: {self.initiative_posture}",
         ]
         if self.secondary_strategy:
             pieces.insert(1, f"Secondary: {self.secondary_strategy.replace('_', ' ')}")

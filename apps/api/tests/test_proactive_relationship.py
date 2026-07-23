@@ -218,6 +218,47 @@ async def test_repair_posture_suppresses_pressure_and_uses_spacious_fallback(
     assert "no reply is expected" in fallback.content.lower()
 
 
+async def test_active_contact_boundary_suppresses_proactive_delivery_and_scheduling(
+    client: AsyncClient,
+) -> None:
+    headers = await auth_headers(client)
+    conversation_data = (await client.post("/conversations", json={}, headers=headers)).json()
+    chat = await client.post(
+        "/chat/messages",
+        json={
+            "conversation_id": conversation_data["id"],
+            "content": "Please don't send me proactive messages. That is my boundary.",
+        },
+        headers=headers,
+    )
+    assert chat.status_code == 200
+
+    provider = RecordingProactiveProvider()
+    async with AsyncSessionLocal() as session:
+        conversation = await session.get(Conversation, uuid.UUID(conversation_data["id"]))
+        assert conversation is not None
+        await session.execute(
+            delete(ScheduledJob).where(ScheduledJob.character_id == conversation.character_id)
+        )
+        created_jobs = await ensure_proactive_jobs(
+            session,
+            conversation=conversation,
+            user_id=conversation.user_id,
+            character_id=conversation.character_id,
+        )
+        message = await create_inactivity_proactive_message(
+            session,
+            conversation,
+            inactivity_hours=1,
+            force=True,
+            provider=provider,
+        )
+
+    assert created_jobs == []
+    assert message is None
+    assert provider.prompts == []
+
+
 async def test_scheduler_records_relationship_suppression_without_writing_note(
     client: AsyncClient,
 ) -> None:

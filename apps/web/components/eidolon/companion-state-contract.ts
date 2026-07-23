@@ -3,7 +3,8 @@ import type {
   ContinuityThread,
   Journal,
   MemoryItem,
-  Relationship
+  Relationship,
+  RelationshipEvidenceEvent
 } from "./types";
 
 const UUID_PATTERN =
@@ -165,12 +166,18 @@ export function completeRelationship(
     !record(value) ||
     !boundedJson(value) ||
     value.character_id !== characterId ||
-    !finiteRange(value.trust, 0, 1) ||
-    !finiteRange(value.intimacy, 0, 1) ||
-    !finiteRange(value.warmth, 0, 1) ||
-    !finiteRange(value.tension, 0, 1) ||
-    !finiteRange(value.familiarity, 0, 1) ||
-    !finiteRange(value.attachment, 0, 1) ||
+    !finiteRange(value.trust, -100, 100) ||
+    !finiteRange(value.intimacy, 0, 100) ||
+    !finiteRange(value.warmth, -100, 100) ||
+    !finiteRange(value.tension, 0, 100) ||
+    !finiteRange(value.familiarity, 0, 100) ||
+    !finiteRange(value.attachment, 0, 100) ||
+    !finiteRange(value.emotional_safety, 0, 100) ||
+    !finiteRange(value.reliability, 0, 100) ||
+    !finiteRange(value.reciprocity, 0, 100) ||
+    !finiteRange(value.repair_progress, 0, 100) ||
+    !finiteRange(value.boundary_alignment, 0, 100) ||
+    !finiteRange(value.shared_history_depth, 0, 100) ||
     !boundedText(value.mood, 80) ||
     !boundedText(value.conflict_state, 80) ||
     typeof value.repair_needed !== "boolean" ||
@@ -188,6 +195,12 @@ export function completeRelationship(
     tension: value.tension,
     familiarity: value.familiarity,
     attachment: value.attachment,
+    emotional_safety: value.emotional_safety,
+    reliability: value.reliability,
+    reciprocity: value.reciprocity,
+    repair_progress: value.repair_progress,
+    boundary_alignment: value.boundary_alignment,
+    shared_history_depth: value.shared_history_depth,
     mood: value.mood,
     conflict_state: value.conflict_state,
     repair_needed: value.repair_needed,
@@ -195,6 +208,59 @@ export function completeRelationship(
     last_interaction_at: value.last_interaction_at,
     metadata_json: value.metadata_json
   };
+}
+
+export function isCompleteRelationshipEvent(
+  value: unknown,
+  characterId: string
+): value is RelationshipEvidenceEvent {
+  return (
+    record(value) &&
+    boundedJson(value) &&
+    validUuid(value.id) &&
+    value.character_id === characterId &&
+    (value.source_message_id === null || validUuid(value.source_message_id)) &&
+    (value.linked_moment_id === null || validUuid(value.linked_moment_id)) &&
+    (value.scope === "general" || value.scope === "adult") &&
+    [
+      "support",
+      "vulnerability",
+      "promise",
+      "consistency",
+      "promise_broken",
+      "conflict",
+      "apology",
+      "boundary_set",
+      "boundary_violation",
+      "boundary_revoked",
+      "repair",
+      "humor",
+      "ritual",
+      "milestone",
+      "absence",
+      "return",
+      "reset"
+    ].includes(String(value.event_type)) &&
+    boundedText(value.summary, 500) &&
+    (value.evidence_excerpt === null || boundedText(value.evidence_excerpt, 240)) &&
+    (value.significance === "subtle" ||
+      value.significance === "meaningful" ||
+      value.significance === "important") &&
+    typeof value.is_boundary_active === "boolean" &&
+    typeof value.corrected === "boolean" &&
+    validTimestamp(value.occurred_at) &&
+    validTimestamp(value.created_at) &&
+    validTimestamp(value.updated_at)
+  );
+}
+
+export function isCompleteRelationshipEventList(
+  value: unknown,
+  characterId: string
+): value is RelationshipEvidenceEvent[] {
+  return completeUniqueList<RelationshipEvidenceEvent>(value, 200, (item) =>
+    isCompleteRelationshipEvent(item, characterId)
+  );
 }
 
 export function completeAdultStatus(value: unknown): AdultStatus | null {

@@ -128,21 +128,25 @@ block refresh; same-site custom subdomains are the durable solution.
 1. Authenticate the request and load the owned conversation and companion.
 2. Validate content mode, privacy mode, message bounds, and hard safety rules.
 3. Persist the accepted user message and its privacy provenance.
-4. Infer bounded intent/tone and retrieve eligible relationship, memory,
-   episode, living-thread, scenario, and recent-message context.
-5. Build a private response plan and compile ordered prompt modules.
+4. Infer bounded intent/tone and retrieve eligible relationship read state,
+   scoped active boundaries, memory, episodes, living threads, scenario, and
+   recent-message context.
+5. Build a compact qualitative relationship plan and private response plan,
+   then compile ordered prompt modules.
 6. Call the selected provider.
 7. For SSE, emit `message_start`, screened `token` events, then
    `message_done`; a terminal `error` event closes failed streams.
 8. Validate and persist the completed assistant message exactly once.
-9. Apply the immediate deterministic relationship/emotional effect.
+9. Record idempotent deterministic relationship evidence and its exact
+   reversible emotional/read-model effect; routine turns make no relationship
+   progress, while adult turns may record only isolated boundary evidence.
 10. Create a durable post-chat job and expose a pending continuity receipt on
     the completed assistant message.
 11. For an eligible turn, request a bounded structured cognition report, reject
     claims without exact source evidence, and let backend rules classify value,
     sensitivity, emotional meaning, entities, correction, and retention before
     committing scoped memory, a source-linked moment, and bounded relationship
-    evidence.
+    evidence with confidence/significance.
 12. Finish living-thread and proactive work, then settle the receipt with only
     changes that actually committed.
 

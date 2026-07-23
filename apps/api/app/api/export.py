@@ -20,6 +20,7 @@ from app.models import (
     MemoryEvidence,
     MemoryItem,
     Message,
+    RelationshipEvent,
     RelationshipState,
     ScheduledJob,
     User,
@@ -108,6 +109,9 @@ async def export_account(
     relationships = (
         await session.execute(select(RelationshipState).where(RelationshipState.user_id == user.id))
     ).scalars()
+    relationship_events = (
+        await session.execute(select(RelationshipEvent).where(RelationshipEvent.user_id == user.id))
+    ).scalars()
     jobs = (
         await session.execute(select(ScheduledJob).where(ScheduledJob.user_id == user.id))
     ).scalars()
@@ -142,6 +146,7 @@ async def export_account(
         ],
         continuity_threads=[continuity_thread_to_dict(thread) for thread in continuity_threads],
         relationship_states=[relationship_to_dict(relationship) for relationship in relationships],
+        relationship_events=[relationship_event_to_dict(event) for event in relationship_events],
         scheduled_jobs=[job_to_dict(job) for job in jobs],
     )
 
@@ -319,6 +324,12 @@ def relationship_to_dict(relationship: RelationshipState) -> dict:
         "tension": relationship.tension,
         "familiarity": relationship.familiarity,
         "attachment": relationship.attachment,
+        "emotional_safety": relationship.emotional_safety,
+        "reliability": relationship.reliability,
+        "reciprocity": relationship.reciprocity,
+        "repair_progress": relationship.repair_progress,
+        "boundary_alignment": relationship.boundary_alignment,
+        "shared_history_depth": relationship.shared_history_depth,
         "mood": relationship.mood,
         "conflict_state": relationship.conflict_state,
         "repair_needed": relationship.repair_needed,
@@ -327,6 +338,30 @@ def relationship_to_dict(relationship: RelationshipState) -> dict:
         "metadata_json": relationship.metadata_json,
         "created_at": relationship.created_at.isoformat(),
         "updated_at": relationship.updated_at.isoformat(),
+    }
+
+
+def relationship_event_to_dict(event: RelationshipEvent) -> dict:
+    return {
+        "id": str(event.id),
+        "user_id": str(event.user_id),
+        "character_id": str(event.character_id),
+        "source_message_id": str(event.source_message_id) if event.source_message_id else None,
+        "memory_id": str(event.memory_id) if event.memory_id else None,
+        "journal_id": str(event.journal_id) if event.journal_id else None,
+        "scope": event.scope,
+        "event_key": event.event_key,
+        "event_type": event.event_type,
+        "summary": event.summary,
+        "evidence_quote": event.evidence_quote,
+        "confidence": event.confidence,
+        "significance": event.significance,
+        "dimension_deltas_json": event.dimension_deltas_json,
+        "affects_current_state": event.affects_current_state,
+        "occurred_at": event.occurred_at.isoformat(),
+        "metadata_json": event.metadata_json,
+        "created_at": event.created_at.isoformat(),
+        "updated_at": event.updated_at.isoformat(),
     }
 
 

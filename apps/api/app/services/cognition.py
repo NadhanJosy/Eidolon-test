@@ -22,7 +22,7 @@ from app.services.memory import (
     supersede_memory,
     user_opted_out_of_memory,
 )
-from app.services.relationship import clamp
+from app.services.relationship import RELATIONSHIP_EVENT_TYPES, clamp
 from app.services.safety import is_blocked_content
 
 COGNITION_VERSION = "grounded_cognition_v1"
@@ -224,11 +224,22 @@ class CognitionEpisode(BaseModel):
     salience: float = Field(ge=0.0, le=1.0)
 
 
+class CognitionRelationshipEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: str = Field(min_length=1, max_length=32)
+    summary: str = Field(min_length=1, max_length=500)
+    evidence_quote: str = Field(min_length=1, max_length=600)
+    confidence: float = Field(ge=0.0, le=1.0)
+    significance: float = Field(ge=0.0, le=1.0)
+
+
 class CognitionRelationship(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     signals: list[str] = Field(max_length=6)
     confidence: float = Field(ge=0.0, le=1.0)
+    evidence: list[CognitionRelationshipEvidence] = Field(default_factory=list, max_length=6)
 
 
 class CognitionReport(BaseModel):
@@ -255,6 +266,7 @@ class CognitionApplication:
     change_labels: tuple[str, ...] = ()
     relationship_signals: tuple[str, ...] = ()
     relationship_confidence: float = 0.0
+    relationship_evidence: tuple[dict[str, object], ...] = ()
 
 
 def cognition_schema() -> dict[str, object]:
@@ -419,6 +431,9 @@ async def apply_cognition_report(
         change_labels=tuple(dict.fromkeys(labels)),
         relationship_signals=relationship_signals,
         relationship_confidence=report.relationship.confidence,
+        relationship_evidence=tuple(
+            item.model_dump(mode="json") for item in report.relationship.evidence
+        ),
     )
 
 
@@ -647,6 +662,13 @@ def _ground_report(
         salience=episode.salience,
     )
     known_memory_ids = {str(memory.id) for memory in selected_memories}
+    relationship_evidence = [
+        item
+        for item in report.relationship.evidence
+        if item.event_type in RELATIONSHIP_EVENT_TYPES
+        and item.event_type not in {"milestone", "absence", "return", "reset"}
+        and _normalized_text(item.evidence_quote) in _normalized_text(user_message.content)
+    ][:6]
     return CognitionReport(
         memory_candidates=candidates,
         episode=grounded_episode,
@@ -655,6 +677,7 @@ def _ground_report(
                 signal for signal in report.relationship.signals if signal in RELATIONSHIP_SIGNALS
             ],
             confidence=report.relationship.confidence,
+            evidence=relationship_evidence,
         ),
         referenced_memory_ids=[
             value for value in report.referenced_memory_ids if value in known_memory_ids
@@ -873,6 +896,11 @@ def _cognition_prompt(
             ),
             "Referenced memory IDs must be selected memories visibly used in the assistant reply.",
             "Relationship signals describe evidence only; they never set scores.",
+            (
+                "Each relationship evidence item needs an exact contiguous quote from CURRENT "
+                "USER plus separate confidence and significance. Ignore routine politeness, "
+                "roleplay events, and assumptions from assistant prose."
+            ),
             "RECENT ELIGIBLE CONTEXT:",
             *(recent_lines or ["none"]),
             "SELECTED MEMORIES:",

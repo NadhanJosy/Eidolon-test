@@ -56,12 +56,22 @@ only for legacy browser migration.
 | GET | `/characters/{character_id}` | Get owned companion |
 | PATCH | `/characters/{character_id}` | Update and recanonicalize companion |
 | GET | `/characters/{character_id}/relationship` | Get current decayed relationship |
+| GET | `/characters/{character_id}/relationship/events` | List owner-visible meaningful events in general scope; `scope=adult` is explicit |
+| PATCH | `/characters/{character_id}/relationship/events/{event_id}` | Correct an owned event interpretation or allowlisted type |
+| DELETE | `/characters/{character_id}/relationship/events/{event_id}` | Remove an owned event and reverse its current effect |
+| POST | `/characters/{character_id}/relationship/reset` | Reset dimensions or restart non-boundary history |
 | GET | `/characters/{character_id}/adult-status` | Get character-bound gate result and separate adult-continuity counts |
-| DELETE | `/characters/{character_id}/adult-continuity` | Erase adult-scoped memories and moments only |
+| DELETE | `/characters/{character_id}/adult-continuity` | Erase adult-scoped memories, moments, and relationship-boundary events |
 
 Profile writes validate text/JSON bounds, proactive clock settings, adult
 eligibility, and hard safety constraints. Changes to proactive preferences
 reschedule or cancel pending work in the same transaction.
+
+Relationship event responses use human significance labels and a bounded
+owner-only evidence excerpt; they omit raw confidence and dimension deltas. Reset accepts
+`{"mode":"dimensions"}`, an optional allowlisted `dimensions` array for a
+selective reset, or `{"mode":"restart"}`. Restart keeps explicit boundary
+events authoritative.
 
 ## Conversations and messages
 
@@ -195,7 +205,7 @@ Debug remains authenticated and owner-scoped. Production defaults to disabled.
 
 The export contains the user profile, companions, conversations, messages,
 memories, memory evidence/entities/links, journals, continuity threads,
-relationships, and scheduled jobs. It
+relationships, relationship evidence events, and scheduled jobs. It
 excludes password and refresh-token hashes, auth throttles, raw embeddings,
 provider keys, and JWT secrets. Journal export includes scope and exact source
 message IDs; memory export includes scope, claim identity, lifecycle, retention,

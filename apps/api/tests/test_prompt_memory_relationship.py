@@ -268,7 +268,7 @@ def test_prompt_context_order_deduplication_and_budget_are_explicit() -> None:
         current_message="Can we return to the lantern plan tonight?",
         content_mode="sfw",
         response_plan="Answer directly, preserve the promise, and do not force a question.",
-        context_budget_tokens=1024,
+        context_budget_tokens=1400,
     )
     prompt = bundle.prompt
     ordered_markers = (
@@ -292,7 +292,7 @@ def test_prompt_context_order_deduplication_and_budget_are_explicit() -> None:
     assert "lean on preference" not in prompt
     assert "Current user message: Can we return to the lantern plan tonight?" in prompt
     assert bundle.context_trimmed is True
-    assert bundle.estimated_input_tokens <= 1024
+    assert bundle.estimated_input_tokens <= 1400
     assert bundle.context_manifest["budget"]["trimmed"] is True
 
 
@@ -398,6 +398,12 @@ async def test_manual_memory_retrieval_and_debug_prompt(client: AsyncClient) -> 
         "tension",
         "familiarity",
         "attachment",
+        "emotional_safety",
+        "reliability",
+        "reciprocity",
+        "repair_progress",
+        "boundary_alignment",
+        "shared_history_depth",
         "mood",
         "conflict_state",
         "repair_needed",
@@ -496,7 +502,7 @@ async def test_last_assembled_context_is_private_bounded_and_owner_scoped(
     debug = await client.get(f"/debug/conversation/{conversation_id}", headers=headers)
     assert debug.status_code == 200
     context = debug.json()["last_assembled_context"]
-    assert len(context["response_plan_summary"]) == 1200
+    assert len(context["response_plan_summary"]) == 1800
     assert raw_message not in json.dumps(context)
     assert "raw_prompt" not in context["context_manifest"]
 
@@ -540,8 +546,8 @@ async def test_relationship_updates_after_chat(client: AsyncClient) -> None:
     recent_changes = payload["metadata_json"]["recent_changes"]
     assert recent_changes
     summaries = {change["summary"] for change in recent_changes}
-    assert "Trust opened a little." in summaries
-    assert "Warmth rose after this turn." in summaries
+    assert "Trust gained a little support." in summaries
+    assert "Warmth grew through this exchange." in summaries
     assert payload["metadata_json"]["recent_change_summary"]
 
 
@@ -1086,6 +1092,23 @@ async def test_adult_mode_temporarily_blocks_during_relationship_repair(
         headers=headers,
     )
     assert repair_chat.status_code == 200
+
+    still_blocked = await client.get(
+        f"/characters/{character_id}/adult-status",
+        headers=headers,
+    )
+    assert still_blocked.json()["allowed"] is False
+
+    repair_followthrough = await client.post(
+        "/chat/messages",
+        json={
+            "conversation_id": conversation_id,
+            "content": "I want to make this right. Can we work through it carefully?",
+            "content_mode": "sfw",
+        },
+        headers=headers,
+    )
+    assert repair_followthrough.status_code == 200
 
     restored_status = await client.get(f"/characters/{character_id}/adult-status", headers=headers)
     restored_payload = restored_status.json()

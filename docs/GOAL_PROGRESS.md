@@ -120,3 +120,27 @@ Validation:
 - Ruff lint and format checks passed.
 - Frontend ESLint, TypeScript, and static production build passed through
   `make verify`.
+
+## 2026-07-23 — Relationship Intelligence
+
+Outcome:
+
+- Replaced message-count progression with an idempotent, confidence/significance
+  evidence ledger and gradual reversible transitions across trust, emotional
+  safety, warmth, reliability, reciprocity, tension, repair, boundary respect,
+  familiarity, and shared-history depth.
+- Added scoped durable boundaries, multi-step conflict repair, linked
+  relationship milestones, qualitative pre-generation planning, relationship-
+  aware proactive posture, adult isolation, and anti-manipulation rules.
+- Added owner APIs and a human-language Relationship experience for meaningful
+  moment correction/removal, dimension reset, relationship restart, active
+  boundaries, and multidimensional explanation without numerical bond meters.
+
+Validation:
+
+- Alembic downgraded to `0012_living_memory` and upgraded through
+  `0013_relationship_intelligence` successfully.
+- Backend: 259 tests passed and the opt-in live-provider test was skipped.
+- Ruff lint and format checks passed.
+- Frontend ESLint, TypeScript, and static production build passed through
+  `make verify`.

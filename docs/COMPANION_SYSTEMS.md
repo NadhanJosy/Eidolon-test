@@ -208,25 +208,40 @@ conversation.
 
 ## Relationship and emotional continuity
 
-One relationship row per user-companion pair contains bounded metrics, mood,
-conflict/repair state, emotional posture, evidence counts, timeline entries, and
-one-time milestones.
+One relationship row per user-companion pair is the bounded read model. A
+separate owner-scoped event ledger supplies its evidence, audit history,
+idempotency, source links, general/adult scope, corrections, milestone links,
+and exact reversible effects.
 
-Immediate updates are deterministic. A grounded post-turn report may add small
-bounded deltas from allowlisted interaction evidence such as gratitude,
-vulnerability, repair, play, support, or a shared ritual; the model never sets a
-score. Familiarity usually grows with interaction; warmth, trust, tension, and
-repair respond gradually. Elapsed time decays volatile state toward safe
-baselines.
+Deterministic extraction and grounded post-turn cognition recognize meaningful
+support, vulnerability, promises, consistency, broken expectations, conflict,
+apology, boundary changes/violations, repair, humour, rituals, milestones,
+absence, and return. Every structured proposal needs exact current-user
+evidence plus confidence and significance. Backend transition rules ignore
+routine politeness, message counts, roleplay-only events, assistant assumptions,
+unknown types, low confidence, and duplicates.
 
-Prompt assembly sees behavioural qualitative wording, never raw meters. A single
-apology can begin repair but cannot erase accumulated tension in one turn.
-Relationship state must never produce guilt, punishment, jealousy, threats,
-fabricated crisis, or pressure to return.
+Trust, emotional safety, warmth, reliability, reciprocity, tension, repair,
+boundary alignment, familiarity, and shared-history depth change gradually and
+reversibly. Conflict can increase care and reduce initiative without hostility;
+apology starts a multi-evidence repair arc. Time softens immediate tension but
+does not punish absence or erase durable foundations.
 
-Source turns may carry exact bounded relationship effects. Latest-turn edit or
-deletion reverses those recorded effects and recalculates from the replacement
-turn. Legacy effects are not guessed.
+Before every production generation, selected state and active scoped boundaries
+become a compact qualitative relationship plan: current posture, recent change,
+unresolved tension, active boundary, familiarity posture, and initiative
+posture. Prompt assembly sees that plan, never meters. Boundaries override mood,
+conflict, closeness, and initiative immediately.
+
+Milestones create linked semantic-memory, episodic-journal, and relationship
+event rows. Source edit/delete, owner event removal, correction, dimension reset,
+and restart update the read model without guessing. A selective reset detaches
+only the chosen dimensions from prior event effects; restart retains explicit
+boundaries. Adult events remain isolated from normal planning and progression.
+
+Relationship behaviour must never produce guilt, punishment, jealousy,
+exclusivity, dependency, scarcity, engagement rewards, threats, fabricated
+crisis, obligation, or pressure to return.
 
 ## Scheduled jobs
 
@@ -269,13 +284,16 @@ Before queueing and delivery, proactive work checks:
 - per-conversation cooldown
 - configured IANA timezone, target local time, and quiet hours
 - current relationship posture
+- active general-scope boundaries, with no-contact boundaries suppressing
+  scheduling and delivery
 - whether the referenced milestone/open thread is still valid
 - whether a thinking-of-you note has a non-manual, general-scope shared moment
 - a per-thread follow-up cooldown for living threads
 
 Careful/repair posture suppresses pressure-prone milestone and delayed follow-up
-notes. Ordinary check-ins become more spacious. A note must not claim awareness
-or activity while offline.
+notes. Active boundaries constrain generated wording; a boundary against
+proactive contact suppresses every proactive note. Ordinary check-ins become
+more spacious. A note must not claim awareness or activity while offline.
 
 After all guards pass, the provider receives a minimal SFW prompt containing
 screened authored fragments and qualitative posture, not raw history, private

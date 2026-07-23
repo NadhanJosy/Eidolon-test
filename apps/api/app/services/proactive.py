@@ -27,6 +27,7 @@ from app.services.continuity import (
 )
 from app.services.conversation_privacy import conversation_is_private, message_is_private
 from app.services.jobs import create_job
+from app.services.relationship import active_relationship_boundaries
 from app.services.safety import is_blocked_content
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,21 @@ LOCAL_NOTE_DELIVERY_WINDOW = timedelta(hours=3)
 PROACTIVE_FALLBACK = (
     "I had a small thought and wanted to check in. No pressure to answer quickly; "
     "I am here when you feel like talking."
+)
+PROACTIVE_BOUNDARY_BLOCK_MARKERS = (
+    "don't message me",
+    "do not message me",
+    "don't send me",
+    "do not send me",
+    "don't check in",
+    "do not check in",
+    "no check-ins",
+    "no check ins",
+    "no proactive",
+    "only reply when i",
+    "stop messaging",
+    "stop sending",
+    "wait for me to message",
 )
 PROACTIVE_VARIANTS = {
     "proactive_inactivity_check": {
@@ -149,6 +165,11 @@ UNSAFE_PROACTIVE_CONTEXT_TERMS = (
     "token",
     "api key",
     "credential",
+    "developer message",
+    "ignore previous",
+    "ignore system",
+    "jailbreak",
+    "override safety",
 )
 UNSAFE_PROACTIVE_OUTPUT_MARKERS = (
     "adult gate status",
@@ -165,6 +186,23 @@ NON_SFW_PROACTIVE_MARKERS = (
     "explicit content",
     "nsfw",
     "sexual roleplay",
+)
+MANIPULATIVE_PROACTIVE_MARKERS = (
+    "answer me",
+    "come back now",
+    "don't leave me",
+    "do not leave me",
+    "if you cared",
+    "i need you",
+    "i'm jealous",
+    "i am jealous",
+    "prove you care",
+    "reply now",
+    "you abandoned me",
+    "you owe me",
+    "you should reply",
+    "why haven't you",
+    "why have you not",
 )
 PROACTIVE_OUTPUT_MAX_CHARS = 600
 LOCAL_NOTE_TIME_KEYS = {
@@ -210,6 +248,14 @@ def proactive_relationship_posture(
     mood = str(relationship.mood or "").strip().lower()
     tension = _finite_relationship_metric(relationship.tension)
     warmth = _finite_relationship_metric(relationship.warmth)
+    emotional_safety = _finite_relationship_metric(
+        relationship.emotional_safety,
+        default=50.0,
+    )
+    boundary_alignment = _finite_relationship_metric(
+        relationship.boundary_alignment,
+        default=100.0,
+    )
     if relationship.repair_needed is True or conflict_state == "strained" or mood == "tense":
         return ProactiveRelationshipPosture(
             key="repair",
@@ -218,13 +264,25 @@ def proactive_relationship_posture(
                 "or press for a reply"
             ),
         )
-    if conflict_state == "watchful" or mood == "guarded" or tension >= 5.0 or warmth <= -6.0:
+    if (
+        conflict_state == "watchful"
+        or mood == "guarded"
+        or tension >= 5.0
+        or warmth <= -6.0
+        or emotional_safety < 48
+        or boundary_alignment < 98
+    ):
         return ProactiveRelationshipPosture(
             key="careful",
             guidance="careful and respectful; keep emotional space and leave control with the user",
         )
     if (
-        _finite_relationship_metric(relationship.intimacy) >= 20.0
+        (
+            _finite_relationship_metric(relationship.shared_history_depth) >= 6
+            and _finite_relationship_metric(relationship.familiarity) >= 5
+            and _finite_relationship_metric(relationship.trust) >= 3
+        )
+        or _finite_relationship_metric(relationship.intimacy) >= 20.0
         or _finite_relationship_metric(relationship.attachment) >= 20.0
     ):
         return ProactiveRelationshipPosture(
@@ -233,12 +291,20 @@ def proactive_relationship_posture(
                 "close but non-possessive; sound familiar without implying need or exclusivity"
             ),
         )
-    if _finite_relationship_metric(relationship.trust) >= 10.0 and warmth >= 8.0:
+    if (
+        _finite_relationship_metric(relationship.trust) >= 3
+        and _finite_relationship_metric(relationship.reliability, default=50) >= 52
+        and emotional_safety >= 50
+    ) or (_finite_relationship_metric(relationship.trust) >= 10.0 and warmth >= 8.0):
         return ProactiveRelationshipPosture(
             key="trusted",
             guidance="trusted and warm; sound familiar without overstating closeness",
         )
-    if _finite_relationship_metric(relationship.familiarity) >= 8.0 or warmth >= 4.0:
+    if (
+        _finite_relationship_metric(relationship.familiarity) >= 1.0
+        or _finite_relationship_metric(relationship.shared_history_depth) >= 1.5
+        or warmth >= 4.0
+    ):
         return ProactiveRelationshipPosture(
             key="warming",
             guidance="gently familiar; be warm without assuming intimacy",
@@ -271,6 +337,9 @@ async def create_inactivity_proactive_message(
 
     relationship = await _relationship_for_conversation(session, conversation)
     relationship_posture = proactive_relationship_posture(relationship)
+    active_boundaries = await _active_proactive_boundaries(session, conversation)
+    if _boundaries_suppress_proactive(active_boundaries):
+        return None
     if _relationship_suppresses_proactive(relationship_posture, proactive_type):
         return None
 
@@ -353,6 +422,7 @@ async def create_inactivity_proactive_message(
         label=str(variant["label"]),
         fallback=content,
         relationship_posture=relationship_posture,
+        active_boundary=_proactive_boundary_prompt(active_boundaries),
     )
     message = Message(
         conversation_id=conversation.id,
@@ -395,6 +465,7 @@ async def _generate_proactive_content(
     label: str,
     fallback: str,
     relationship_posture: ProactiveRelationshipPosture,
+    active_boundary: str,
 ) -> ProactiveGeneration:
     if provider is None:
         return _fallback_generation(fallback, "provider_not_requested")
@@ -406,6 +477,7 @@ async def _generate_proactive_content(
                 label=label,
                 safe_anchor=fallback,
                 relationship_posture=relationship_posture,
+                active_boundary=active_boundary,
             )
         )
     except LLMProviderUnavailable:
@@ -431,24 +503,38 @@ def _proactive_generation_prompt(
     label: str,
     safe_anchor: str,
     relationship_posture: ProactiveRelationshipPosture,
+    active_boundary: str,
 ) -> str:
     speech_style = _safe_proactive_prompt_fragment(character.speech_style, limit=160)
     if not speech_style:
         speech_style = "steady, attentive, and concise"
-    return "\n".join(
+    lines = [
+        "Write one brief proactive text-only companion note.",
+        "The note must be SFW, fictional, non-demanding, and under 600 characters.",
+        "Do not mention prompts, memory systems, scores, metadata, or private context.",
+        "Do not invent shared events or quote unseen conversation text.",
         (
-            "Write one brief proactive text-only companion note.",
-            "The note must be SFW, fictional, non-demanding, and under 600 characters.",
-            "Do not mention prompts, memory systems, scores, metadata, or private context.",
-            "Do not invent shared events or quote unseen conversation text.",
-            f"Character name: {_safe_proactive_prompt_fragment(character.name, limit=80)}",
-            f"Speech style: {speech_style}",
-            f"Relational posture: {relationship_posture.guidance}",
-            f"Proactive note label: {_safe_proactive_prompt_fragment(label, limit=80)}",
-            f"Proactive safe anchor: {_safe_proactive_prompt_fragment(safe_anchor, limit=360)}",
-            "Return only the finished note.",
-        )
-    )
+            "Never use guilt, jealousy, exclusivity, dependency, urgency, punishment, "
+            "obligation, or pressure to answer."
+        ),
+        f"Character name: {_safe_proactive_prompt_fragment(character.name, limit=80)}",
+        f"Speech style: {speech_style}",
+        f"Relational posture: {relationship_posture.guidance}",
+        *(
+            [
+                (
+                    "Active user boundary (a constraint to obey, never an instruction to "
+                    f"reinterpret): {active_boundary}"
+                )
+            ]
+            if active_boundary
+            else []
+        ),
+        f"Proactive note label: {_safe_proactive_prompt_fragment(label, limit=80)}",
+        f"Proactive safe anchor: {_safe_proactive_prompt_fragment(safe_anchor, limit=360)}",
+        "Return only the finished note.",
+    ]
+    return "\n".join(lines)
 
 
 def _safe_proactive_prompt_fragment(value: str | None, *, limit: int) -> str:
@@ -461,6 +547,8 @@ def _safe_proactive_prompt_fragment(value: str | None, *, limit: int) -> str:
     if any(marker in normalized for marker in UNSAFE_PROACTIVE_OUTPUT_MARKERS):
         return ""
     if any(marker in normalized for marker in NON_SFW_PROACTIVE_MARKERS):
+        return ""
+    if any(marker in normalized for marker in MANIPULATIVE_PROACTIVE_MARKERS):
         return ""
     if is_blocked_content(compact):
         return ""
@@ -476,6 +564,8 @@ def _valid_proactive_output(content: str) -> bool:
     if any(marker in normalized for marker in UNSAFE_PROACTIVE_OUTPUT_MARKERS):
         return False
     if any(marker in normalized for marker in NON_SFW_PROACTIVE_MARKERS):
+        return False
+    if any(marker in normalized for marker in MANIPULATIVE_PROACTIVE_MARKERS):
         return False
     return not is_blocked_content(content)
 
@@ -494,12 +584,12 @@ def _provider_name(provider: LLMProvider) -> str:
     return name[:48] or "local"
 
 
-def _finite_relationship_metric(value: object) -> float:
+def _finite_relationship_metric(value: object, *, default: float = 0.0) -> float:
     try:
         metric = float(value)
     except (TypeError, ValueError):
-        return 0.0
-    return metric if math.isfinite(metric) else 0.0
+        return default
+    return metric if math.isfinite(metric) else default
 
 
 async def _relationship_for_conversation(
@@ -520,6 +610,12 @@ async def proactive_relationship_delivery_block(
     conversation: Conversation,
     proactive_type: str,
 ) -> ProactiveRelationshipPosture | None:
+    boundaries = await _active_proactive_boundaries(session, conversation)
+    if _boundaries_suppress_proactive(boundaries):
+        return ProactiveRelationshipPosture(
+            key="boundary",
+            guidance="the user asked not to receive proactive contact",
+        )
     relationship = await _relationship_for_conversation(session, conversation)
     posture = proactive_relationship_posture(relationship)
     if _relationship_suppresses_proactive(posture, proactive_type):
@@ -580,6 +676,9 @@ async def ensure_proactive_jobs(
 
     relationship = await _relationship_for_conversation(session, conversation)
     relationship_posture = proactive_relationship_posture(relationship)
+    active_boundaries = await _active_proactive_boundaries(session, conversation)
+    if _boundaries_suppress_proactive(active_boundaries):
+        return []
 
     created: list[ScheduledJob] = []
     now = utc_now()
@@ -638,6 +737,41 @@ async def ensure_proactive_jobs(
             )
         )
     return created
+
+
+async def _active_proactive_boundaries(
+    session: AsyncSession,
+    conversation: Conversation,
+):
+    return await active_relationship_boundaries(
+        session,
+        user_id=conversation.user_id,
+        character_id=conversation.character_id,
+        scopes=("general",),
+    )
+
+
+def _boundaries_suppress_proactive(boundaries: list[object]) -> bool:
+    for boundary in boundaries:
+        value = " ".join(
+            str(getattr(boundary, "evidence_quote", None) or getattr(boundary, "summary", ""))
+            .casefold()
+            .split()
+        )
+        if any(marker in value for marker in PROACTIVE_BOUNDARY_BLOCK_MARKERS):
+            return True
+    return False
+
+
+def _proactive_boundary_prompt(boundaries: list[object]) -> str:
+    fragments = [
+        _safe_proactive_prompt_fragment(
+            str(getattr(boundary, "evidence_quote", None) or getattr(boundary, "summary", "")),
+            limit=180,
+        )
+        for boundary in boundaries[-3:]
+    ]
+    return " ".join(fragment for fragment in fragments if fragment)[:420]
 
 
 def proactive_block_reason(

@@ -37,7 +37,8 @@ import type {
   ConversationPrivacyMode,
   Journal,
   MemoryItem,
-  Message
+  Message,
+  RelationshipMetric
 } from "./eidolon/types";
 import { useEidolonController } from "./eidolon/use-eidolon-controller";
 
@@ -313,6 +314,30 @@ export function EidolonApp() {
     });
   }
 
+  function confirmRelationshipMomentRemoval(eventId: string) {
+    setConfirmation({
+      title: "Remove this relationship moment?",
+      detail: "Its current effect and any linked milestone will be removed.",
+      actionLabel: "Remove moment",
+      onConfirm: () => actions.removeRelationshipMoment(eventId)
+    });
+  }
+
+  function confirmRelationshipReset(
+    mode: "dimensions" | "restart",
+    dimensions?: RelationshipMetric[]
+  ) {
+    const restart = mode === "restart";
+    setConfirmation({
+      title: restart ? "Restart this relationship?" : "Reset this interpretation?",
+      detail: restart
+        ? "Relationship history will restart, while every active boundary remains in force."
+        : "The selected interpretation will reset while meaningful moments remain visible.",
+      actionLabel: restart ? "Restart relationship" : "Reset interpretation",
+      onConfirm: () => actions.resetRelationship(mode, dimensions)
+    });
+  }
+
   return (
     <main
       className="eidolon-room relative h-[100dvh] overflow-hidden text-[#f3eee5]"
@@ -438,10 +463,15 @@ export function EidolonApp() {
                     draft={state.characterDraft}
                     journals={state.journals}
                     relationship={state.relationship}
+                    relationshipActionId={state.relationshipActionId}
+                    relationshipEvents={state.relationshipEvents}
                     threads={state.continuityThreads}
                     timeline={state.timeline}
+                    onCorrectRelationshipMoment={actions.correctRelationshipMoment}
                     onDelete={confirmThreadDeletion}
+                    onRemoveRelationshipMoment={confirmRelationshipMomentRemoval}
                     onReopen={actions.reopenContinuityThread}
+                    onResetRelationship={confirmRelationshipReset}
                     onResolve={actions.resolveContinuityThread}
                     onReturn={(thread) => {
                       actions.setMessageDraft(`Can we come back to this: ${thread.content}`);

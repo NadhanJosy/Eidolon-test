@@ -144,14 +144,34 @@ also reject conversation-linked manual creation.
 
 ### Relationship continuity
 
-Each user-companion pair has one relationship row containing bounded trust,
-intimacy, warmth, tension, familiarity, attachment, mood, conflict state, repair
-state, and qualitative emotional continuity.
+Each user-companion pair has one bounded relationship read model covering trust,
+emotional safety, warmth, reliability, reciprocity, tension, repair, boundary
+respect, familiarity, and shared-history depth. A first-class private event
+ledger records only meaningful evidence such as support, vulnerability,
+follow-through, conflict, apology, repair, boundaries, humour, rituals, returns,
+and linked milestones. Routine message volume does not earn closeness.
 
-Relationship changes are deterministic and bounded. A grounded post-turn pass
-may label supported interaction evidence, but it cannot set scores directly.
-Relationship state can influence tone and pacing but must not create
-manipulative dependency, jealousy, punishment, or pressure to return.
+The backend assigns confidence, significance, and gradual reversible effects;
+structured cognition may propose exact-quote evidence but cannot set state.
+Elapsed time softens volatile tension without erasing earned trust or reliability.
+One apology begins repair rather than instantly restoring it.
+
+Before generation, the backend builds a compact qualitative plan containing
+current posture, recent supported change, unresolved tension, active boundaries,
+earned familiarity, and safe initiative. This can adjust tone, pacing, humour,
+callbacks, disagreement, reassurance, vulnerability, and proactive presence.
+Explicit limits always override those behaviours. Adult boundary events use an
+isolated adult scope and never advance the normal relationship.
+
+The Relationship view explains facets, meaningful moments, and bounded
+owner-only evidence excerpts in human language, without a bond score or meter
+dashboard. Owners can correct classifications or remove events,
+reset one or every dimension of the current interpretation while keeping
+history, or restart relationship history while preserving active boundaries.
+
+Relationship behaviour must never create dependency, jealousy, exclusivity,
+punishment, scarcity, engagement rewards, fabricated crisis, obligation, or
+pressure to return.
 
 ### Scheduled presence
 
@@ -228,6 +248,9 @@ boundaries pass. A missing, stale, or failed readiness check resolves to SFW.
 Adult continuity is off by default. When explicitly enabled, eligible adult
 memories and moments use a separate scope that normal chat, normal archives,
 relationship progression, living threads, and proactive notes cannot read.
+Explicit boundaries stated in an adult turn use the same isolated scope even
+when optional adult memory storage is off, because privacy preferences cannot
+disable safety handling.
 Settings reports the separate item counts and can erase that adult-only
 continuity without deleting visible conversation messages. Private turns never
 enter either scope.

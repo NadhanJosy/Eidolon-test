@@ -144,6 +144,22 @@ class GroundedCognitionProvider:
             "relationship": {
                 "signals": (["shared_ritual"] if not correction and not initial_preference else []),
                 "confidence": 0.88 if not correction and not initial_preference else 0.0,
+                "evidence": (
+                    [
+                        {
+                            "event_type": "ritual",
+                            "summary": "The user described a recurring personal ritual.",
+                            "evidence_quote": (
+                                "Please remember that my Sunday ritual is jasmine tea because "
+                                "it makes me feel calm."
+                            ),
+                            "confidence": 0.88,
+                            "significance": 0.75,
+                        }
+                    ]
+                    if not correction and not initial_preference
+                    else []
+                ),
             },
             "referenced_memory_ids": [],
         }

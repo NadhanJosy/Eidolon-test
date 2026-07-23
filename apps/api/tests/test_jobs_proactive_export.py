@@ -289,6 +289,18 @@ class _NonSfwProactiveProvider:
         )
 
 
+class _ManipulativeProactiveProvider:
+    name = "manipulative-test"
+    model = "manipulative-test"
+
+    async def generate(self, prompt: str) -> LLMGeneration:
+        return LLMGeneration(
+            "If you cared, you would reply now.",
+            self.name,
+            self.model,
+        )
+
+
 @pytest.mark.parametrize(
     ("provider", "expected_reason"),
     [
@@ -296,6 +308,7 @@ class _NonSfwProactiveProvider:
         (_UnsafeProactiveProvider(), "invalid_output"),
         (_MalformedProactiveProvider(), "invalid_output"),
         (_NonSfwProactiveProvider(), "invalid_output"),
+        (_ManipulativeProactiveProvider(), "invalid_output"),
     ],
 )
 async def test_scheduler_uses_safe_fallback_when_proactive_generation_fails(
@@ -1678,8 +1691,9 @@ async def test_export_preserves_continuity_metadata_without_secrets(
 
     assert payload["relationship_states"]
     relationship = payload["relationship_states"][0]
-    assert relationship["metadata_json"]["timeline"]
-    assert relationship["metadata_json"]["recent_changes"]
+    assert relationship["emotional_safety"] == 50
+    assert "relationship_events" in payload
+    assert relationship["metadata_json"]["recent_changes"] == []
     assert "last_interaction_at" in relationship
 
     assert payload["scheduled_jobs"]

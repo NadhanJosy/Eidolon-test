@@ -107,6 +107,17 @@ async def test_database_is_at_head_with_level2_columns() -> None:
                 text("select to_regclass('public.memory_entity_links') is not null")
             )
         ).scalar_one()
+        relationship_event_columns = {
+            row[0]
+            for row in (
+                await connection.execute(
+                    text(
+                        "select column_name from information_schema.columns "
+                        "where table_name = 'relationship_events'"
+                    )
+                )
+            )
+        }
 
         legacy_login_throttle_exists = (
             await connection.execute(
@@ -114,7 +125,7 @@ async def test_database_is_at_head_with_level2_columns() -> None:
             )
         ).scalar_one()
 
-    assert revision == "0012_living_memory"
+    assert revision == "0013_relationship_intelligence"
     assert {
         "importance",
         "pinned",
@@ -137,11 +148,33 @@ async def test_database_is_at_head_with_level2_columns() -> None:
     assert memory_entities_exists is True
     assert memory_entity_links_exists is True
     assert {
+        "user_id",
+        "character_id",
+        "source_message_id",
+        "memory_id",
+        "journal_id",
+        "scope",
+        "event_key",
+        "event_type",
+        "summary",
+        "confidence",
+        "significance",
+        "dimension_deltas_json",
+        "affects_current_state",
+        "occurred_at",
+    }.issubset(relationship_event_columns)
+    assert {
         "mood",
         "conflict_state",
         "repair_needed",
         "tags_json",
         "emotional_state_json",
+        "emotional_safety",
+        "reliability",
+        "reciprocity",
+        "repair_progress",
+        "boundary_alignment",
+        "shared_history_depth",
     }.issubset(relationship_columns)
     assert "soul_json" in character_columns
     assert {"metadata_json", "last_read_at"}.issubset(conversation_columns)

@@ -1049,10 +1049,10 @@ async def test_relationship_read_applies_absence_decay(client: AsyncClient) -> N
     response = await client.get(f"/characters/{character_id}/relationship", headers=headers)
     assert response.status_code == 200
     payload = response.json()
-    assert payload["warmth"] < 12.0
+    assert payload["warmth"] == 12.0
     assert payload["tension"] < 6.0
     assert "absence" in payload["tags_json"]
-    assert payload["metadata_json"]["timeline"][-1]["kind"] == "decay"
+    assert payload["metadata_json"]["timeline"][-1]["kind"] == "absence"
 
 
 async def test_scheduler_processes_relationship_decay_job(client: AsyncClient) -> None:
@@ -1130,7 +1130,8 @@ async def test_scheduler_processes_relationship_decay_job(client: AsyncClient) -
                 )
             )
         ).scalar_one()
-        assert relationship.warmth < 10.0
+        assert relationship.warmth == 10.0
+        assert relationship.tension < 4.0
         assert "absence" in relationship.tags_json
 
 
@@ -1436,17 +1437,18 @@ async def test_edit_latest_user_turn_recalculates_relationship_effect(
     assert first.status_code == 200
     user_message = first.json()["user_message"]
     old_effect = user_message["metadata_json"]["relationship_effect"]
-    assert old_effect["version"] == "relationship_effect_v1"
-    assert old_effect["deltas"]["tension"] == 0.5
-    assert old_effect["deltas"]["warmth"] == -0.2
+    assert old_effect["version"] == "relationship_effect_v2"
+    assert old_effect["event_ids"]
+    assert old_effect["deltas"]["tension"] > 0
+    assert old_effect["deltas"]["warmth"] < 0
 
     relationship_after_first = await client.get(
         f"/characters/{character_id}/relationship",
         headers=headers,
     )
     assert relationship_after_first.status_code == 200
-    assert relationship_after_first.json()["tension"] == 0.5
-    assert relationship_after_first.json()["warmth"] == -0.2
+    assert relationship_after_first.json()["tension"] > 0
+    assert relationship_after_first.json()["warmth"] < 0
     assert relationship_after_first.json()["repair_needed"] is True
 
     edited = await client.patch(
@@ -1460,8 +1462,8 @@ async def test_edit_latest_user_turn_recalculates_relationship_effect(
     assert edited_metadata["relationship_recalculated"] is True
     new_effect = edited_metadata["relationship_effect"]
     assert new_effect["deltas"]["tension"] == 0.0
-    assert new_effect["deltas"]["warmth"] == 0.3
-    assert new_effect["deltas"]["trust"] == 0.1
+    assert new_effect["deltas"]["warmth"] > 0
+    assert new_effect["deltas"]["trust"] > 0
 
     relationship_after_edit = await client.get(
         f"/characters/{character_id}/relationship",
@@ -1469,8 +1471,8 @@ async def test_edit_latest_user_turn_recalculates_relationship_effect(
     )
     assert relationship_after_edit.status_code == 200
     assert relationship_after_edit.json()["tension"] == 0.0
-    assert relationship_after_edit.json()["warmth"] == 0.3
-    assert relationship_after_edit.json()["trust"] == 0.1
+    assert relationship_after_edit.json()["warmth"] > 0
+    assert relationship_after_edit.json()["trust"] > 0
     assert relationship_after_edit.json()["repair_needed"] is False
     assert "tension" not in relationship_after_edit.json()["tags_json"]
     assert "warm" in relationship_after_edit.json()["tags_json"]
@@ -1689,8 +1691,8 @@ async def test_delete_latest_user_turn_removes_dependent_state(
         headers=headers,
     )
     assert relationship_before_delete.status_code == 200
-    assert relationship_before_delete.json()["tension"] == 0.5
-    assert relationship_before_delete.json()["warmth"] == -0.2
+    assert relationship_before_delete.json()["tension"] > 0
+    assert relationship_before_delete.json()["warmth"] < 0
 
     memories_before_delete = await client.get(
         f"/characters/{character_id}/memories",
@@ -1727,8 +1729,8 @@ async def test_delete_latest_user_turn_removes_dependent_state(
         headers=headers,
     )
     assert relationship_after_delete.status_code == 200
-    assert relationship_after_delete.json()["familiarity"] == 0.2
-    assert relationship_after_delete.json()["attachment"] == 0.02
+    assert relationship_after_delete.json()["familiarity"] == 0.0
+    assert relationship_after_delete.json()["attachment"] == 0.0
     assert relationship_after_delete.json()["tension"] == 0.0
     assert relationship_after_delete.json()["warmth"] == 0.0
     assert relationship_after_delete.json()["repair_needed"] is False
